@@ -1,0 +1,24 @@
+# ===== 构建产物 =====
+build/
+.vs/
+out/
+cmake-build-*/
+
+# ===== Python 虚拟环境 =====
+.venv/
+__pycache__/
+*.pyc
+
+# ===== 辅助脚本（不推送）=====
+scripts/
+
+# ===== 日志与临时文件 =====
+*.log
+*.tmp
+*.user
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.suo
+*.VC.db
