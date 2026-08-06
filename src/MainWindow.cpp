@@ -14,7 +14,6 @@
 #include <QDialogButtonBox>
 #include <QComboBox>
 #include <QMessageBox>
-#include <QPainter>
 
 #include <windows.h>
 
@@ -109,32 +108,27 @@ MainWindow::MainWindow(QObject *parent)
 {
     qApp->installNativeEventFilter(this);
 
-    // 托盘（运行时绘制图标，无需二进制资源）
-    QPixmap iconPix(32, 32);
-    iconPix.fill(Qt::transparent);
-    {
-        QPainter p(&iconPix);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 150, 255));
-        p.drawRoundedRect(3, 6, 26, 20, 3, 3);       // 相机机身
-        p.setBrush(QColor(0, 120, 220));
-        p.drawRoundedRect(10, 1, 12, 6, 2, 2);        // 取景器
-        p.setBrush(QColor(255, 255, 255));
-        p.drawEllipse(10, 12, 12, 12);                // 镜头外圈
-        p.setBrush(QColor(0, 150, 255));
-        p.drawEllipse(13, 15, 6, 6);                  // 镜头内圈
-    }
-
-    m_tray = new QSystemTrayIcon(QIcon(iconPix), this);
+    // 托盘（使用资源图标：Material Design 相机图标，Apache 2.0 许可）
+    m_tray = new QSystemTrayIcon(QIcon(":/app_icon.svg"), this);
     m_tray->setToolTip("MySnipaste\n按 F1 截图");
 
     m_menu = new QMenu();
+    // 菜单标题显示当前模式（托盘区域文字提示）
+    m_menu->setTitle("MySnipaste");
     m_menu->addAction("截图 (F1)", this, [this] {
         if (!m_capture->isVisible())
             m_capture->startCapture();
     });
     m_menu->addAction("设置...", this, &MainWindow::onShowSettings);
+    m_menu->addSeparator();
+    m_menu->addAction("关于", this, [this] {
+        QMessageBox::about(m_result, "MySnipaste",
+            "MySnipaste v0.1.0\n\n"
+            "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
+            "快捷键：F1 截图\n"
+            "OCR 引擎：Tesseract 5（本地离线）\n"
+            "翻译：OpenAI 兼容大模型 API（可配置）");
+    });
     m_menu->addSeparator();
     m_menu->addAction("退出", this, &QApplication::quit);
     m_tray->setContextMenu(m_menu);
@@ -164,12 +158,15 @@ MainWindow::~MainWindow()
 {
     if (m_hotkeyRegistered)
         UnregisterHotKey(nullptr, m_hotkeyId);
+    UnregisterHotKey(nullptr, m_pinHotkeyId);
 }
 
 bool MainWindow::registerHotKeys()
 {
     const quint32 vk = Settings::instance().captureHotKeyVk();
     m_hotkeyRegistered = RegisterHotKey(nullptr, m_hotkeyId, 0, vk) != 0;
+    // F3 贴图热键（架构预留：PinWindow 功能待实现，先注册以保留热键）
+    RegisterHotKey(nullptr, m_pinHotkeyId, 0, VK_F3);
     return m_hotkeyRegistered;
 }
 
@@ -179,10 +176,17 @@ bool MainWindow::nativeEventFilter(const QByteArray &eventType, void *message, q
     Q_UNUSED(result)
 
     auto *msg = static_cast<MSG *>(message);
-    if (msg->message == WM_HOTKEY && msg->wParam == m_hotkeyId) {
-        if (!m_capture->isVisible())
-            m_capture->startCapture();
-        return true;
+    if (msg->message == WM_HOTKEY) {
+        if (msg->wParam == m_hotkeyId) {
+            if (!m_capture->isVisible())
+                m_capture->startCapture();
+            return true;
+        }
+        // F3 贴图（架构预留）：将 m_lastPixmap 交给 PinWindow::pin() 置顶显示
+        if (msg->wParam == m_pinHotkeyId) {
+            // TODO(PinWindow): PinWindow::instance().pin(m_lastPixmap);
+            return true;
+        }
     }
     return false;
 }

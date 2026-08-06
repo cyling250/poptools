@@ -15,7 +15,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 qt_standard_project_setup()
 
-qt_add_executable(MySnipaste
+qt_add_executable(MySnipaste WIN32
     src/main.cpp
     src/MainWindow.cpp
     src/MainWindow.h
@@ -27,6 +27,9 @@ qt_add_executable(MySnipaste
     src/Translator.h
     src/Settings.cpp
     src/Settings.h
+    src/PinWindow.cpp
+    src/PinWindow.h
+    src/resources.qrc
 )
 
 target_link_libraries(MySnipaste PRIVATE

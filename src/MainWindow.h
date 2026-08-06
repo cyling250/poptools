@@ -70,6 +70,7 @@ private:
     Translator *m_translator;
     ResultDialog *m_result;
     QPixmap m_lastPixmap;
-    quint32 m_hotkeyId = 1;
+    quint32 m_hotkeyId = 1;      // F1 截图热键 ID
+    quint32 m_pinHotkeyId = 2;   // F3 贴图热键 ID（架构预留）
     bool m_hotkeyRegistered = false;
 };
