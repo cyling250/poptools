@@ -67,6 +67,7 @@ private:
     void setCursorFor(Handle h);
 
     void enterEditingState();  // 框选完成 → 编辑态（显示工具栏）
+    void positionToolbar();    // 工具栏贴画布下方靠右
     void exitCapture();        // 离开截图模式（隐藏窗口 + 工具栏）
 
     // ---- 标注工具事件处理（选区内局部坐标） ----
@@ -74,7 +75,7 @@ private:
     void startDraw(const QPointF &pos);               // 工具按下
     void continueDraw(const QPointF &pos);            // 工具拖动
     void finishDraw(const QPointF &pos);              // 工具释放
-    void pickColor(const QPointF &pos);               // 取色器
+    void buildMosaicImage();                          // 马赛克像素化
 
     void confirm();  // 确认截图（Enter / 双击 / 工具栏完成）
     void cancel();   // 取消截图（Esc）
@@ -105,8 +106,6 @@ private:
     ToolBar *m_toolbar = nullptr;
     AnnotationItem m_draft;    // 正在绘制的标注（局部坐标）
     bool m_drawing = false;    // 是否正在绘制
-    QVector<QPointF> m_polyPts; // 折线绘制中的临时顶点
-    QColor m_pickedColor;      // 取色器取到的颜色
 
     static constexpr int kMinSize = 8;   // 选区最小尺寸（像素）
     static constexpr int kHandle = 5;    // 控制点半边长（像素，共 10px 方块）

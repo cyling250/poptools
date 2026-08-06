@@ -32,6 +32,8 @@ CaptureWindow::CaptureWindow(QWidget *parent)
     m_toolbar->hide();
     connect(m_toolbar, &ToolBar::toolSelected, this, &CaptureWindow::onToolSelected);
     connect(m_toolbar, &ToolBar::colorSelected, this, &CaptureWindow::onColorSelected);
+    connect(m_toolbar, &ToolBar::widthSelected, this, [this](qreal w) { m_canvas.width = w; });
+    connect(m_toolbar, &ToolBar::filledToggled, this, [this](bool f) { m_canvas.filled = f; });
     connect(m_toolbar, &ToolBar::undoRequested, this, [this] {
         m_canvas.undo();
         m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
@@ -69,6 +71,8 @@ void CaptureWindow::startCapture()
     m_state = State::Selecting;
     m_selection = QRect();
     m_canvas.clear();
+    m_canvas.tool = AnnotationCanvas::Tool::None; // 默认选择模式
+    m_drawing = false;
     m_toolbar->hide();
     setGeometry(m_desktop);
     show();
@@ -212,15 +216,25 @@ void CaptureWindow::enterEditingState()
     m_activeHandle = Handle::None;
     m_moving = false;
     m_drawing = false;
-    m_polyPts.clear();
 
-    // 显示工具栏（底部居中）
-    m_toolbar->adjustSize();
-    m_toolbar->move((width() - m_toolbar->width()) / 2, height() - m_toolbar->height() - 8);
+    // 显示工具栏（贴画布下方靠右）
+    positionToolbar();
     m_toolbar->show();
     m_toolbar->raise();
     m_toolbar->setUndoRedoEnabled(false, false);
+    m_toolbar->setTool(m_canvas.tool);
     update();
+}
+
+void CaptureWindow::positionToolbar()
+{
+    m_toolbar->adjustSize();
+    const QRect sel = m_selection.translated(-m_desktop.topLeft());
+    // 靠右对齐：工具栏右缘贴画布右缘（含 8px 外边距）
+    const int x = sel.right() + 8 - m_toolbar->width();
+    const int y = sel.bottom() + 8;
+    m_toolbar->move(qBound(0, x, width() - m_toolbar->width()),
+                    qBound(0, y, height() - m_toolbar->height()));
 }
 
 void CaptureWindow::exitCapture()
@@ -234,9 +248,13 @@ void CaptureWindow::exitCapture()
 void CaptureWindow::onToolSelected(AnnotationCanvas::Tool t)
 {
     m_canvas.tool = t;
-    setCursor(t == AnnotationCanvas::Tool::Eraser ? Qt::PointingHandCursor
-               : t == AnnotationCanvas::Tool::ColorPicker ? Qt::CrossCursor
-               : Qt::CrossCursor);
+    m_drawing = false;
+    // 光标反馈
+    switch (t) {
+    case AnnotationCanvas::Tool::Eraser: setCursor(Qt::PointingHandCursor); break;
+    case AnnotationCanvas::Tool::None:   setCursor(Qt::SizeAllCursor); break; // 选择模式：可拖动画布
+    default:                             setCursor(Qt::CrossCursor); break;
+    }
 }
 
 void CaptureWindow::onColorSelected(const QColor &c)
@@ -283,38 +301,42 @@ void CaptureWindow::startDraw(const QPointF &pos)
 {
     switch (m_canvas.tool) {
     case AnnotationCanvas::Tool::Rect:
-        m_draft.type = AnnotationType::Rect;
-        m_draft.color = m_canvas.color;
-        m_draft.width = m_canvas.width;
-        m_draft.filled = m_canvas.filled;
-        m_draft.rect = QRectF(pos, pos);
-        m_drawing = true;
-        break;
     case AnnotationCanvas::Tool::Ellipse:
-        m_draft.type = AnnotationType::Ellipse;
+        m_draft.type = (m_canvas.tool == AnnotationCanvas::Tool::Rect)
+                           ? AnnotationType::Rect : AnnotationType::Ellipse;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
         m_draft.filled = m_canvas.filled;
         m_draft.rect = QRectF(pos, pos);
         m_drawing = true;
         break;
+    case AnnotationCanvas::Tool::Line:
     case AnnotationCanvas::Tool::Arrow:
-        m_draft.type = AnnotationType::Arrow;
+        m_draft.type = (m_canvas.tool == AnnotationCanvas::Tool::Line)
+                           ? AnnotationType::Line : AnnotationType::Arrow;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
         m_draft.points = QPolygonF() << pos << pos;
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Freehand:
+    case AnnotationCanvas::Tool::Pencil:
         m_draft.type = AnnotationType::Freehand;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
         m_draft.points = QPolygonF() << pos;
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Polyline:
-        // 折线：点击添加顶点，双击/回车结束
-        m_polyPts.append(pos);
+    case AnnotationCanvas::Tool::Doodle:
+        m_draft.type = AnnotationType::Doodle;
+        m_draft.color = m_canvas.color;
+        m_draft.width = m_canvas.width;
+        m_draft.points = QPolygonF() << pos;
+        m_drawing = true;
+        break;
+    case AnnotationCanvas::Tool::Mosaic:
+        m_draft.type = AnnotationType::Mosaic;
+        m_draft.rect = QRectF(pos, pos);
+        m_drawing = true;
         break;
     case AnnotationCanvas::Tool::Eraser:
         m_canvas.eraseAt(pos);
@@ -322,7 +344,6 @@ void CaptureWindow::startDraw(const QPointF &pos)
         update();
         break;
     case AnnotationCanvas::Tool::Text: {
-        // 弹输入框输入文本，回车确认
         bool ok = false;
         const QString text = QInputDialog::getText(
             this, "文本标注", "输入文本：", QLineEdit::Normal, QString(), &ok);
@@ -334,7 +355,6 @@ void CaptureWindow::startDraw(const QPointF &pos)
             it.font.setBold(true);
             it.text = text;
             it.rect = QRectF(pos, QSizeF(0, 0));
-            // 估算文本大小
             QFontMetricsF fm(it.font);
             it.rect.setSize(QSizeF(fm.horizontalAdvance(text), fm.height()));
             m_canvas.addItem(it);
@@ -343,9 +363,8 @@ void CaptureWindow::startDraw(const QPointF &pos)
         }
         break;
     }
-    case AnnotationCanvas::Tool::ColorPicker:
-        pickColor(pos);
-        break;
+    case AnnotationCanvas::Tool::None:
+        break; // 选择模式：由调用方处理拖动画布
     }
 }
 
@@ -356,13 +375,16 @@ void CaptureWindow::continueDraw(const QPointF &pos)
     switch (m_canvas.tool) {
     case AnnotationCanvas::Tool::Rect:
     case AnnotationCanvas::Tool::Ellipse:
+    case AnnotationCanvas::Tool::Mosaic:
         m_draft.rect = QRectF(m_draft.rect.topLeft(), pos).normalized();
         break;
+    case AnnotationCanvas::Tool::Line:
     case AnnotationCanvas::Tool::Arrow:
         if (m_draft.points.size() >= 2)
             m_draft.points[1] = pos;
         break;
-    case AnnotationCanvas::Tool::Freehand:
+    case AnnotationCanvas::Tool::Pencil:
+    case AnnotationCanvas::Tool::Doodle:
         m_draft.points.append(pos);
         break;
     default:
@@ -374,12 +396,15 @@ void CaptureWindow::continueDraw(const QPointF &pos)
 void CaptureWindow::finishDraw(const QPointF &pos)
 {
     if (m_drawing) {
-        // 过小图形忽略
         const bool tooSmall =
             (m_canvas.tool == AnnotationCanvas::Tool::Rect ||
-             m_canvas.tool == AnnotationCanvas::Tool::Ellipse) &&
+             m_canvas.tool == AnnotationCanvas::Tool::Ellipse ||
+             m_canvas.tool == AnnotationCanvas::Tool::Mosaic) &&
             (m_draft.rect.width() < 2 || m_draft.rect.height() < 2);
         if (!tooSmall) {
+            // 马赛克：基于原始屏幕画面生成像素块效果
+            if (m_canvas.tool == AnnotationCanvas::Tool::Mosaic)
+                buildMosaicImage();
             m_canvas.addItem(m_draft);
             m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
         }
@@ -388,16 +413,26 @@ void CaptureWindow::finishDraw(const QPointF &pos)
     }
 }
 
-void CaptureWindow::pickColor(const QPointF &pos)
+// 从屏幕画面生成马赛克（局部坐标区域 → 桌面坐标截取 → 像素化）
+void CaptureWindow::buildMosaicImage()
 {
-    // 从屏幕画面中取色（全局坐标 → 桌面图像坐标）
-    const QPoint imgPos = m_selection.topLeft() + pos.toPoint() - m_desktop.topLeft();
-    const QImage img = m_screen.toImage();
-    if (img.rect().contains(imgPos)) {
-        m_pickedColor = img.pixelColor(imgPos);
-        m_canvas.color = m_pickedColor;
-        m_toolbar->setColor(m_pickedColor);
-    }
+    const QRect local = m_draft.rect.toRect();
+    const QRect global = local.translated(m_selection.topLeft());
+    const QRect crop = global.intersected(m_desktop);
+    if (crop.isEmpty())
+        return;
+
+    QImage src = m_screen.toImage().copy(crop.translated(-m_desktop.topLeft()));
+    const int block = 8; // 马赛克块大小（像素）
+    if (src.width() < block || src.height() < block)
+        return;
+    // 先缩小再放大，产生块状马赛克
+    QImage small = src.scaled(qMax(1, src.width() / block), qMax(1, src.height() / block),
+                              Qt::IgnoreAspectRatio, Qt::FastTransformation);
+    QImage mosaic = small.scaled(src.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
+    m_draft.mosaicImage = mosaic;
+    // 校正为局部坐标
+    m_draft.rect = QRectF(local);
 }
 
 // ==================== 鼠标事件 ====================
@@ -422,11 +457,21 @@ void CaptureWindow::mousePressEvent(QMouseEvent *event)
     }
 
     if (m_state == State::Editing) {
-        // 编辑态下优先处理标注工具（选区内点击）
-        if (m_selection.contains(pos)) {
+        // 选择模式（None）：画布内无标注 → 抓取画布拖动
+        if (m_canvas.tool == AnnotationCanvas::Tool::None) {
+            const QPointF local = toLocal(pos);
+            if (m_selection.contains(pos) && !m_canvas.hitTest(local)) {
+                m_moving = true;
+                m_moveOffset = pos - m_selection.topLeft();
+                setCursor(Qt::SizeAllCursor);
+                return;
+            }
+        } else if (m_selection.contains(pos)) {
+            // 工具模式下：选区内开始绘制
             startDraw(toLocal(pos));
             return;
         }
+
         // 选区外：控制点 / 移动 / 重新框选
         m_activeHandle = handleAt(pos);
         if (m_activeHandle != Handle::None) {
@@ -478,15 +523,27 @@ void CaptureWindow::mouseMoveEvent(QMouseEvent *event)
             r = r.intersected(m_desktop);
             if (r.width() >= kMinSize && r.height() >= kMinSize) {
                 m_selection = r;
+                positionToolbar();
                 update();
             }
             return;
         }
-        // 未按下：根据悬停位置更新光标
-        if (m_selection.contains(pos))
-            setCursor(Qt::CrossCursor);
-        else
+        // 未按下：光标反馈
+        if (m_canvas.tool == AnnotationCanvas::Tool::None) {
+            // 选择模式：无标注处显示移动光标
+            const QPointF local = toLocal(pos);
+            const bool onAnnotation = m_canvas.hitTest(local);
+            const bool overHandle = handleAt(pos) != Handle::None;
+            if (!m_selection.contains(pos) || overHandle)
+                setCursorFor(handleAt(pos));
+            else
+                setCursor(onAnnotation ? Qt::ArrowCursor : Qt::SizeAllCursor);
+        } else if (m_selection.contains(pos)) {
+            setCursor(m_canvas.tool == AnnotationCanvas::Tool::Eraser
+                          ? Qt::PointingHandCursor : Qt::CrossCursor);
+        } else {
             setCursorFor(handleAt(pos));
+        }
     }
 }
 
@@ -512,11 +569,6 @@ void CaptureWindow::mouseReleaseEvent(QMouseEvent *event)
             finishDraw(toLocal(event->globalPosition().toPoint()));
             return;
         }
-        // 折线工具：单击已加顶点，释放时双击或按回车结束
-        if (m_canvas.tool == AnnotationCanvas::Tool::Polyline
-            && !m_polyPts.isEmpty() && m_selection.contains(event->globalPosition().toPoint())) {
-            // 完成折线（双击结束由 mouseDoubleClick 处理）
-        }
         m_activeHandle = Handle::None;
         m_moving = false;
     }
@@ -527,20 +579,7 @@ void CaptureWindow::mouseDoubleClickEvent(QMouseEvent *event)
     if (event->button() != Qt::LeftButton)
         return;
     if (m_state == State::Editing && m_selection.contains(event->globalPosition().toPoint())) {
-        // 折线工具：双击结束并提交折线
-        if (m_canvas.tool == AnnotationCanvas::Tool::Polyline && m_polyPts.size() >= 2) {
-            AnnotationItem it;
-            it.type = AnnotationType::Polyline;
-            it.color = m_canvas.color;
-            it.width = m_canvas.width;
-            it.points = QPolygonF::fromList(m_polyPts);
-            m_canvas.addItem(it);
-            m_polyPts.clear();
-            m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-            update();
-            return;
-        }
-        // 其他工具：双击选区完成截图
+        // 双击选区完成截图
         confirm();
     }
 }
@@ -552,32 +591,16 @@ void CaptureWindow::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Escape) {
         cancel();
     } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-        if (m_state == State::Editing) {
-            // 折线工具：回车结束折线
-            if (m_canvas.tool == AnnotationCanvas::Tool::Polyline && m_polyPts.size() >= 2) {
-                AnnotationItem it;
-                it.type = AnnotationType::Polyline;
-                it.color = m_canvas.color;
-                it.width = m_canvas.width;
-                it.points = QPolygonF::fromList(m_polyPts);
-                m_canvas.addItem(it);
-                m_polyPts.clear();
-                m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-                update();
-                return;
-            }
+        if (m_state == State::Editing)
             confirm();
-        }
     }
 }
 
 void CaptureWindow::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_toolbar->isVisible()) {
-        m_toolbar->adjustSize();
-        m_toolbar->move((width() - m_toolbar->width()) / 2, height() - m_toolbar->height() - 8);
-    }
+    if (m_toolbar->isVisible())
+        positionToolbar();
 }
 
 // ==================== 确认 / 取消 ====================

@@ -43,31 +43,7 @@ bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
     // 从后往前找最近且距离在容差内的标注
     for (int i = items.size() - 1; i >= 0; --i) {
         const AnnotationItem &it = items[i];
-        qreal d = 1e9;
-        switch (it.type) {
-        case AnnotationType::Rect:
-        case AnnotationType::Ellipse:
-        case AnnotationType::Text:
-            // 命中测试：点在图形边界附近（取外接矩形外扩 tol）
-            d = it.rect.adjusted(-tol, -tol, tol, tol).contains(pos)
-                    ? qMin(qAbs(pos.x() - it.rect.left()), qMin(qAbs(pos.x() - it.rect.right()),
-                                                                qMin(qAbs(pos.y() - it.rect.top()),
-                                                                     qAbs(pos.y() - it.rect.bottom()))))
-                    : 1e9;
-            if (it.rect.adjusted(-tol, -tol, tol, tol).contains(pos) && d > tol)
-                d = 0; // 点在框内（填充/文本区域）
-            break;
-        case AnnotationType::Arrow:
-        case AnnotationType::Polyline:
-        case AnnotationType::Freehand: {
-            // 到折线的最小距离
-            for (int j = 1; j < it.points.size(); ++j)
-                d = qMin(d, pointToSegmentDist(pos, it.points[j - 1], it.points[j]));
-            if (it.points.size() == 1)
-                d = pointToSegmentDist(pos, it.points[0], it.points[0]);
-            break;
-        }
-        }
+        qreal d = distanceToItem(pos, it);
         if (d <= tol) {
             m_undoStack.push_back(items);
             items.removeAt(i);
@@ -76,6 +52,49 @@ bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
         }
     }
     return false;
+}
+
+bool AnnotationCanvas::hitTest(const QPointF &pos, qreal tol) const
+{
+    for (const AnnotationItem &it : items) {
+        if (distanceToItem(pos, it) <= tol)
+            return true;
+    }
+    return false;
+}
+
+// 计算点到标注的距离（公有静态内部工具函数）
+qreal AnnotationCanvas::distanceToItem(const QPointF &pos, const AnnotationItem &it)
+{
+    qreal d = 1e9;
+    switch (it.type) {
+    case AnnotationType::Rect:
+    case AnnotationType::Ellipse:
+    case AnnotationType::Text:
+    case AnnotationType::Mosaic:
+        // 命中测试：点在图形边界附近（取外接矩形外扩 tol）
+        d = it.rect.adjusted(-6, -6, 6, 6).contains(pos)
+                ? qMin(qAbs(pos.x() - it.rect.left()), qMin(qAbs(pos.x() - it.rect.right()),
+                                                            qMin(qAbs(pos.y() - it.rect.top()),
+                                                                 qAbs(pos.y() - it.rect.bottom()))))
+                : 1e9;
+        if (it.rect.adjusted(-6, -6, 6, 6).contains(pos) && d > 6)
+            d = 0; // 点在框内（填充/文本/马赛克区域）
+        break;
+    case AnnotationType::Line:
+    case AnnotationType::Arrow:
+    case AnnotationType::Polyline:
+    case AnnotationType::Freehand:
+    case AnnotationType::Doodle: {
+        // 到折线的最小距离
+        for (int j = 1; j < it.points.size(); ++j)
+            d = qMin(d, pointToSegmentDist(pos, it.points[j - 1], it.points[j]));
+        if (it.points.size() == 1)
+            d = pointToSegmentDist(pos, it.points[0], it.points[0]);
+        break;
+    }
+    }
+    return d;
 }
 
 void AnnotationCanvas::clear()
@@ -102,6 +121,10 @@ void AnnotationCanvas::drawOne(QPainter &p, const AnnotationItem &it)
     case AnnotationType::Ellipse:
         p.drawEllipse(it.rect);
         break;
+    case AnnotationType::Line:
+        if (it.points.size() >= 2)
+            p.drawLine(it.points[0], it.points[1]);
+        break;
     case AnnotationType::Arrow: {
         if (it.points.size() < 2)
             break;
@@ -121,11 +144,16 @@ void AnnotationCanvas::drawOne(QPainter &p, const AnnotationItem &it)
         break;
     }
     case AnnotationType::Polyline:
+    case AnnotationType::Doodle:
         p.setBrush(Qt::NoBrush);
         p.drawPolyline(it.points);
         break;
     case AnnotationType::Freehand:
         p.drawPolyline(it.points);
+        break;
+    case AnnotationType::Mosaic:
+        if (!it.mosaicImage.isNull())
+            p.drawImage(it.rect.topLeft(), it.mosaicImage);
         break;
     case AnnotationType::Text:
         p.setFont(it.font);

@@ -2,5 +2,18 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file alias="app_icon.svg">resources/app_icon.svg</file>
+        <file alias="icons/rect.svg">resources/icons/rect.svg</file>
+        <file alias="icons/ellipse.svg">resources/icons/ellipse.svg</file>
+        <file alias="icons/line.svg">resources/icons/line.svg</file>
+        <file alias="icons/arrow.svg">resources/icons/arrow.svg</file>
+        <file alias="icons/pencil.svg">resources/icons/pencil.svg</file>
+        <file alias="icons/doodle.svg">resources/icons/doodle.svg</file>
+        <file alias="icons/mosaic.svg">resources/icons/mosaic.svg</file>
+        <file alias="icons/text.svg">resources/icons/text.svg</file>
+        <file alias="icons/eraser.svg">resources/icons/eraser.svg</file>
+        <file alias="icons/undo.svg">resources/icons/undo.svg</file>
+        <file alias="icons/redo.svg">resources/icons/redo.svg</file>
+        <file alias="icons/save.svg">resources/icons/save.svg</file>
+        <file alias="icons/copy.svg">resources/icons/copy.svg</file>
     </qresource>
 </RCC>

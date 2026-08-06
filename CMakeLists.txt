@@ -11,7 +11,7 @@ set(CMAKE_AUTOUIC ON)
 # Qt SDK 位置（LGPL 开源版，独立安装于 F:\Qt）
 set(CMAKE_PREFIX_PATH "F:/Qt/6.8.3/msvc2022_64")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg)
 
 qt_standard_project_setup()
 
@@ -41,6 +41,7 @@ target_link_libraries(MySnipaste PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
+    Qt6::Svg
 )
 
 # Windows 全局热键需要 user32
