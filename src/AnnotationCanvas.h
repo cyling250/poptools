@@ -1,0 +1,83 @@
+#pragma once
+
+#include <QColor>
+#include <QRectF>
+#include <QPolygonF>
+#include <QVector>
+#include <QString>
+#include <QFont>
+#include <QPainter>
+
+// ============================================================
+// 画板工具类：管理截图上的标注内容
+//
+// - 标注项类型：矩形 / 椭圆 / 箭头 / 折线 / 画笔 / 文本
+// - 撤销 / 重做（基于标注项列表快照）
+// - 橡皮擦：命中检测删除标注
+// - 当前工具、颜色、线宽状态
+//
+// 坐标约定：标注项使用"选区局部坐标"（相对选区左上角），
+// 选区移动时标注随选区整体平移，绘制时由调用方 translate。
+// ============================================================
+
+// 可绘制的标注类型
+enum class AnnotationType {
+    Rect,     // 矩形 / 圆角矩形
+    Ellipse,  // 椭圆
+    Arrow,    // 箭头
+    Polyline, // 折线 / 多边形
+    Freehand, // 自由画笔
+    Text,     // 文本
+};
+
+// 单条标注项
+struct AnnotationItem
+{
+    AnnotationType type = AnnotationType::Rect;
+    QColor color = Qt::red;
+    qreal width = 2.0;
+    bool filled = false;      // 矩形/椭圆是否填充
+    QRectF rect;              // Rect/Ellipse/Text 的外接矩形（局部坐标）
+    QPolygonF points;         // Arrow/Polyline/Freehand 顶点（局部坐标）
+    QString text;             // Text 内容
+    QFont font;               // Text 字体
+};
+
+// 画板：标注集合 + 撤销/重做 + 工具状态
+class AnnotationCanvas
+{
+public:
+    // 当前工具（由 CaptureWindow 切换）
+    enum class Tool {
+        Rect, Ellipse, Arrow, Polyline,
+        Freehand, Eraser, Text, ColorPicker
+    };
+
+    QVector<AnnotationItem> items;   // 当前标注列表
+    QColor color = Qt::red;          // 当前画笔/边框颜色
+    qreal width = 2.0;               // 当前线宽
+    bool filled = false;             // 矩形/椭圆是否填充
+    Tool tool = Tool::Rect;          // 当前工具
+
+    void addItem(const AnnotationItem &item);   // 添加标注（入撤销栈）
+    void undo();
+    void redo();
+    bool canUndo() const { return !m_undoStack.isEmpty(); }
+    bool canRedo() const { return !m_redoStack.isEmpty(); }
+
+    // 橡皮擦：删除与 pos 距离最近的标注，返回是否删除了
+    bool eraseAt(const QPointF &pos, qreal tol = 6.0);
+
+    // 清空所有标注（重新截图时调用）
+    void clear();
+
+    // 将标注绘制到 painter（painter 已 translate 到选区左上角）
+    void draw(QPainter &p) const;
+
+    // 绘制单条标注（用于正在绘制的草稿）
+    static void drawOne(QPainter &p, const AnnotationItem &it);
+
+private:
+    QVector<QVector<AnnotationItem>> m_undoStack; // 历史快照
+    QVector<QVector<AnnotationItem>> m_redoStack;
+};

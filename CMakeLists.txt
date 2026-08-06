@@ -27,6 +27,10 @@ qt_add_executable(MySnipaste WIN32
     src/Translator.h
     src/Settings.cpp
     src/Settings.h
+    src/AnnotationCanvas.cpp
+    src/AnnotationCanvas.h
+    src/ToolBar.cpp
+    src/ToolBar.h
     src/PinWindow.cpp
     src/PinWindow.h
     src/resources.qrc

@@ -4,6 +4,12 @@
 #include <QPixmap>
 #include <QPoint>
 #include <QRect>
+#include <QVector>
+#include <QImage>
+
+#include "AnnotationCanvas.h"
+
+class ToolBar;
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）
@@ -14,14 +20,13 @@
 //   Editing   → 松开鼠标进入编辑态：
 //                 * 选区高亮（外部灰色蒙版），蓝色 1.5pt 边框
 //                 * 8 个控制点（四角+四边中点）可拖动精调选区
-//                 * 点击选区内可整体移动选区
+//                 * 底部弹出标注工具栏（矩形/椭圆/箭头/折线/
+//                   画笔/橡皮/文本/取色 + 颜色 + 撤销/重做/保存/复制/完成）
 //                 * Enter / 双击选区 确认截图
 //                 * Esc 取消退出
 //
-// 架构预留：
-//   1. 标注工具（文字/箭头/矩形/马赛克...）后续在此画布上实现，
-//      编辑结果经 confirm() 合成到最终 pixmap 输出
-//   2. F3 贴图：captured() 输出的 pixmap 交由 PinWindow 置顶显示
+// 标注：AnnotationCanvas 管理标注项（选区局部坐标），
+//       confirm() 时将标注合成到输出 pixmap
 // ============================================================
 class CaptureWindow : public QWidget
 {
@@ -33,7 +38,7 @@ public:
     void startCapture();
 
 signals:
-    // 完成截图（选中区域画面）；null 表示取消
+    // 完成截图（选中区域画面，含标注）；null 表示取消
     void captured(const QPixmap &pixmap);
 
 protected:
@@ -43,6 +48,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     enum class State { Idle, Selecting, Editing };
@@ -59,8 +65,25 @@ private:
     Handle handleAt(const QPoint &pos) const;  // 命中检测
     void resizeSelection(Handle h, const QPoint &pos); // 按控制点调整选区
     void setCursorFor(Handle h);
-    void confirm();  // 确认截图（Enter / 双击）
+
+    void enterEditingState();  // 框选完成 → 编辑态（显示工具栏）
+    void exitCapture();        // 离开截图模式（隐藏窗口 + 工具栏）
+
+    // ---- 标注工具事件处理（选区内局部坐标） ----
+    QPointF toLocal(const QPoint &global) const;      // 全局 → 选区局部
+    void startDraw(const QPointF &pos);               // 工具按下
+    void continueDraw(const QPointF &pos);            // 工具拖动
+    void finishDraw(const QPointF &pos);              // 工具释放
+    void pickColor(const QPointF &pos);               // 取色器
+
+    void confirm();  // 确认截图（Enter / 双击 / 工具栏完成）
     void cancel();   // 取消截图（Esc）
+
+    // 工具栏槽
+    void onToolSelected(AnnotationCanvas::Tool t);
+    void onColorSelected(const QColor &c);
+    void onSave();
+    void onCopy();
 
     QPixmap m_screen;          // 虚拟桌面截图
     QRect m_desktop;           // 虚拟桌面几何（全局坐标）
@@ -77,11 +100,14 @@ private:
     bool m_moving = false;
     QPoint m_moveOffset;       // 鼠标相对选区左上角的偏移
 
-    static constexpr int kMinSize = 8;   // 选区最小尺寸（像素）
-    static constexpr int kHandle = 8;    // 控制点半边长（像素）
+    // 画板与工具栏
+    AnnotationCanvas m_canvas; // 标注画板（标注项 + 撤销/重做）
+    ToolBar *m_toolbar = nullptr;
+    AnnotationItem m_draft;    // 正在绘制的标注（局部坐标）
+    bool m_drawing = false;    // 是否正在绘制
+    QVector<QPointF> m_polyPts; // 折线绘制中的临时顶点
+    QColor m_pickedColor;      // 取色器取到的颜色
 
-    // ===== 后续标注工具架构预留 =====
-    // 工具枚举：Select / Text / Arrow / Rect / Mosaic ...
-    // 标注项容器：QVector<AnnotationItem> m_annotations;
-    // 待实现：在选区内绘制文字/箭头，随 confirm() 合成到输出 pixmap
+    static constexpr int kMinSize = 8;   // 选区最小尺寸（像素）
+    static constexpr int kHandle = 5;    // 控制点半边长（像素，共 10px 方块）
 };
