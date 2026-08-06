@@ -8,8 +8,15 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# Qt SDK 位置（LGPL 开源版，独立安装于 F:\Qt）
-set(CMAKE_PREFIX_PATH "F:/Qt/6.8.3/msvc2022_64")
+# Qt SDK 位置（LGPL 开源版）
+# 优先级：环境变量 QT_ROOT > CMake 参数 -DQT_ROOT=... > 默认路径
+if(DEFINED ENV{QT_ROOT} AND NOT "$ENV{QT_ROOT}" STREQUAL "")
+    set(CMAKE_PREFIX_PATH "$ENV{QT_ROOT}")
+elseif(DEFINED QT_ROOT)
+    set(CMAKE_PREFIX_PATH "${QT_ROOT}")
+else()
+    set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg)
 

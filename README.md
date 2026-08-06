@@ -45,14 +45,14 @@
 - [Tesseract 5](https://github.com/UB-Mannheim/tesseract/releases)（用于 OCR，安装后保留默认路径即可）
 
 ```powershell
-# 修改 CMakeLists.txt 中 CMAKE_PREFIX_PATH 为你的 Qt 安装路径
-set(CMAKE_PREFIX_PATH "F:/Qt/6.8.3/msvc2022_64")
+# 设置 Qt 路径（环境变量 QT_ROOT，若已设置可跳过）
+$env:QT_ROOT = "D:\Qt\6.8.3\msvc2022_64"   # 或用 [Environment]::SetEnvironmentVariable("QT_ROOT", "...", "User") 持久化
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 
 # 部署 Qt 运行库（拷贝 DLL 到 exe 目录）
-F:/Qt/6.8.3/msvc2022_64/bin/windeployqt.exe --release build/Release/MySnipaste.exe
+& "$env:QT_ROOT\bin\windeployqt.exe" --release build/Release/MySnipaste.exe
 ```
 
 ## 使用
@@ -89,4 +89,6 @@ F:/Qt/6.8.3/msvc2022_64/bin/windeployqt.exe --release build/Release/MySnipaste.e
 
 ## License
 
-个人使用，非商用。Qt 按 LGPL v3 动态链接使用。
+本项目采用 [Apache License 2.0](LICENSE)。
+
+Qt 按 LGPL v3 动态链接使用（Qt 自身许可证不变）。

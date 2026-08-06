@@ -56,10 +56,17 @@ private:
     QToolButton *makeToolButton(const QString &iconName);
     QToolButton *makeActionButton(const QString &iconName, const QString &tip);
 
+    // 根据当前主题返回图标颜色（深色主题用浅色图标）
+    QColor iconColor() const;
+    // 按当前工具刷新线宽档位按钮（值 / 图标 / 选中态），并同步线宽
+    void applyWidthOptions();
+
     AnnotationCanvas::Tool m_tool = AnnotationCanvas::Tool::None;
     QColor m_currentColor = Qt::red;
     qreal m_width = 2.0;
+    int m_widthIndex = 1;      // 线宽档位（0 小 / 1 中 / 2 大），切换工具时保持相对档位
     bool m_filled = false;
+    bool m_dark = false; // 系统深色主题
 
     QVector<QToolButton *> m_toolButtons;  // 第一类工具按钮（互斥）
     QVector<QToolButton *> m_colorButtons; // 色块按钮

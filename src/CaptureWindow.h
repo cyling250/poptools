@@ -10,6 +10,8 @@
 #include "AnnotationCanvas.h"
 
 class ToolBar;
+class QScreen;
+class QLineEdit;
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）
@@ -62,7 +64,10 @@ private:
     };
 
     QRect handleRect(Handle h) const;          // 控制点方块区域（全局坐标）
-    Handle handleAt(const QPoint &pos) const;  // 命中检测
+    QRectF handleRect(const QRectF &r, Handle h) const; // 控制点方块（r 所在坐标系，选中标注用）
+    Handle handleAt(const QPoint &pos) const;  // 命中检测（全局坐标）
+    Handle handleAt(const QRectF &r, const QPointF &pos) const; // 命中检测（r 所在坐标系）
+    QRectF resizeRectF(QRectF r, Handle h, const QPointF &pos, qreal minSize) const; // 按控制点调矩形（纯函数）
     void resizeSelection(Handle h, const QPoint &pos); // 按控制点调整选区
     void setCursorFor(Handle h);
 
@@ -77,6 +82,14 @@ private:
     void finishDraw(const QPointF &pos);              // 工具释放
     void buildMosaicImage();                          // 马赛克像素化
 
+    // ---- 选择模式：标注项选中 / 编辑 ----
+    void moveSelectedItem(const QPointF &local);      // 拖动选中项（快照 + 实时替换）
+    void resizeSelectedItem(const QPointF &local);    // 拖动选中项控制点缩放
+
+    // ---- 文字内嵌输入框（PPT 风格） ----
+    void beginTextEdit(const QPointF &local, int itemIndex); // itemIndex=-1 新建，否则重编辑
+    void commitTextEdit();                                  // 空输入删除 / 有输入保存
+
     void confirm();  // 确认截图（Enter / 双击 / 工具栏完成）
     void cancel();   // 取消截图（Esc）
 
@@ -86,8 +99,13 @@ private:
     void onSave();
     void onCopy();
 
-    QPixmap m_screen;          // 虚拟桌面截图
-    QRect m_desktop;           // 虚拟桌面几何（全局坐标）
+    // ---- DPI：逻辑坐标（窗口/鼠标/选区）↔ 物理坐标（m_screen） ----
+    QPoint toPhysical(const QPoint &logicalGlobal) const;  // 逻辑全局点 → 物理全局点
+    QRect selectionToPhysical() const;                     // 选区（逻辑全局）→ 物理像素矩形
+
+    QPixmap m_screen;          // 虚拟桌面截图（物理分辨率，dpr=1）
+    QRect m_desktop;           // 虚拟桌面几何（逻辑坐标，窗口/鼠标/选区均用）
+    QRect m_physDesktop;       // 虚拟桌面几何（物理像素，m_screen 坐标系）
     State m_state = State::Idle;
     QRect m_selection;         // 当前选区（全局坐标）
 
@@ -105,7 +123,23 @@ private:
     AnnotationCanvas m_canvas; // 标注画板（标注项 + 撤销/重做）
     ToolBar *m_toolbar = nullptr;
     AnnotationItem m_draft;    // 正在绘制的标注（局部坐标）
+    QPointF m_draftOrigin;     // 绘制按下点（矩形/椭圆拖动锚点，避免随鼠标漂移）
     bool m_drawing = false;    // 是否正在绘制
+
+    // 文字内嵌输入框（PPT 风格：无输入点击别处删除 / 有输入点击别处保存）
+    QLineEdit *m_textEdit = nullptr;
+    bool m_textEditing = false;   // 是否正在输入文字
+    int m_textEditItem = -1;      // 正在编辑的标注索引（-1 = 新建）
+    QPointF m_textEditPos;        // 新建文本的选区局部坐标
+
+    // 选择模式：标注项选中 / 编辑
+    int m_selectedItem = -1;            // 当前选中的标注索引（-1 无）
+    bool m_itemMoving = false;          // 正在拖动选中项
+    Handle m_itemActiveHandle = Handle::None; // 正在缩放选中项的控制点
+    bool m_itemSnapshotted = false;     // 本次交互是否已压撤销快照（首笔变化时压一次）
+    QPointF m_itemStartPos;             // 按下时的鼠标（选区局部坐标）
+    QRectF m_itemStartBounds;           // 按下时的标注外接矩形（局部坐标）
+    AnnotationItem m_itemStartGeom;     // 按下时的标注几何快照
 
     static constexpr int kMinSize = 8;   // 选区最小尺寸（像素）
     static constexpr int kHandle = 5;    // 控制点半边长（像素，共 10px 方块）

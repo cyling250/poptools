@@ -85,6 +85,22 @@ public:
     // 判断某点是否落在任一标注上（用于拖动画布时避开标注）
     bool hitTest(const QPointF &pos, qreal tol = 6.0) const;
 
+    // 从后往前返回命中 pos 的标注索引（选择模式点选用），未命中返回 -1
+    int itemAt(const QPointF &pos, qreal tol = 6.0) const;
+
+    // 交互式修改支持（调用方先 pushSnapshot，再多次 setItem/removeItem 实时更新，
+    // 避免拖拽过程中重复压撤销栈；pushSnapshot 后首次撤销即回到修改前状态）
+    void pushSnapshot();                                  // 记录当前 items 快照（实际修改前调用一次）
+    void setItem(int index, const AnnotationItem &item);  // 原位替换（不压栈）
+    void removeItem(int index);                           // 删除指定索引（不压栈）
+
+    // 标注的外接矩形（选区局部坐标）：Rect/Ellipse/Text/Mosaic 用 rect，折线类用 points
+    static QRectF itemBounds(const AnnotationItem &it);
+
+    // 将标注几何从原外接矩形等比变换到 newBounds（拖动缩放用）；
+    // 折线顶点按相对坐标映射，文字按高度等比缩放字号
+    static AnnotationItem scaledItem(const AnnotationItem &src, const QRectF &newBounds);
+
     // 计算点到单条标注的最短距离（命中检测用）
     static qreal distanceToItem(const QPointF &pos, const AnnotationItem &it);
 

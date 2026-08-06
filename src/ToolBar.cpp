@@ -7,6 +7,8 @@
 #include <QVariant>
 #include <QPainter>
 #include <QSvgRenderer>
+#include <QGuiApplication>
+#include <QStyleHints>
 
 // ============================================================
 // 工具栏实现
@@ -34,22 +36,24 @@ static QIcon svgIcon(const QString &name, const QColor &color, int size = 20)
     return QIcon(colored);
 }
 
-// 线宽图标：横向线条粗细代表线宽
-static QIcon widthIcon(qreal w, int size = 20, const QColor &color = Qt::black)
+// 线宽图标：圆点大小按档位内相对值缩放（半径 2px..7px），档位之间清晰可辨
+static QIcon widthIcon(qreal w, qreal maxW, int size = 20, const QColor &color = Qt::black)
 {
     QPixmap pm(size, size);
     pm.fill(Qt::transparent);
     {
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(QPen(color, w, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(3, size / 2, size - 3, size / 2);
+        const qreal r = 2.0 + 5.0 * (w / qMax(1e-6, maxW));
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        p.drawEllipse(QPointF(size / 2.0, size / 2.0), r, r);
     }
     return QIcon(pm);
 }
 
 // 填充/纯线图标
-static QIcon fillIcon(bool filled, int size = 20)
+static QIcon fillIcon(bool filled, int size = 20, const QColor &color = Qt::black)
 {
     QPixmap pm(size, size);
     pm.fill(Qt::transparent);
@@ -57,23 +61,43 @@ static QIcon fillIcon(bool filled, int size = 20)
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing);
         QRect r(4, 4, size - 8, size - 8);
-        p.setPen(QPen(Qt::black, 2));
-        p.setBrush(filled ? QBrush(Qt::black) : QBrush(Qt::NoBrush));
+        p.setPen(QPen(color, 2));
+        p.setBrush(filled ? QBrush(color) : QBrush(Qt::NoBrush));
         p.drawRect(r);
     }
     return QIcon(pm);
 }
 
+// 每个工具的线宽档位：铅笔最粗(4) 仍比涂鸦最细(6) 更细；马赛克档位为笔刷直径
+static QVector<qreal> widthOptionsFor(AnnotationCanvas::Tool t)
+{
+    switch (t) {
+    case AnnotationCanvas::Tool::Pencil: return {1.0, 2.0, 4.0};
+    case AnnotationCanvas::Tool::Doodle: return {6.0, 12.0, 20.0};
+    case AnnotationCanvas::Tool::Mosaic: return {12.0, 20.0, 32.0};
+    default:                            return {2.0, 5.0, 12.0}; // 矩形/椭圆/直线/箭头/文本等
+    }
+}
+
 ToolBar::ToolBar(QWidget *parent)
     : QWidget(parent)
 {
+    // 跟随系统深浅色主题（Windows 深色模式下用深色面板，避免浅色面板刺眼）
+    m_dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+
     setAttribute(Qt::WA_StyledBackground);
-    // 选中：蓝底白图标；悬停：浅蓝
-    setStyleSheet(
+    // 面板：浅色=灰白底+黑边；深色=深灰底+浅灰边；选中：蓝底白图标；悬停：跟随主题
+    const QString bg = m_dark ? "#2d2d2d" : "#f1f1f1";
+    const QString border = m_dark ? "#6b6b6b" : "#000000";
+    const QString hover = m_dark ? "#3f3f3f" : "#e6f2ff";
+    setStyleSheet(QString(
+        "ToolBar { background: %1; border: 1px solid %2;"
+        "  border-radius: 4px; }"
         "QToolButton { border: none; border-radius: 3px;"
         "  background: transparent; padding: 2px; }"
-        "QToolButton:hover { background: #e6f2ff; }"
-        "QToolButton:checked { background: #2f6feb; }");
+        "QToolButton:hover { background: %3; }"
+        "QToolButton:checked { background: #2f6feb; }")
+                      .arg(bg, border, hover));
 
     auto *grid = new QGridLayout(this);
     grid->setContentsMargins(4, 4, 4, 4);
@@ -95,7 +119,7 @@ ToolBar::ToolBar(QWidget *parent)
         auto *btn = new QToolButton(this);
         btn->setFixedSize(26, 26);
         btn->setCheckable(true);
-        btn->setIcon(svgIcon(tools[i].icon, QColor("#333")));
+        btn->setIcon(svgIcon(tools[i].icon, iconColor()));
         btn->setProperty("tool", static_cast<int>(tools[i].tool));
         btn->setToolTip([&] {
             switch (tools[i].tool) {
@@ -119,28 +143,28 @@ ToolBar::ToolBar(QWidget *parent)
     // 第一行操作按钮：撤销 重做 | 保存 复制
     m_undoBtn = new QToolButton(this);
     m_undoBtn->setFixedSize(26, 26);
-    m_undoBtn->setIcon(svgIcon("undo", QColor("#333")));
+    m_undoBtn->setIcon(svgIcon("undo", iconColor()));
     m_undoBtn->setToolTip("撤销");
     connect(m_undoBtn, &QToolButton::clicked, this, &ToolBar::undoRequested);
     grid->addWidget(m_undoBtn, 0, 9);
 
     m_redoBtn = new QToolButton(this);
     m_redoBtn->setFixedSize(26, 26);
-    m_redoBtn->setIcon(svgIcon("redo", QColor("#333")));
+    m_redoBtn->setIcon(svgIcon("redo", iconColor()));
     m_redoBtn->setToolTip("重做");
     connect(m_redoBtn, &QToolButton::clicked, this, &ToolBar::redoRequested);
     grid->addWidget(m_redoBtn, 0, 10);
 
     auto *saveBtn = new QToolButton(this);
     saveBtn->setFixedSize(26, 26);
-    saveBtn->setIcon(svgIcon("save", QColor("#333")));
+    saveBtn->setIcon(svgIcon("save", iconColor()));
     saveBtn->setToolTip("保存");
     connect(saveBtn, &QToolButton::clicked, this, &ToolBar::saveRequested);
     grid->addWidget(saveBtn, 0, 12);
 
     auto *copyBtn = new QToolButton(this);
     copyBtn->setFixedSize(26, 26);
-    copyBtn->setIcon(svgIcon("copy", QColor("#333")));
+    copyBtn->setIcon(svgIcon("copy", iconColor()));
     copyBtn->setToolTip("复制");
     connect(copyBtn, &QToolButton::clicked, this, &ToolBar::copyRequested);
     grid->addWidget(copyBtn, 0, 13);
@@ -157,14 +181,11 @@ ToolBar::ToolBar(QWidget *parent)
     connect(confirmBtn, &QToolButton::clicked, this, &ToolBar::confirmRequested);
     grid->addWidget(confirmBtn, 0, 14);
 
-    // ---- 第二行：线宽 / 填充 ----
-    struct { qreal w; } widths[] = {{1.5}, {3.0}, {6.0}};
+    // ---- 第二行：线宽 / 填充（档位值/图标由 applyWidthOptions 按工具刷新） ----
     for (int i = 0; i < 3; ++i) {
         auto *btn = new QToolButton(this);
         btn->setFixedSize(26, 26);
         btn->setCheckable(true);
-        btn->setIcon(widthIcon(widths[i].w));
-        btn->setProperty("width", widths[i].w);
         btn->setToolTip(i == 0 ? "小线宽" : i == 1 ? "中线宽" : "大线宽");
         connect(btn, &QToolButton::clicked, this, &ToolBar::onWidthClicked);
         grid->addWidget(btn, 1, i);
@@ -175,7 +196,7 @@ ToolBar::ToolBar(QWidget *parent)
     m_fillBtn = new QToolButton(this);
     m_fillBtn->setFixedSize(26, 26);
     m_fillBtn->setCheckable(true);
-    m_fillBtn->setIcon(fillIcon(false));
+    m_fillBtn->setIcon(fillIcon(false, 20, iconColor()));
     m_fillBtn->setToolTip("填充/纯线（仅矩形、椭圆）");
     connect(m_fillBtn, &QToolButton::clicked, this, &ToolBar::onFilledClicked);
     grid->addWidget(m_fillBtn, 1, 3);
@@ -215,23 +236,20 @@ ToolBar::ToolBar(QWidget *parent)
     m_colorBig->setToolTip("当前颜色");
     grid->addWidget(m_colorBig, 0, 16, 2, 1);
 
-    // 默认工具：None（选择模式）—— 无按钮高亮
+    // 默认工具：None（选择模式）—— 无按钮高亮（同时按默认档位初始化线宽按钮）
     setTool(AnnotationCanvas::Tool::None);
-    // 默认线宽：中线宽（3.0）
-    setWidth(3.0);
 }
 
 void ToolBar::setTool(AnnotationCanvas::Tool t)
 {
     m_tool = t;
     for (QToolButton *btn : m_toolButtons) {
-        const bool checked =
-            btn->property("tool").isValid()
-            && static_cast<AnnotationCanvas::Tool>(btn->property("tool").toInt()) == t;
+        const auto btnTool = static_cast<AnnotationCanvas::Tool>(btn->property("tool").toInt());
+        const bool checked = btn->property("tool").isValid() && btnTool == t;
         btn->setChecked(checked);
-        // 高亮时切换白图标
+        // 图标名取自按钮自身的工具（修复：原先误用当前工具 t，导致所有按钮图标相同/消失）
         btn->setIcon(svgIcon([&] {
-            switch (t) {
+            switch (btnTool) {
             case AnnotationCanvas::Tool::Rect: return "rect";
             case AnnotationCanvas::Tool::Ellipse: return "ellipse";
             case AnnotationCanvas::Tool::Line: return "line";
@@ -243,8 +261,10 @@ void ToolBar::setTool(AnnotationCanvas::Tool t)
             case AnnotationCanvas::Tool::Eraser: return "eraser";
             default: return "";
             }
-        }(), checked ? Qt::white : QColor("#333")));
+        }(), checked ? Qt::white : iconColor()));
     }
+    // 切换工具时按该工具的线宽档位刷新按钮（保持相对档位 m_widthIndex）
+    applyWidthOptions();
 }
 
 void ToolBar::setColor(const QColor &c)
@@ -259,11 +279,34 @@ void ToolBar::setColor(const QColor &c)
 void ToolBar::setWidth(qreal w)
 {
     m_width = w;
-    for (QToolButton *btn : m_widthButtons) {
-        const bool checked = qFuzzyCompare(btn->property("width").toReal(), w);
+    // 找到 w 对应的档位
+    const QVector<qreal> options = widthOptionsFor(m_tool);
+    int idx = m_widthIndex;
+    for (int i = 0; i < options.size(); ++i) {
+        if (qFuzzyCompare(options[i], w)) {
+            idx = i;
+            break;
+        }
+    }
+    m_widthIndex = idx;
+    applyWidthOptions();
+}
+
+void ToolBar::applyWidthOptions()
+{
+    const QVector<qreal> options = widthOptionsFor(m_tool);
+    const qreal maxW = options.isEmpty() ? 1.0 : options.last();
+    for (int i = 0; i < m_widthButtons.size(); ++i) {
+        QToolButton *btn = m_widthButtons[i];
+        const qreal w = (i < options.size()) ? options[i] : options.last();
+        btn->setProperty("width", w);
+        const bool checked = (i == m_widthIndex);
         btn->setChecked(checked);
-        btn->setIcon(widthIcon(btn->property("width").toReal(), 20,
-                               checked ? Qt::white : Qt::black));
+        btn->setIcon(widthIcon(w, maxW, 20, checked ? Qt::white : iconColor()));
+    }
+    if (!options.isEmpty() && m_widthIndex < options.size()) {
+        m_width = options[m_widthIndex];
+        emit widthSelected(m_width);
     }
 }
 
@@ -272,8 +315,14 @@ void ToolBar::setFilled(bool filled)
     m_filled = filled;
     if (m_fillBtn) {
         m_fillBtn->setChecked(filled);
-        m_fillBtn->setIcon(fillIcon(filled));
+        m_fillBtn->setIcon(fillIcon(filled, 20, iconColor()));
     }
+}
+
+QColor ToolBar::iconColor() const
+{
+    // 深色面板上用浅色图标保证可见性
+    return m_dark ? QColor("#e0e0e0") : QColor("#333");
 }
 
 void ToolBar::setUndoRedoEnabled(bool undo, bool redo)
@@ -316,13 +365,12 @@ void ToolBar::onWidthClicked()
     auto *btn = qobject_cast<QToolButton *>(sender());
     if (!btn)
         return;
-    // 线宽互斥：取消其他宽度按钮选中
-    for (QToolButton *b : findChildren<QToolButton *>()) {
-        if (b->property("width").isValid())
-            b->setChecked(b == btn);
-    }
-    m_width = btn->property("width").toReal();
-    emit widthSelected(m_width);
+    const int idx = m_widthButtons.indexOf(btn);
+    if (idx < 0)
+        return;
+    m_widthIndex = idx;
+    // 更新互斥选中 + 图标，并同步线宽（emit widthSelected）
+    applyWidthOptions();
 }
 
 void ToolBar::onFilledClicked()
