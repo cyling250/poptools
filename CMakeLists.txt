@@ -22,39 +22,21 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg)
 
 qt_standard_project_setup()
 
+# ---- 分层：core（核心域） + ui（界面层） + app（可执行） ----
+add_subdirectory(src/core)
+add_subdirectory(src/ui)
+
 qt_add_executable(MySnipaste WIN32
     src/main.cpp
-    src/MainWindow.cpp
-    src/MainWindow.h
-    src/CaptureWindow.cpp
-    src/CaptureWindow.h
-    src/OcrService.cpp
-    src/OcrService.h
-    src/Translator.cpp
-    src/Translator.h
-    src/Settings.cpp
-    src/Settings.h
-    src/AnnotationCanvas.cpp
-    src/AnnotationCanvas.h
-    src/ToolBar.cpp
-    src/ToolBar.h
-    src/PinWindow.cpp
-    src/PinWindow.h
-    src/resources.qrc
+    src/app/MainWindow.cpp
+    src/app/MainWindow.h
+    src/resources/resources.qrc
 )
 
 target_link_libraries(MySnipaste PRIVATE
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    Qt6::Network
-    Qt6::Svg
+    snipaste_core
+    snipaste_ui
 )
-
-# Windows 全局热键需要 user32
-if(WIN32)
-    target_link_libraries(MySnipaste PRIVATE user32)
-endif()
 
 # 安装规则（可选）
 install(TARGETS MySnipaste RUNTIME DESTINATION .)

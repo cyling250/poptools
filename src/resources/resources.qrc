@@ -1,0 +1,19 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file alias="app_icon.svg">app_icon.svg</file>
+        <file alias="icons/rect.svg">icons/rect.svg</file>
+        <file alias="icons/ellipse.svg">icons/ellipse.svg</file>
+        <file alias="icons/line.svg">icons/line.svg</file>
+        <file alias="icons/arrow.svg">icons/arrow.svg</file>
+        <file alias="icons/pencil.svg">icons/pencil.svg</file>
+        <file alias="icons/doodle.svg">icons/doodle.svg</file>
+        <file alias="icons/mosaic.svg">icons/mosaic.svg</file>
+        <file alias="icons/text.svg">icons/text.svg</file>
+        <file alias="icons/eraser.svg">icons/eraser.svg</file>
+        <file alias="icons/undo.svg">icons/undo.svg</file>
+        <file alias="icons/redo.svg">icons/redo.svg</file>
+        <file alias="icons/save.svg">icons/save.svg</file>
+        <file alias="icons/copy.svg">icons/copy.svg</file>
+    </qresource>
+</RCC>

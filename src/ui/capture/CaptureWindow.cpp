@@ -1,4 +1,6 @@
 #include "CaptureWindow.h"
+#include "ToolBar.h"
+#include "core/annotation/AnnotationPainter.h"
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -15,19 +17,12 @@
 #include <QLineEdit>
 #include <QFontMetricsF>
 
-#include "ToolBar.h"
+namespace snipaste {
 
-// DPI：屏幕逻辑几何 → 物理像素几何（m_screen 坐标系基准）。
-// Qt 6.8 的 QScreen 无 nativeGeometry()，按 Windows 每显示器 DPI 映射：
-// 物理 = 屏幕逻辑原点×dpr + 屏幕内偏移×dpr
-static QRect screenPhysicalRect(const QScreen *s)
-{
-    const qreal dpr = s->devicePixelRatio();
-    const QRect lg = s->geometry();
-    const QPoint tl(qRound(lg.left() * dpr), qRound(lg.top() * dpr));
-    const QPoint br(qRound((lg.right() + 1) * dpr), qRound((lg.bottom() + 1) * dpr));
-    return QRect(tl, QSize(br.x() - tl.x(), br.y() - tl.y()));
-}
+// 屏幕逻辑几何 → 物理像素几何（m_screen 坐标系基准）。
+// DPI：窗口/鼠标/选区均为 Qt 逻辑坐标，而截屏画面为物理像素（grabWindow 原图）。
+// 输出（保存/复制/确认）时需把逻辑选区换算为物理矩形，并把标注等比放大。
+// 该映射统一在 ScreenCapturer 中实现。
 
 CaptureWindow::CaptureWindow(QWidget *parent)
     : QWidget(parent)
@@ -70,34 +65,17 @@ CaptureWindow::CaptureWindow(QWidget *parent)
 
 void CaptureWindow::startCapture()
 {
-    // 计算所有屏幕合并后的虚拟桌面区域（逻辑坐标：窗口/鼠标/选区均用逻辑坐标）
-    const QList<QScreen *> screens = QGuiApplication::screens();
-    m_desktop = QRect();
-    for (QScreen *s : screens)
-        m_desktop = m_desktop.united(s->geometry());
+    // 捕获所有屏幕拼接的物理分辨率画面（多屏扩展无黑屏），
+    // 并记录逻辑/物理虚拟桌面几何（窗口/鼠标/选区均用逻辑坐标）
+    m_cap = ScreenCapturer::capture();
 
-    // DPI 修复：grabWindow 返回的是物理像素图。此前按逻辑尺寸创建 m_screen，
-    // 物理图被 drawPixmap 压缩 → 截图掉分辨率。现按物理分辨率拼接
-    m_physDesktop = QRect();
-    for (QScreen *s : screens)
-        m_physDesktop = m_physDesktop.united(screenPhysicalRect(s));
-    m_screen = QPixmap(m_physDesktop.size());
-    m_screen.fill(Qt::black);
-    {
-        QPainter p(&m_screen);
-        for (QScreen *s : screens) {
-            QPixmap shot = s->grabWindow(0);
-            shot.setDevicePixelRatio(1.0); // 物理像素 1:1 拼接（否则按 dpr 缩小）
-            p.drawPixmap(screenPhysicalRect(s).topLeft() - m_physDesktop.topLeft(), shot);
-        }
-    }
     m_state = State::Selecting;
     m_selection = QRect();
     m_canvas.clear();
-    m_canvas.tool = AnnotationCanvas::Tool::None; // 默认选择模式
+    m_canvas.tool = Tool::None; // 默认选择模式
     m_drawing = false;
     m_toolbar->hide();
-    setGeometry(m_desktop);
+    setGeometry(m_cap.desktop);
     show();
     activateWindow();
     raise();
@@ -111,7 +89,7 @@ void CaptureWindow::paintEvent(QPaintEvent *event)
     Q_UNUSED(event)
     QPainter p(this);
     p.setRenderHint(QPainter::SmoothPixmapTransform); // 物理原图缩放到逻辑窗口时保持平滑
-    p.drawPixmap(rect(), m_screen); // 底层为原始屏幕画面（物理分辨率）
+    p.drawPixmap(rect(), m_cap.screen); // 底层为原始屏幕画面（物理分辨率）
 
     if (m_state == State::Idle)
         return;
@@ -120,11 +98,11 @@ void CaptureWindow::paintEvent(QPaintEvent *event)
     if (!m_selection.isEmpty()) {
         QPainterPath mask;
         mask.addRect(rect());
-        mask.addRect(m_selection.translated(-m_desktop.topLeft()));
+        mask.addRect(m_selection.translated(-m_cap.desktop.topLeft()));
         p.fillPath(mask, QColor(0, 0, 0, 110)); // 半透明灰蒙版
 
         // 选区（全局坐标 → 窗口坐标）
-        const QRect sel = m_selection.translated(-m_desktop.topLeft());
+        const QRect sel = m_selection.translated(-m_cap.desktop.topLeft());
 
         if (m_state == State::Selecting) {
             // 框选过程中：浅蓝虚线框
@@ -137,14 +115,14 @@ void CaptureWindow::paintEvent(QPaintEvent *event)
             // 裁剪到选区内：防止标注拖出选区时，未填充内部透出灰蒙版显示为黑色
             p.setClipRect(sel);
             p.translate(sel.topLeft());
-            m_canvas.draw(p);
+            AnnotationPainter::draw(p, m_canvas.items);
             // 正在绘制的草稿
             if (m_drawing)
-                AnnotationCanvas::drawOne(p, m_draft);
+                AnnotationPainter::drawOne(p, m_draft);
             // 选择模式：被选中标注的边框 + 控制点（选区局部坐标）
             if (m_selectedItem >= 0 && m_selectedItem < m_canvas.items.size()) {
                 const AnnotationItem &selIt = m_canvas.items[m_selectedItem];
-                const QRectF b = AnnotationCanvas::itemBounds(selIt);
+                const QRectF b = AnnotationPainter::itemBounds(selIt);
                 p.setPen(QPen(QColor(0, 200, 120), 1, Qt::DashLine));
                 p.setBrush(Qt::NoBrush);
                 p.drawRect(b);
@@ -174,12 +152,12 @@ void CaptureWindow::paintEvent(QPaintEvent *event)
             p.setBrush(Qt::white);
             p.setPen(QPen(QColor(0, 120, 255), 1));
             for (Handle h : handles)
-                p.drawRect(handleRect(h).translated(-m_desktop.topLeft()));
+                p.drawRect(handleRect(h).translated(-m_cap.desktop.topLeft()));
         }
 
         // 尺寸提示（物理分辨率 = 最终输出尺寸）
         p.setPen(Qt::white);
-        const QSize phys = selectionToPhysical().size();
+        const QSize phys = ScreenCapturer::toPhysicalRect(m_selection).size();
         p.drawText(sel.translated(4, -16),
                    QString("%1 × %2").arg(phys.width()).arg(phys.height()));
     }
@@ -263,7 +241,7 @@ QRectF CaptureWindow::resizeRectF(QRectF r, Handle h, const QPointF &pos, qreal 
 void CaptureWindow::resizeSelection(Handle h, const QPoint &pos)
 {
     const QRectF n = resizeRectF(QRectF(m_handleStartSel), h, QPointF(pos), kMinSize);
-    m_selection = n.toRect().intersected(m_desktop);
+    m_selection = n.toRect().intersected(m_cap.desktop);
     update();
 }
 
@@ -293,7 +271,7 @@ void CaptureWindow::enterEditingState()
 void CaptureWindow::positionToolbar()
 {
     m_toolbar->adjustSize();
-    const QRect sel = m_selection.translated(-m_desktop.topLeft());
+    const QRect sel = m_selection.translated(-m_cap.desktop.topLeft());
     // 靠右对齐：工具栏右缘贴画布右缘（含 8px 外边距）
     const int x = sel.right() + 8 - m_toolbar->width();
     const int y = sel.bottom() + 8;
@@ -315,7 +293,7 @@ void CaptureWindow::exitCapture()
     hide();
 }
 
-void CaptureWindow::onToolSelected(AnnotationCanvas::Tool t)
+void CaptureWindow::onToolSelected(Tool t)
 {
     // 切换工具前先保存/删除待输入文字
     if (m_textEditing)
@@ -327,9 +305,9 @@ void CaptureWindow::onToolSelected(AnnotationCanvas::Tool t)
     m_itemActiveHandle = Handle::None;
     // 光标反馈
     switch (t) {
-    case AnnotationCanvas::Tool::Eraser: setCursor(Qt::PointingHandCursor); break;
-    case AnnotationCanvas::Tool::None:   setCursor(Qt::SizeAllCursor); break; // 选择模式：可拖动画布
-    default:                             setCursor(Qt::CrossCursor); break;
+    case Tool::Eraser: setCursor(Qt::PointingHandCursor); break;
+    case Tool::None:   setCursor(Qt::SizeAllCursor); break; // 选择模式：可拖动画布
+    default:           setCursor(Qt::CrossCursor); break;
     }
 }
 
@@ -338,50 +316,32 @@ void CaptureWindow::onColorSelected(const QColor &c)
     m_canvas.color = c;
 }
 
-// ==================== DPI 坐标映射 ====================
-// 窗口/鼠标/选区均为 Qt 逻辑坐标，而 m_screen 为物理像素（grabWindow 原图）。
-// 输出（保存/复制/确认）时需把逻辑选区换算为物理矩形，并把标注等比放大。
+// ==================== 输出合成（保存 / 复制 / 确认） ====================
+// 输出为物理分辨率：逻辑选区 → 物理矩形裁剪；标注为选区局部逻辑坐标，
+// 通过 scale(k,k) 等比放大（k = 物理宽 / 逻辑宽）。
 
-QPoint CaptureWindow::toPhysical(const QPoint &logicalGlobal) const
+QPixmap CaptureWindow::renderResult() const
 {
-    QScreen *s = nullptr;
-    for (QScreen *sc : QGuiApplication::screens()) {
-        if (sc->geometry().contains(logicalGlobal)) {
-            s = sc;
-            break;
+    const QRect crop = ScreenCapturer::toPhysicalRect(m_selection)
+                           .translated(-m_cap.physDesktop.topLeft());
+    QPixmap result = m_cap.screen.copy(crop);
+    {
+        QPainter p(&result);
+        const qreal k = qreal(result.width()) / qMax(1, m_selection.width());
+        p.scale(k, k);
+        AnnotationPainter::draw(p, m_canvas.items);
+        if (m_drawing) {
+            AnnotationPainter::drawOne(p, m_draft);
         }
     }
-    if (!s)
-        s = QGuiApplication::primaryScreen();
-    const qreal dpr = s->devicePixelRatio();
-    const QRect lg = s->geometry();
-    // 与 screenPhysicalRect 一致：屏幕物理原点 + 屏幕内逻辑偏移×dpr
-    return QPoint(qRound(lg.left() * dpr) + qRound((logicalGlobal.x() - lg.left()) * dpr),
-                  qRound(lg.top() * dpr) + qRound((logicalGlobal.y() - lg.top()) * dpr));
-}
-
-QRect CaptureWindow::selectionToPhysical() const
-{
-    // 选区为逻辑全局坐标（Qt 矩形右/下边界含端点）→ 物理像素矩形
-    const QPoint tl = toPhysical(m_selection.topLeft());
-    const QPoint br = toPhysical(m_selection.bottomRight() + QPoint(1, 1));
-    return QRect(tl, br - QPoint(1, 1));
+    return result;
 }
 
 void CaptureWindow::onSave()
 {
     if (m_textEditing)
         commitTextEdit();
-    // DPI：输出为物理分辨率（逻辑选区 → 物理矩形裁剪）
-    const QRect crop = selectionToPhysical().translated(-m_physDesktop.topLeft());
-    QPixmap result = m_screen.copy(crop);
-    {
-        QPainter p(&result);
-        // 标注为选区局部逻辑坐标；结果图为物理像素 → 等比放大
-        const qreal k = qreal(result.width()) / qMax(1, m_selection.width());
-        p.scale(k, k);
-        m_canvas.draw(p);
-    }
+    const QPixmap result = renderResult();
     const QString path = QFileDialog::getSaveFileName(
         this, "保存截图", QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
         "PNG 图片 (*.png);;JPEG 图片 (*.jpg)");
@@ -395,16 +355,7 @@ void CaptureWindow::onCopy()
 {
     if (m_textEditing)
         commitTextEdit();
-    // DPI：输出为物理分辨率
-    const QRect crop = selectionToPhysical().translated(-m_physDesktop.topLeft());
-    QPixmap result = m_screen.copy(crop);
-    {
-        QPainter p(&result);
-        const qreal k = qreal(result.width()) / qMax(1, m_selection.width());
-        p.scale(k, k);
-        m_canvas.draw(p);
-    }
-    QGuiApplication::clipboard()->setPixmap(result);
+    QGuiApplication::clipboard()->setPixmap(renderResult());
     exitCapture(); // 复制后退出截图界面（显式操作才退出，防误触）
 }
 
@@ -418,10 +369,10 @@ QPointF CaptureWindow::toLocal(const QPoint &global) const
 void CaptureWindow::startDraw(const QPointF &pos)
 {
     switch (m_canvas.tool) {
-    case AnnotationCanvas::Tool::Rect:
-    case AnnotationCanvas::Tool::Ellipse:
+    case Tool::Rect:
+    case Tool::Ellipse:
         m_draftOrigin = pos; // 固定拖动锚点（按下点），避免反向拖动时随鼠标漂移
-        m_draft.type = (m_canvas.tool == AnnotationCanvas::Tool::Rect)
+        m_draft.type = (m_canvas.tool == Tool::Rect)
                            ? AnnotationType::Rect : AnnotationType::Ellipse;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
@@ -429,23 +380,23 @@ void CaptureWindow::startDraw(const QPointF &pos)
         m_draft.rect = QRectF(pos, pos);
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Line:
-    case AnnotationCanvas::Tool::Arrow:
-        m_draft.type = (m_canvas.tool == AnnotationCanvas::Tool::Line)
+    case Tool::Line:
+    case Tool::Arrow:
+        m_draft.type = (m_canvas.tool == Tool::Line)
                            ? AnnotationType::Line : AnnotationType::Arrow;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
         m_draft.points = QPolygonF() << pos << pos;
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Pencil:
+    case Tool::Pencil:
         m_draft.type = AnnotationType::Freehand;
         m_draft.color = m_canvas.color;
         m_draft.width = m_canvas.width;
         m_draft.points = QPolygonF() << pos;
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Doodle:
+    case Tool::Doodle:
         m_draft.type = AnnotationType::Doodle;
         m_draft.color = m_canvas.color;
         m_draft.color.setAlpha(100); // 半透明：高亮 / 荧光笔效果
@@ -453,22 +404,22 @@ void CaptureWindow::startDraw(const QPointF &pos)
         m_draft.points = QPolygonF() << pos;
         m_drawing = true;
         break;
-    case AnnotationCanvas::Tool::Mosaic:
+    case Tool::Mosaic:
         m_draft.type = AnnotationType::Mosaic;
         m_draft.width = m_canvas.width; // 笔刷直径
         m_draft.points = QPolygonF() << pos;
         m_drawing = true;
         buildMosaicImage();
         break;
-    case AnnotationCanvas::Tool::Eraser:
+    case Tool::Eraser:
         m_canvas.eraseAt(pos);
         m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
         update();
         break;
-    case AnnotationCanvas::Tool::Text:
+    case Tool::Text:
         beginTextEdit(pos, -1); // 画布内嵌待输入框（PPT 风格：空删 / 非空存）
         break;
-    case AnnotationCanvas::Tool::None:
+    case Tool::None:
         break; // 选择模式：由调用方处理拖动画布
     }
 }
@@ -478,21 +429,21 @@ void CaptureWindow::continueDraw(const QPointF &pos)
     if (!m_drawing)
         return;
     switch (m_canvas.tool) {
-    case AnnotationCanvas::Tool::Rect:
-    case AnnotationCanvas::Tool::Ellipse:
+    case Tool::Rect:
+    case Tool::Ellipse:
         // 固定按下点为锚点（修复：原先取 m_draft.rect.topLeft()，反向拖动时锚点随鼠标漂移）
         m_draft.rect = QRectF(m_draftOrigin, pos).normalized();
         break;
-    case AnnotationCanvas::Tool::Line:
-    case AnnotationCanvas::Tool::Arrow:
+    case Tool::Line:
+    case Tool::Arrow:
         if (m_draft.points.size() >= 2)
             m_draft.points[1] = pos;
         break;
-    case AnnotationCanvas::Tool::Pencil:
-    case AnnotationCanvas::Tool::Doodle:
+    case Tool::Pencil:
+    case Tool::Doodle:
         m_draft.points.append(pos);
         break;
-    case AnnotationCanvas::Tool::Mosaic:
+    case Tool::Mosaic:
         m_draft.points.append(pos);
         buildMosaicImage(); // 笔刷涂抹：沿笔迹实时生成马赛克
         break;
@@ -506,12 +457,12 @@ void CaptureWindow::finishDraw(const QPointF &pos)
 {
     if (m_drawing) {
         const bool tooSmall =
-            (m_canvas.tool == AnnotationCanvas::Tool::Rect ||
-             m_canvas.tool == AnnotationCanvas::Tool::Ellipse) &&
+            (m_canvas.tool == Tool::Rect ||
+             m_canvas.tool == Tool::Ellipse) &&
             (m_draft.rect.width() < 2 || m_draft.rect.height() < 2);
         if (!tooSmall) {
             // 马赛克：基于原始屏幕画面生成笔刷足迹的像素块效果
-            if (m_canvas.tool == AnnotationCanvas::Tool::Mosaic)
+            if (m_canvas.tool == Tool::Mosaic)
                 buildMosaicImage();
             m_canvas.addItem(m_draft);
             m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
@@ -538,15 +489,15 @@ void CaptureWindow::buildMosaicImage()
     if (local.isEmpty())
         return;
 
-    // 截取屏幕源区域并整体像素化（m_screen 为物理像素 → 换算物理矩形）
-    const QRect global = local.translated(m_selection.topLeft()).intersected(m_desktop);
+    // 截取屏幕源区域并整体像素化（m_cap.screen 为物理像素 → 换算物理矩形）
+    const QRect global = local.translated(m_selection.topLeft()).intersected(m_cap.desktop);
     if (global.isEmpty())
         return;
-    const QRect physGlobal(QRect(toPhysical(global.topLeft()),
-                                 toPhysical(global.bottomRight() + QPoint(1, 1)) - QPoint(1, 1)));
+    const QRect physGlobal(QRect(ScreenCapturer::toPhysical(global.topLeft()),
+                                 ScreenCapturer::toPhysical(global.bottomRight() + QPoint(1, 1)) - QPoint(1, 1)));
     if (physGlobal.isEmpty())
         return;
-    const QPixmap region = m_screen.copy(physGlobal.translated(-m_physDesktop.topLeft()));
+    const QPixmap region = m_cap.screen.copy(physGlobal.translated(-m_cap.physDesktop.topLeft()));
     const int block = 8; // 马赛克块大小（物理像素）
     if (region.width() < block || region.height() < block)
         return;
@@ -618,7 +569,7 @@ void CaptureWindow::beginTextEdit(const QPointF &local, int itemIndex)
 
     // 定位：选区局部坐标 → 全局坐标 → 窗口坐标
     const QPointF global = boxPos + m_selection.topLeft();
-    const QPoint win = (global - QPointF(m_desktop.topLeft())).toPoint();
+    const QPoint win = (global - QPointF(m_cap.desktop.topLeft())).toPoint();
     QFontMetricsF fm(f);
     m_textEdit->setGeometry(QRect(win, QSize(240, int(fm.height()) + 10)));
     m_textEdit->show();
@@ -712,7 +663,7 @@ void CaptureWindow::resizeSelectedItem(const QPointF &local)
         m_canvas.pushSnapshot();
         m_itemSnapshotted = true;
     }
-    m_canvas.setItem(m_selectedItem, AnnotationCanvas::scaledItem(m_itemStartGeom, newBounds));
+    m_canvas.setItem(m_selectedItem, AnnotationPainter::scaledItem(m_itemStartGeom, newBounds));
     update();
 }
 
@@ -743,7 +694,7 @@ void CaptureWindow::mousePressEvent(QMouseEvent *event)
             commitTextEdit();
 
         // 选择模式（None）且点在选区内：标注项选中 / 拖动 / 缩放，或拖动选区
-        if (m_canvas.tool == AnnotationCanvas::Tool::None && m_selection.contains(pos)) {
+        if (m_canvas.tool == Tool::None && m_selection.contains(pos)) {
             const QPointF local = toLocal(pos);
             // 0) 选区自身的控制点优先（与标注项控制点互斥）
             const Handle selHandle = handleAt(pos);
@@ -758,7 +709,7 @@ void CaptureWindow::mousePressEvent(QMouseEvent *event)
             // 1) 已有选中项：点其控制点 → 开始缩放
             if (m_selectedItem >= 0 && m_selectedItem < m_canvas.items.size()) {
                 const AnnotationItem &sel = m_canvas.items[m_selectedItem];
-                const QRectF b = AnnotationCanvas::itemBounds(sel);
+                const QRectF b = AnnotationPainter::itemBounds(sel);
                 const Handle h = handleAt(b, local);
                 if (h != Handle::None) {
                     m_itemActiveHandle = h;
@@ -778,7 +729,7 @@ void CaptureWindow::mousePressEvent(QMouseEvent *event)
                 const AnnotationItem &sel = m_canvas.items[idx];
                 m_itemMoving = true;
                 m_itemStartPos = local;
-                m_itemStartBounds = AnnotationCanvas::itemBounds(sel);
+                m_itemStartBounds = AnnotationPainter::itemBounds(sel);
                 m_itemStartGeom = sel;
                 m_itemSnapshotted = false;
                 setCursor(Qt::SizeAllCursor);
@@ -792,7 +743,7 @@ void CaptureWindow::mousePressEvent(QMouseEvent *event)
             return;
         }
         // 工具模式下：选区内开始绘制
-        if (m_canvas.tool != AnnotationCanvas::Tool::None && m_selection.contains(pos)) {
+        if (m_canvas.tool != Tool::None && m_selection.contains(pos)) {
             startDraw(toLocal(pos));
             return;
         }
@@ -851,7 +802,7 @@ void CaptureWindow::mouseMoveEvent(QMouseEvent *event)
         if (m_moving && event->buttons() & Qt::LeftButton) {
             QRect r = m_selection;
             r.moveTopLeft(pos - m_moveOffset);
-            r = r.intersected(m_desktop);
+            r = r.intersected(m_cap.desktop);
             if (r.width() >= kMinSize && r.height() >= kMinSize) {
                 m_selection = r;
                 positionToolbar();
@@ -860,14 +811,14 @@ void CaptureWindow::mouseMoveEvent(QMouseEvent *event)
             return;
         }
         // 未按下：光标反馈
-        if (m_canvas.tool == AnnotationCanvas::Tool::None) {
+        if (m_canvas.tool == Tool::None) {
             const QPointF local = toLocal(pos);
             const bool overSelHandle = handleAt(pos) != Handle::None;
             if (!m_selection.contains(pos) || overSelHandle) {
                 setCursorFor(handleAt(pos));
             } else if (m_selectedItem >= 0 && m_selectedItem < m_canvas.items.size()) {
                 // 选中标注：控制点光标 / 项内移动光标
-                const QRectF b = AnnotationCanvas::itemBounds(m_canvas.items[m_selectedItem]);
+                const QRectF b = AnnotationPainter::itemBounds(m_canvas.items[m_selectedItem]);
                 const Handle h = handleAt(b, local);
                 if (h != Handle::None)
                     setCursorFor(h);
@@ -878,7 +829,7 @@ void CaptureWindow::mouseMoveEvent(QMouseEvent *event)
                 setCursor(m_canvas.hitTest(local) ? Qt::ArrowCursor : Qt::SizeAllCursor);
             }
         } else if (m_selection.contains(pos)) {
-            setCursor(m_canvas.tool == AnnotationCanvas::Tool::Eraser
+            setCursor(m_canvas.tool == Tool::Eraser
                           ? Qt::PointingHandCursor : Qt::CrossCursor);
         } else {
             setCursorFor(handleAt(pos));
@@ -924,7 +875,7 @@ void CaptureWindow::mouseDoubleClickEvent(QMouseEvent *event)
     const QPoint pos = event->globalPosition().toPoint();
     if (m_selection.contains(pos)) {
         // 选择模式：双击文字标注 → 重新编辑
-        if (m_canvas.tool == AnnotationCanvas::Tool::None) {
+        if (m_canvas.tool == Tool::None) {
             const QPointF local = toLocal(pos);
             const int idx = m_canvas.itemAt(local);
             if (idx >= 0 && m_canvas.items[idx].type == AnnotationType::Text) {
@@ -980,18 +931,9 @@ void CaptureWindow::confirm()
         commitTextEdit();
 
     // 裁剪选中区域并合成标注（输出为物理分辨率）
-    const QRect crop = selectionToPhysical().translated(-m_physDesktop.topLeft());
-    QPixmap result = m_screen.copy(crop);
-    {
-        QPainter p(&result);
-        const qreal k = qreal(result.width()) / qMax(1, m_selection.width());
-        p.scale(k, k);
-        m_canvas.draw(p);
-        if (m_drawing) {
-            AnnotationCanvas::drawOne(p, m_draft);
-            m_drawing = false;
-        }
-    }
+    QPixmap result = renderResult();
+    if (m_drawing)
+        m_drawing = false;
     exitCapture();
     emit captured(result);
 }
@@ -1001,3 +943,5 @@ void CaptureWindow::cancel()
     exitCapture();
     emit captured(QPixmap());
 }
+
+} // namespace snipaste

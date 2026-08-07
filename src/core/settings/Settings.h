@@ -3,6 +3,8 @@
 #include <QString>
 #include <QSettings>
 
+namespace snipaste {
+
 // 应用设置持久化（QSettings 存储于注册表/配置文件）
 class Settings
 {
@@ -39,3 +41,5 @@ private:
     Settings();
     QSettings m_s;
 };
+
+} // namespace snipaste

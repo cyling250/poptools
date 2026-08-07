@@ -23,17 +23,27 @@
 
 ## 目录结构
 
+采用标准 Qt/C++ 中大型项目组织：**三层分层（core / ui / app）+ 领域模块化**，引入 `snipaste` 命名空间。
+
 ```
-├── CMakeLists.txt          # CMake 构建配置
+├── CMakeLists.txt              # 根构建：配置 + 组装可执行
 ├── src/
-│   ├── main.cpp            # 程序入口
-│   ├── MainWindow.h/.cpp   # 主窗口：系统托盘 + 全局热键 + 结果面板
-│   ├── CaptureWindow.h/.cpp# 截图窗口：全屏遮罩 + 选区
-│   ├── OcrService.h/.cpp   # Tesseract OCR 服务
-│   ├── Translator.h/.cpp   # 翻译服务（本地/大模型 API 可配置）
-│   ├── Settings.h/.cpp     # 设置持久化（QSettings）
-│   └── resources/tessdata/ # Tesseract 中文语言包
-└── .trae/rules/            # 项目规则与文档
+│   ├── main.cpp                # 程序入口
+│   ├── app/MainWindow.h/.cpp   # 应用控制器：托盘 + 全局热键 + 服务编排
+│   ├── core/                   # 核心域（静态库 snipaste_core，与 UI 解耦）
+│   │   ├── annotation/         #   标注模型 + 渲染（AnnotationCanvas/Painter）
+│   │   ├── capture/            #   多屏捕获 + DPI 映射（ScreenCapturer）
+│   │   ├── hotkey/             #   全局热键（GlobalHotKey）
+│   │   ├── ocr/                #   Tesseract OCR 服务
+│   │   ├── settings/           #   设置持久化
+│   │   └── translation/        #   翻译服务
+│   ├── ui/                     # 界面层（静态库 snipaste_ui，依赖 core）
+│   │   ├── capture/            #   截图画布 + 标注工具栏
+│   │   ├── result/             #   结果面板（截图 + OCR + 翻译）
+│   │   ├── settings/           #   设置对话框
+│   │   └── pin/                #   贴图窗口
+│   └── resources/              # 资源（qrc / 图标 / tessdata 语言包）
+└── .trae/rules/                # 项目规则与文档
 ```
 
 ## 构建

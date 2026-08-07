@@ -82,3 +82,15 @@
   - `paintEvent` 加 `SmoothPixmapTransform`（物理原图缩放到逻辑窗口时平滑），尺寸提示显示物理分辨率
 - **验证**：自动化 GUI 测试全屏框选 → 结果 2461×1501（期望≈2460×1500；修复前约 1640×1000）；红色矩形 bbox 按 dpr 等比放大正确（误差 ±4px）；马赛克无黑框回归（最大连通黑块占比 5.6%）
 - **教训**：Qt 全屏截图存在两个坐标系——**逻辑坐标**（窗口/鼠标/选区）与**物理像素**（grabWindow 原图），输出时必须在边界转换；坐标换算统一按"屏幕逻辑原点×dpr + 屏幕内偏移×dpr"，且 `QRect` 右/下边界含端点，换算用 (right+1, bottom+1) 避免丢像素
+
+## 14. 工具栏底衬丢失（命名空间导致样式表类型选择器失配）
+- **现象**：重构引入 `namespace snipaste` 后，工具栏灰白/深灰背景与边框消失
+- **根因**：moc 生成的 `QMetaObject::className()` 为 `"snipaste::ToolBar"`，样式表类型选择器 `ToolBar { ... }` 不再匹配（Qt 样式表类型选择器按 className 匹配，`: 与 ::` 有特殊含义无法直接写限定名）
+- **解决**：`setObjectName("annotationToolBar")` + 样式表改用 ID 选择器 `#annotationToolBar { ... }`，与命名空间解耦
+- **验证**：自动化 GUI 测试（F1 → 框选 → 截屏检测）检测到工具栏背景色像素（浅 6564 / 深 16080 采样点 > 阈值）→ TOOLBAR_BG_OK
+- **教训**：命名空间内的 QObject 子类（Q_OBJECT）若用样式表设置自身外观，不能用类型选择器，须用 objectName ID 选择器；Qt 全局类（QToolButton 等）不受影响
+
+## 15. "撤销栈顺序颠倒"Issue 验证为误报
+- **现象（误报）**：`addItem` 被指"先 push_back(items) 快照再添加新项，顺序颠倒，撤销后应保留新项"
+- **验证**：① 静态分析：`addItem` 顺序为 `m_undoStack.push_back(items)`（保存不含新项快照）→ `items.push_back(item)`，语义正确；用户提供的"修复建议"代码与现有一致，无实际差异 ② 运行时测试（链接 snipaste_core，`scripts/undo_test/test_undo.cpp`）：add A+B → undo 回到 [A]（新项被移除）→ 二次 undo 空 → redo 恢复 [A]，PASS
+- **结论**：无需修复。误报排查成本较高，特此记录避免重复验证

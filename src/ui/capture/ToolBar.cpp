@@ -10,6 +10,8 @@
 #include <QGuiApplication>
 #include <QStyleHints>
 
+namespace snipaste {
+
 // ============================================================
 // 工具栏实现
 // ============================================================
@@ -69,13 +71,13 @@ static QIcon fillIcon(bool filled, int size = 20, const QColor &color = Qt::blac
 }
 
 // 每个工具的线宽档位：铅笔最粗(4) 仍比涂鸦最细(6) 更细；马赛克档位为笔刷直径
-static QVector<qreal> widthOptionsFor(AnnotationCanvas::Tool t)
+static QVector<qreal> widthOptionsFor(Tool t)
 {
     switch (t) {
-    case AnnotationCanvas::Tool::Pencil: return {1.0, 2.0, 4.0};
-    case AnnotationCanvas::Tool::Doodle: return {6.0, 12.0, 20.0};
-    case AnnotationCanvas::Tool::Mosaic: return {12.0, 20.0, 32.0};
-    default:                            return {2.0, 5.0, 12.0}; // 矩形/椭圆/直线/箭头/文本等
+    case Tool::Pencil: return {1.0, 2.0, 4.0};
+    case Tool::Doodle: return {6.0, 12.0, 20.0};
+    case Tool::Mosaic: return {12.0, 20.0, 32.0};
+    default:           return {2.0, 5.0, 12.0}; // 矩形/椭圆/直线/箭头/文本等
     }
 }
 
@@ -86,12 +88,16 @@ ToolBar::ToolBar(QWidget *parent)
     m_dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
 
     setAttribute(Qt::WA_StyledBackground);
+    // 注意：不能用类型选择器 "ToolBar { ... }" —— 类位于 snipaste 命名空间，
+    // QMetaObject::className() 返回 "snipaste::ToolBar"，样式表类型选择器失配 → 底衬丢失。
+    // 改用 objectName ID 选择器（#annotationToolBar）与命名空间解耦。
+    setObjectName("annotationToolBar");
     // 面板：浅色=灰白底+黑边；深色=深灰底+浅灰边；选中：蓝底白图标；悬停：跟随主题
     const QString bg = m_dark ? "#2d2d2d" : "#f1f1f1";
     const QString border = m_dark ? "#6b6b6b" : "#000000";
     const QString hover = m_dark ? "#3f3f3f" : "#e6f2ff";
     setStyleSheet(QString(
-        "ToolBar { background: %1; border: 1px solid %2;"
+        "#annotationToolBar { background: %1; border: 1px solid %2;"
         "  border-radius: 4px; }"
         "QToolButton { border: none; border-radius: 3px;"
         "  background: transparent; padding: 2px; }"
@@ -104,16 +110,16 @@ ToolBar::ToolBar(QWidget *parent)
     grid->setSpacing(2);
 
     // ---- 第一行：绘图工具（互斥） ----
-    struct { const char *icon; AnnotationCanvas::Tool tool; } tools[] = {
-        {"rect", AnnotationCanvas::Tool::Rect},
-        {"ellipse", AnnotationCanvas::Tool::Ellipse},
-        {"line", AnnotationCanvas::Tool::Line},
-        {"arrow", AnnotationCanvas::Tool::Arrow},
-        {"pencil", AnnotationCanvas::Tool::Pencil},
-        {"doodle", AnnotationCanvas::Tool::Doodle},
-        {"mosaic", AnnotationCanvas::Tool::Mosaic},
-        {"text", AnnotationCanvas::Tool::Text},
-        {"eraser", AnnotationCanvas::Tool::Eraser},
+    struct { const char *icon; Tool tool; } tools[] = {
+        {"rect", Tool::Rect},
+        {"ellipse", Tool::Ellipse},
+        {"line", Tool::Line},
+        {"arrow", Tool::Arrow},
+        {"pencil", Tool::Pencil},
+        {"doodle", Tool::Doodle},
+        {"mosaic", Tool::Mosaic},
+        {"text", Tool::Text},
+        {"eraser", Tool::Eraser},
     };
     for (int i = 0; i < 9; ++i) {
         auto *btn = new QToolButton(this);
@@ -123,15 +129,15 @@ ToolBar::ToolBar(QWidget *parent)
         btn->setProperty("tool", static_cast<int>(tools[i].tool));
         btn->setToolTip([&] {
             switch (tools[i].tool) {
-            case AnnotationCanvas::Tool::Rect: return QStringLiteral("矩形");
-            case AnnotationCanvas::Tool::Ellipse: return QStringLiteral("椭圆");
-            case AnnotationCanvas::Tool::Line: return QStringLiteral("直线");
-            case AnnotationCanvas::Tool::Arrow: return QStringLiteral("箭头");
-            case AnnotationCanvas::Tool::Pencil: return QStringLiteral("铅笔");
-            case AnnotationCanvas::Tool::Doodle: return QStringLiteral("涂鸦笔");
-            case AnnotationCanvas::Tool::Mosaic: return QStringLiteral("马赛克");
-            case AnnotationCanvas::Tool::Text: return QStringLiteral("文字");
-            case AnnotationCanvas::Tool::Eraser: return QStringLiteral("橡皮擦");
+            case Tool::Rect: return QStringLiteral("矩形");
+            case Tool::Ellipse: return QStringLiteral("椭圆");
+            case Tool::Line: return QStringLiteral("直线");
+            case Tool::Arrow: return QStringLiteral("箭头");
+            case Tool::Pencil: return QStringLiteral("铅笔");
+            case Tool::Doodle: return QStringLiteral("涂鸦笔");
+            case Tool::Mosaic: return QStringLiteral("马赛克");
+            case Tool::Text: return QStringLiteral("文字");
+            case Tool::Eraser: return QStringLiteral("橡皮擦");
             default: return QString();
             }
         }());
@@ -237,28 +243,28 @@ ToolBar::ToolBar(QWidget *parent)
     grid->addWidget(m_colorBig, 0, 16, 2, 1);
 
     // 默认工具：None（选择模式）—— 无按钮高亮（同时按默认档位初始化线宽按钮）
-    setTool(AnnotationCanvas::Tool::None);
+    setTool(Tool::None);
 }
 
-void ToolBar::setTool(AnnotationCanvas::Tool t)
+void ToolBar::setTool(Tool t)
 {
     m_tool = t;
     for (QToolButton *btn : m_toolButtons) {
-        const auto btnTool = static_cast<AnnotationCanvas::Tool>(btn->property("tool").toInt());
+        const auto btnTool = static_cast<Tool>(btn->property("tool").toInt());
         const bool checked = btn->property("tool").isValid() && btnTool == t;
         btn->setChecked(checked);
         // 图标名取自按钮自身的工具（修复：原先误用当前工具 t，导致所有按钮图标相同/消失）
         btn->setIcon(svgIcon([&] {
             switch (btnTool) {
-            case AnnotationCanvas::Tool::Rect: return "rect";
-            case AnnotationCanvas::Tool::Ellipse: return "ellipse";
-            case AnnotationCanvas::Tool::Line: return "line";
-            case AnnotationCanvas::Tool::Arrow: return "arrow";
-            case AnnotationCanvas::Tool::Pencil: return "pencil";
-            case AnnotationCanvas::Tool::Doodle: return "doodle";
-            case AnnotationCanvas::Tool::Mosaic: return "mosaic";
-            case AnnotationCanvas::Tool::Text: return "text";
-            case AnnotationCanvas::Tool::Eraser: return "eraser";
+            case Tool::Rect: return "rect";
+            case Tool::Ellipse: return "ellipse";
+            case Tool::Line: return "line";
+            case Tool::Arrow: return "arrow";
+            case Tool::Pencil: return "pencil";
+            case Tool::Doodle: return "doodle";
+            case Tool::Mosaic: return "mosaic";
+            case Tool::Text: return "text";
+            case Tool::Eraser: return "eraser";
             default: return "";
             }
         }(), checked ? Qt::white : iconColor()));
@@ -336,11 +342,11 @@ void ToolBar::onToolClicked()
     auto *btn = qobject_cast<QToolButton *>(sender());
     if (!btn || !btn->property("tool").isValid())
         return;
-    const auto t = static_cast<AnnotationCanvas::Tool>(btn->property("tool").toInt());
+    const auto t = static_cast<Tool>(btn->property("tool").toInt());
     if (t == m_tool) {
         // 点灭当前高亮工具 → 进入选择模式（可拖动画布）
-        setTool(AnnotationCanvas::Tool::None);
-        emit toolSelected(AnnotationCanvas::Tool::None);
+        setTool(Tool::None);
+        emit toolSelected(Tool::None);
     } else {
         setTool(t);
         emit toolSelected(t);
@@ -379,3 +385,5 @@ void ToolBar::onFilledClicked()
     m_fillBtn->setIcon(fillIcon(m_filled));
     emit filledToggled(m_filled);
 }
+
+} // namespace snipaste

@@ -1,11 +1,13 @@
 #include "Translator.h"
-#include "Settings.h"
+#include "core/settings/Settings.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QUrl>
+
+namespace snipaste {
 
 Translator::Translator(QObject *parent)
     : QObject(parent)
@@ -107,3 +109,5 @@ void Translator::onReplyFinished()
     else
         emit translateFinished(true, result, QString());
 }
+
+} // namespace snipaste

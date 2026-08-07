@@ -5,6 +5,8 @@
 #include <QImage>
 #include <QProcess>
 
+namespace snipaste {
+
 // OCR 服务：调用 Tesseract 命令行识别图片文字（本地离线）
 class OcrService : public QObject
 {
@@ -31,3 +33,5 @@ private:
     QProcess m_process;
     QImage m_lastImage;
 };
+
+} // namespace snipaste

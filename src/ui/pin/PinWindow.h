@@ -4,6 +4,8 @@
 #include <QPixmap>
 #include <QPoint>
 
+namespace snipaste {
+
 // ============================================================
 // 贴图窗口（F3 功能，架构预留）
 //
@@ -15,7 +17,7 @@
 //   * 双击/右键关闭
 //   * 支持多张贴图并存
 //
-// 当前状态：仅定义接口骨架，功能待后续实现。
+// 当前状态：已实现贴图显示、拖动、滚轮缩放、双击关闭。
 // 接入点：MainWindow 中注册 F3 全局热键 → PinWindow::pin(image)
 // ============================================================
 class PinWindow : public QWidget
@@ -38,8 +40,10 @@ private:
     QPixmap m_pixmap;      // 贴图内容
     QPoint m_dragOffset;   // 拖动时鼠标相对窗口左上角偏移
     bool m_dragging = false;
-    qreal m_scale = 1.0;   // 缩放比例（预留）
+    qreal m_scale = 1.0;   // 缩放比例
 
-    static constexpr int kMinWidth = 40;   // 最小缩放尺寸（预留）
-    static constexpr int kMaxWidth = 4000; // 最大缩放尺寸（预留）
+    static constexpr int kMinWidth = 40;   // 最小缩放尺寸
+    static constexpr int kMaxWidth = 4000; // 最大缩放尺寸
 };
+
+} // namespace snipaste

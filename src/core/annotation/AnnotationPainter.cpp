@@ -1,10 +1,11 @@
-#include "AnnotationCanvas.h"
+#include "AnnotationPainter.h"
 
 #include <QLineF>
 #include <QtMath>
 
-// 计算点到线段的最短距离（QLineF 在 Qt6 中无 distanceToPoint）
-static qreal pointToSegmentDist(const QPointF &p, const QPointF &a, const QPointF &b)
+namespace snipaste {
+
+qreal AnnotationPainter::pointToSegmentDist(const QPointF &p, const QPointF &a, const QPointF &b)
 {
     const QPointF ab = b - a;
     const qreal len2 = QPointF::dotProduct(ab, ab);
@@ -15,83 +16,7 @@ static qreal pointToSegmentDist(const QPointF &p, const QPointF &a, const QPoint
     return QLineF(p, a + ab * t).length();
 }
 
-void AnnotationCanvas::addItem(const AnnotationItem &item)
-{
-    m_undoStack.push_back(items);
-    items.push_back(item);
-    m_redoStack.clear();
-}
-
-void AnnotationCanvas::undo()
-{
-    if (m_undoStack.isEmpty())
-        return;
-    m_redoStack.push_back(items);
-    items = m_undoStack.takeLast();
-}
-
-void AnnotationCanvas::redo()
-{
-    if (m_redoStack.isEmpty())
-        return;
-    m_undoStack.push_back(items);
-    items = m_redoStack.takeLast();
-}
-
-bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
-{
-    // 从后往前找最近且距离在容差内的标注
-    for (int i = items.size() - 1; i >= 0; --i) {
-        const AnnotationItem &it = items[i];
-        qreal d = distanceToItem(pos, it);
-        if (d <= tol) {
-            m_undoStack.push_back(items);
-            items.removeAt(i);
-            m_redoStack.clear();
-            return true;
-        }
-    }
-    return false;
-}
-
-bool AnnotationCanvas::hitTest(const QPointF &pos, qreal tol) const
-{
-    for (const AnnotationItem &it : items) {
-        if (distanceToItem(pos, it) <= tol)
-            return true;
-    }
-    return false;
-}
-
-int AnnotationCanvas::itemAt(const QPointF &pos, qreal tol) const
-{
-    // 从后往前：后绘制的标注优先被选中
-    for (int i = items.size() - 1; i >= 0; --i) {
-        if (distanceToItem(pos, items[i]) <= tol)
-            return i;
-    }
-    return -1;
-}
-
-void AnnotationCanvas::pushSnapshot()
-{
-    m_undoStack.push_back(items);
-    m_redoStack.clear();
-}
-
-void AnnotationCanvas::setItem(int index, const AnnotationItem &item)
-{
-    if (index >= 0 && index < items.size())
-        items[index] = item;
-}
-
-void AnnotationCanvas::removeItem(int index)
-{
-    if (index >= 0 && index < items.size())
-        items.removeAt(index);
-}
-
-QRectF AnnotationCanvas::itemBounds(const AnnotationItem &it)
+QRectF AnnotationPainter::itemBounds(const AnnotationItem &it)
 {
     switch (it.type) {
     case AnnotationType::Rect:
@@ -104,7 +29,7 @@ QRectF AnnotationCanvas::itemBounds(const AnnotationItem &it)
     }
 }
 
-AnnotationItem AnnotationCanvas::scaledItem(const AnnotationItem &src, const QRectF &newBounds)
+AnnotationItem AnnotationPainter::scaledItem(const AnnotationItem &src, const QRectF &newBounds)
 {
     AnnotationItem it = src;
     const QRectF oldBounds = itemBounds(src);
@@ -144,8 +69,7 @@ AnnotationItem AnnotationCanvas::scaledItem(const AnnotationItem &src, const QRe
     return it;
 }
 
-// 计算点到标注的距离（公有静态内部工具函数）
-qreal AnnotationCanvas::distanceToItem(const QPointF &pos, const AnnotationItem &it)
+qreal AnnotationPainter::distanceToItem(const QPointF &pos, const AnnotationItem &it)
 {
     qreal d = 1e9;
     switch (it.type) {
@@ -178,20 +102,13 @@ qreal AnnotationCanvas::distanceToItem(const QPointF &pos, const AnnotationItem 
     return d;
 }
 
-void AnnotationCanvas::clear()
-{
-    items.clear();
-    m_undoStack.clear();
-    m_redoStack.clear();
-}
-
-void AnnotationCanvas::draw(QPainter &p) const
+void AnnotationPainter::draw(QPainter &p, const QVector<AnnotationItem> &items)
 {
     for (const AnnotationItem &it : items)
         drawOne(p, it);
 }
 
-void AnnotationCanvas::drawOne(QPainter &p, const AnnotationItem &it)
+void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
 {
     p.setPen(QPen(it.color, it.width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     // 注意：不能写 `it.filled ? it.color : Qt::NoBrush` —— 三元运算符会把
@@ -246,3 +163,5 @@ void AnnotationCanvas::drawOne(QPainter &p, const AnnotationItem &it)
         break;
     }
 }
+
+} // namespace snipaste

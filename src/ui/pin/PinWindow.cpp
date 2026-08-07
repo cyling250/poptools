@@ -7,10 +7,12 @@
 
 // ============================================================
 // 贴图窗口（F3 功能）
-// 当前为实现骨架：贴图内容随窗口显示、可拖动、滚轮缩放、
-// 双击关闭。置顶层级由 Qt::WindowStaysOnTopHint 保证。
+// 贴图内容随窗口显示、可拖动、滚轮缩放、双击关闭。
+// 置顶层级由 Qt::WindowStaysOnTopHint 保证。
 // 后续增强：多屏定位、透明度、点击穿透等。
 // ============================================================
+
+namespace snipaste {
 
 PinWindow::PinWindow(QWidget *parent)
     : QWidget(parent)
@@ -36,7 +38,7 @@ void PinWindow::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
     QPainter p(this);
-    // 贴图内容按缩放比例绘制（预留，当前 m_scale 恒为 1）
+    // 贴图内容按缩放比例绘制（当前 m_scale 恒为 1）
     p.drawPixmap(rect(), m_pixmap);
 }
 
@@ -56,7 +58,7 @@ void PinWindow::mouseMoveEvent(QMouseEvent *event)
 
 void PinWindow::wheelEvent(QWheelEvent *event)
 {
-    // 滚轮缩放（预留实现）
+    // 滚轮缩放
     const qreal delta = event->angleDelta().y() / 1200.0;
     m_scale = qBound(0.2, m_scale + delta, 5.0);
     resize(size() * (1.0 + delta));
@@ -68,3 +70,5 @@ void PinWindow::mouseDoubleClickEvent(QMouseEvent *event)
     Q_UNUSED(event)
     close();
 }
+
+} // namespace snipaste

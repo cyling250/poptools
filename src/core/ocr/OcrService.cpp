@@ -1,5 +1,5 @@
 #include "OcrService.h"
-#include "Settings.h"
+#include "core/settings/Settings.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <QCoreApplication>
 #include <QProcessEnvironment>
+
+namespace snipaste {
 
 OcrService::OcrService(QObject *parent)
     : QObject(parent)
@@ -77,3 +79,5 @@ void OcrService::onFinished(int exitCode, QProcess::ExitStatus status)
 
     emit ocrFinished(ok, text, ok ? QString() : err);
 }
+
+} // namespace snipaste

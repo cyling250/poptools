@@ -7,11 +7,16 @@
 #include <QVector>
 #include <QImage>
 
-#include "AnnotationCanvas.h"
+#include "core/annotation/AnnotationCanvas.h"
+#include "core/annotation/AnnotationItem.h"
+#include "core/capture/ScreenCapturer.h"
 
-class ToolBar;
-class QScreen;
+class QScreen;  // Qt 全局类
 class QLineEdit;
+
+namespace snipaste {
+
+class ToolBar; // 前向声明（ToolBar 定义于本命名空间）
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）
@@ -28,7 +33,8 @@ class QLineEdit;
 //                 * Esc 取消退出
 //
 // 标注：AnnotationCanvas 管理标注项（选区局部坐标），
-//       confirm() 时将标注合成到输出 pixmap
+//       confirm() 时将标注合成到输出 pixmap。
+// 屏幕捕获与 DPI 坐标映射由 ScreenCapturer 提供。
 // ============================================================
 class CaptureWindow : public QWidget
 {
@@ -94,18 +100,16 @@ private:
     void cancel();   // 取消截图（Esc）
 
     // 工具栏槽
-    void onToolSelected(AnnotationCanvas::Tool t);
+    void onToolSelected(Tool t);
     void onColorSelected(const QColor &c);
     void onSave();
     void onCopy();
 
-    // ---- DPI：逻辑坐标（窗口/鼠标/选区）↔ 物理坐标（m_screen） ----
-    QPoint toPhysical(const QPoint &logicalGlobal) const;  // 逻辑全局点 → 物理全局点
-    QRect selectionToPhysical() const;                     // 选区（逻辑全局）→ 物理像素矩形
+    // 输出合成：按物理分辨率裁剪选区并等比放大标注（保存/复制/确认共用）
+    QPixmap renderResult() const;
 
-    QPixmap m_screen;          // 虚拟桌面截图（物理分辨率，dpr=1）
-    QRect m_desktop;           // 虚拟桌面几何（逻辑坐标，窗口/鼠标/选区均用）
-    QRect m_physDesktop;       // 虚拟桌面几何（物理像素，m_screen 坐标系）
+    // 本次截屏数据：画面（物理像素）+ 逻辑/物理虚拟桌面几何
+    CaptureResult m_cap;
     State m_state = State::Idle;
     QRect m_selection;         // 当前选区（全局坐标）
 
@@ -144,3 +148,5 @@ private:
     static constexpr int kMinSize = 8;   // 选区最小尺寸（像素）
     static constexpr int kHandle = 5;    // 控制点半边长（像素，共 10px 方块）
 };
+
+} // namespace snipaste

@@ -5,6 +5,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 
+namespace snipaste {
+
 // 翻译服务：本地引擎或大模型 API（OpenAI 兼容接口，用户可配置 base_url/api_key/model）
 class Translator : public QObject
 {
@@ -35,3 +37,5 @@ private:
     QNetworkReply *m_reply = nullptr;
     bool m_busy = false;
 };
+
+} // namespace snipaste

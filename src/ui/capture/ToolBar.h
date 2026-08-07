@@ -5,7 +5,9 @@
 #include <QColor>
 #include <QVector>
 
-#include "AnnotationCanvas.h"
+#include "core/annotation/AnnotationTypes.h"
+
+namespace snipaste {
 
 // ============================================================
 // 标注工具栏（编辑态，贴画布下方靠右显示，两行紧凑布局）
@@ -24,19 +26,19 @@ class ToolBar : public QWidget
 public:
     explicit ToolBar(QWidget *parent = nullptr);
 
-    void setTool(AnnotationCanvas::Tool t);      // 同步外部工具状态（含 None 选择模式）
-    void setColor(const QColor &c);              // 同步外部颜色状态
-    void setWidth(qreal w);                      // 同步线宽
-    void setFilled(bool filled);                 // 同步填充状态
+    void setTool(Tool t);                      // 同步外部工具状态（含 None 选择模式）
+    void setColor(const QColor &c);            // 同步外部颜色状态
+    void setWidth(qreal w);                    // 同步线宽
+    void setFilled(bool filled);               // 同步填充状态
     void setUndoRedoEnabled(bool undo, bool redo);
 
     // 当前选中工具
-    AnnotationCanvas::Tool currentTool() const { return m_tool; }
+    Tool currentTool() const { return m_tool; }
     // 当前颜色
     QColor currentColor() const { return m_currentColor; }
 
 signals:
-    void toolSelected(AnnotationCanvas::Tool t); // None = 选择模式
+    void toolSelected(Tool t);                 // None = 选择模式
     void colorSelected(const QColor &c);
     void widthSelected(qreal w);
     void filledToggled(bool filled);
@@ -61,7 +63,7 @@ private:
     // 按当前工具刷新线宽档位按钮（值 / 图标 / 选中态），并同步线宽
     void applyWidthOptions();
 
-    AnnotationCanvas::Tool m_tool = AnnotationCanvas::Tool::None;
+    Tool m_tool = Tool::None;
     QColor m_currentColor = Qt::red;
     qreal m_width = 2.0;
     int m_widthIndex = 1;      // 线宽档位（0 小 / 1 中 / 2 大），切换工具时保持相对档位
@@ -76,3 +78,5 @@ private:
     QToolButton *m_undoBtn = nullptr;      // 撤销
     QToolButton *m_redoBtn = nullptr;      // 重做
 };
+
+} // namespace snipaste

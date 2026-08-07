@@ -1,5 +1,7 @@
 #include "Settings.h"
 
+namespace snipaste {
+
 Settings::Settings()
     : m_s(QSettings::IniFormat,
           QSettings::UserScope,
@@ -83,3 +85,5 @@ void Settings::setTargetLang(const QString &lang)
 {
     m_s.setValue("translate/targetLang", lang);
 }
+
+} // namespace snipaste
