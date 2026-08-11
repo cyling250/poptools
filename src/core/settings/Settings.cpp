@@ -25,17 +25,6 @@ void Settings::setCaptureHotKeyVk(quint32 vk)
     m_s.setValue("hotkey/captureVk", vk);
 }
 
-QString Settings::tesseractPath() const
-{
-    return m_s.value("ocr/tesseractPath",
-                     "C:/Program Files/Tesseract-OCR/tesseract.exe").toString();
-}
-
-void Settings::setTesseractPath(const QString &path)
-{
-    m_s.setValue("ocr/tesseractPath", path);
-}
-
 QString Settings::translateMode() const
 {
     return m_s.value("translate/mode", "api").toString(); // api | local

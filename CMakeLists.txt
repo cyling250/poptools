@@ -38,12 +38,14 @@ target_link_libraries(MySnipaste PRIVATE
     snipaste_ui
 )
 
-# 安装规则（可选）
-install(TARGETS MySnipaste RUNTIME DESTINATION .)
-
-# 拷贝 Tesseract 中文语言包到构建输出目录（exe 旁 tessdata\）
+# 内置 OCR 引擎：构建后把 tools/tesseract 复制到可执行文件旁（开发/安装同布局）
+# 运行时 OcrService 优先从 {exeDir}/tesseract/tesseract.exe 加载
 add_custom_command(TARGET MySnipaste POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/src/resources/tessdata
-        $<TARGET_FILE_DIR:MySnipaste>/tessdata
+        "${CMAKE_SOURCE_DIR}/tools/tesseract"
+        "$<TARGET_FILE_DIR:MySnipaste>/tesseract"
+    COMMENT "Copying bundled tesseract engine"
 )
+
+# 安装规则（可选）
+install(TARGETS MySnipaste RUNTIME DESTINATION .)

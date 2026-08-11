@@ -94,3 +94,100 @@
 - **现象（误报）**：`addItem` 被指"先 push_back(items) 快照再添加新项，顺序颠倒，撤销后应保留新项"
 - **验证**：① 静态分析：`addItem` 顺序为 `m_undoStack.push_back(items)`（保存不含新项快照）→ `items.push_back(item)`，语义正确；用户提供的"修复建议"代码与现有一致，无实际差异 ② 运行时测试（链接 snipaste_core，`scripts/undo_test/test_undo.cpp`）：add A+B → undo 回到 [A]（新项被移除）→ 二次 undo 空 → redo 恢复 [A]，PASS
 - **结论**：无需修复。误报排查成本较高，特此记录避免重复验证
+
+## 16. 鼠标悬停工具栏仍显示十字光标（应为箭头）
+- **现象**：进入编辑态后，鼠标移动到标注工具栏上光标仍是十字（或选区尺寸/移动光标），不是正常箭头
+- **根因**：`ToolBar` 是 `CaptureWindow`（全屏窗口）的子 widget，构造时未设置自身光标。Qt 光标解析规则：鼠标悬停于某 widget 时，沿其祖先链向上找**第一个显式设置光标（WA_SetCursor）**的 widget —— 找到了父窗口的 `CrossCursor`；且 `CaptureWindow::mouseMoveEvent` 在编辑态未按下时持续 `setCursor(...)` 覆盖整窗，工具栏因无自身光标一并继承
+- **解决**：`ToolBar` 构造函数开头 `setCursor(Qt::ArrowCursor)`，工具栏自身携带 WA_SetCursor，悬停其上 Qt 即用箭头光标，不受父窗口光标影响
+- **教训**：子 widget 若与父窗口光标需求不同，必须在子控件上显式 `setCursor`；依赖"继承父光标"在 QWidget 上是沿祖先链找显式设置项，父窗口频繁 setCursor 会波及所有未设置光标的子控件
+
+## 17. 标注控制点编辑增强：镜像缩放 + 线段端点控制（含 OOP 重构）
+- **现象/需求**：
+  - 矩形/椭圆在选择模式下拖动边控制点，超过对侧起始边后被 clamp 住无法继续拖动（`resizeRectF` 用 `qMin(pos, right-minSize)` 硬限制），期望 Visio 式"拖过对侧 → 镜像翻转"
+  - 直线/箭头选中态被 8 个控制点的外接矩形包围，期望只显示起点/终点两个控制点，可自由拖动改变长度与指向
+  - 工具交互集中在一个巨型 switch（startDraw/continueDraw/finishDraw），期望面向对象 + 设计模式化
+- **解决**：
+  1. `AnnotationPainter` 新增 `Handle` 枚举（TL..L 8 角/边中点 + **P0/P1 线段端点**）与 `handlesFor()` / `handlePos()` / `resizedItem()`：
+     - 矩形类 8 控制点镜像缩放：`resizeAxis()` 按"被拖动边跟随鼠标 + 越过对侧起始边（anchor±minSize）即翻转（left/right 互换）"处理，每轴独立判定 xFlip/yFlip
+     - `scaledItem()` 增加 xFlip/yFlip 参数，翻转轴按"新边界反方向映射"折线点，产生镜像
+     - 线段类 P0/P1 直接改端点
+  2. `CaptureWindow` 选择模式改用统一控制点接口：选中态绘制/命中/光标均按 `handlesFor` 类型化（线段类不画外接框，仅两个端点方块）
+  3. 工具体系 OOP 化（策略模式 + 简单工厂）：新增 `ui/capture/tools/` —— `ToolBase` 抽象基类（onPress/onDrag/onRelease/paintDraft）+ `ShapeTool`(Rect/Ellipse) + `SegmentTool`(Line/Arrow) + `FreehandTool`(Pencil/Doodle) + `MosaicTool` + `TextTool` + `EraserTool` + `ToolFactory::create(Tool, ToolContext*)`；工具通过 `ToolContext`（画板/屏幕/工具栏 + 回调）与窗口解耦，替换原 switch 分发
+  4. `ToolBar` 单例化（`ToolBar::create(parent)` / `ToolBar::instance()`）
+- **验证**：核心逻辑单元测试（`scripts/tool_test/test_tools.cpp` 链接 snipaste_core）：拖 L 越过右边界 left=110→right=150（翻转）、未越界保持锚定、TL 双轴翻转、折线镜像点映射（原最左→新最右）、线段 P0/P1 端点编辑、handlesFor 类型化 → ALL TOOL TESTS PASSED
+- **教训**：① 缩放的"镜像翻转"必须基于**起始矩形快照 + 固定拖动边方向**判定，不能基于当前矩形逐帧 clamp（否则翻转后无法继续拖）；② 控制点体系应按标注类型抽象（handlesFor/handlePos），窗口交互与标注类型解耦；③ 翻转后内部点映射要沿翻转轴反向，不能只缩放 newBounds
+
+## 18. Tesseract 打包方案：仓库内置裁剪版资源，构建/安装时直接复制
+- **需求**：OCR 依赖 tesseract.exe，希望在开发中直接可用且随安装包一起发放；但 tesseract 依赖链巨大（UB-Mannheim 构建 libtesseract-5.dll≈97MB + libicu≈35MB 等，全量 ~200MB）
+- **方案演变**（三次迭代，最终由用户拍板"直接下载好当资源"）：
+  1. ~~随安装包分发~~：体积太大不划算
+  2. ~~安装期联网安装到 `{exeDir}/tesseract/`~~：安装程序未实现，搁置；且 NSIS `/S /D=` 静默安装到指定目录**不可靠**
+  3. **仓库内置资源（最终）**：tesseract 官方安装包解包后，将 `tesseract.exe` + 全部依赖 DLL + `tessdata\`（中英文语言包）放入 `tools/tesseract/`，CMake POST_BUILD `copy_directory` 复制到 `$<TARGET_FILE_DIR>/tesseract`，开发/安装同布局
+- **实施细节**：
+  - 解包：7-Zip 可直接打开 NSIS 安装包（`7z x tesseract-setup.exe`）；UB-Mannheim v5.4.0.20240606
+  - 语言包：fast 版 `chi_sim`(2.35MB) + `eng`(3.92MB) 足够（`-l chi_sim+eng --psm 6`），无需 osd/pdf 输出
+  - 依赖：**全量复制解包目录 DLL（51 个）** 最稳妥——此前 `prepare_tesseract.py` 的 PE 导入表裁剪解析失败（0 个 DLL），放弃裁剪路线
+  - 运行时：`OcrService` 固定从 `{exeDir}/tesseract/tesseract.exe` 加载（不允许用户改路径，`Settings::tesseractPath()` 已移除）；`TESSDATA_PREFIX` 优先 `{exeDir}/tesseract/tessdata`
+  - 验证：`tesseract.exe --version` 正常加载全部依赖；真实 OCR 冒烟测试 `Hello 你好世界 2026` 一字不差；构建后 `build\Release\tesseract\` 完整就位
+- **清理**：卸载 Program Files 误装、删除临时解包目录（`_pkg`/`_t7z`）；CMake 复制规则按需启用
+- **教训**：① NSIS `/S /D=` 静默安装到指定目录**不可靠**，7-Zip 解包 NSIS 安装包是便携方案；② 引入体积大的第三方二进制先评估"随包分发 vs 安装期联网 vs 内置资源"三条路线，内置资源对个人项目最简单可靠；③ 纯 Python 解析 PE 导入表做依赖裁剪容易踩坑（RVA→offset 映射、section 对齐），失败时全量复制 DLL 是可靠回退
+
+## 19. 【文】点击报错 "Can not read input file" + 识别结果永远为空（两个叠加 bug）
+- **现象**：编辑态点工具栏【文】按钮，弹出 tesseract 报错 `Can not read input file xxx`；修复该问题后又出现"识别永远为空/退出码 0"
+- **Bug A：QTemporaryDir 生命周期** —— `OcrService::start()` 中 `QTemporaryDir dir;` 是**局部变量**，start() 返回即被析构删除目录；QProcess 是异步的，tesseract 实际读取 input.png 时文件已被删除 → `Can not read input file`。同时中间文件落在系统临时目录，不符合"放软件目录 + 用完清理"
+- **Bug B：TSV 行尾 CRLF** —— tesseract TSV 在 Windows 输出行尾为 `\r\n`，`split('\n')` 后 header 末列 `text` 变成 `text\r`，`header.indexOf("text")` 返回 **-1** → 解析函数直接返回空 → `ok=false` 且 stderr 为空 → 报"退出码 0"。该 bug 一直潜伏，此前被 Bug A（文件先没了）掩盖，修复 A 后才暴露
+- **解决**：
+  - Bug A：废除局部 QTemporaryDir，改为成员 `m_workDir`（`{exeDir}/ocr_tmp/<uuid>`）保存路径，识别结束后（onFinished 两分支 / errorOccurred）经 `cleanupWorkDir()` 递归删除，并顺手 rmdir 空壳父目录 ocr_tmp
+  - Bug B：解析前 `QString::fromUtf8(raw).remove('\r').split('\n')`
+- **验证**：集成冒烟测试 `scripts/ocr_test/test_ocr.cpp`（链接 snipaste_core，输出到 build/Release 复用 tesseract）：`OCR_OK boxes=1 text="Hello你好世界2026"`（连成一段一个框）+ `WORK_DIR_CLEAN_OK`（exe 旁无 ocr_tmp 残留）→ 全 PASS
+- **教训**：① 异步 QProcess + 临时目录，目录/文件生命周期必须跨异步调用存活（成员变量或 RAII 延长到 finished）；② 解析文本协议（TSV/CSV）在 Windows 必须先处理 CRLF，用 `split('\n')` + 精确 `indexOf` 匹配列名极易踩坑；③ 表面 bug 修复后可能暴露被掩盖的下一层 bug，冒烟测试要在真实环境（含输出编码/行尾差异）回归
+
+## 20. OCR 覆盖文字字号与原文字匹配（QFontMetricsF 实测逼近）
+- **需求**：【文】识别的文本框覆盖原图时，覆盖字体大小应与原始文字大小相当
+- **问题**：原实现 `pixelSize = 0.8 × 行框高度` 是纯经验系数，不同字体/行高（含 leading）下偏差大，无法保证"差不多"
+- **解决**：`CaptureWindow::onOcrBoxes` 改用实测迭代：
+  1. 粗估 `pixelSize ≈ 0.8 × local.height()`，用 `QFontMetricsF(f).height()` 实测
+  2. 比例修正一次：`pixelSize *= 目标高度 / 实测高度`（字体高度与 pixelSize 近似线性，一次即入 ±2px）
+  3. 精调循环（上限 20 次）：实测高度 > 目标则减 1px，比目标小 1px 以上则加 1px，落在 `[目标-1, 目标]` 区间——覆盖文字既不明显大于也不明显小于原字
+- **验证**：Release 构建通过；效果需实机 F1 → 框选 → 点【文】观察覆盖文字与背景原字的大小对比
+- **关联**：`AnnotationPainter::scaledItem` 缩放 Text 时用 `pointSizeF`（若字号是 pixelSize 设置，pointSizeF() 为 -1，缩放会退回 4pt）——像素字号体系与点字号缩放混用的已知隐患，未在本轮处理
+
+## 21. 文字工具输入框改造：QLineEdit → 多行 QTextEdit（透明底虚线框 + 内容自适应 + 点击框外结束）
+- **需求**：① 文本框始终 长=最长行宽、高=总行高；② 输入中无白底、透明 + 虚线标注输入区域（初始给初始长宽，输入后贴合内容）；③ 多行文本框，回车/Shift+回车均换行，输入结束方式为点击框外而非回车
+- **实现**（`CaptureWindow`）：
+  - `m_textEdit` 由 `QLineEdit` 改为 `QTextEdit`：`NoWrap`（宽=最长行）+ 双滚动条 AlwaysOff + `setDocumentMargin(0)`（document size 即文本自然尺寸）；`textChanged` → `adjustTextEditSize()`
+  - `adjustTextEditSize()`：`document()->size()` 取内容尺寸，`w=qMax(240, ceil(w)+6)`、`h=qMax(行高, ceil(h)+4)`——空文档时为初始长宽（240×单行高），一旦输入即贴合内容
+  - 样式：`background: transparent; border: 1px dashed #0078ff; color=<标注色>`（去掉原白色底）
+  - `commitTextEdit()`：尺寸改用 `document()->size()`（多行：宽=最长行，高=总行高），提交前先记录 content 与 font（clear 后 document 已空）
+  - 结束方式：移除 `returnPressed` 连接；回车/Shift+回车由 QTextEdit 原生换行；点击框外经 `mousePressEvent` 的 `if(m_textEditing) commitTextEdit()` 提交（工具栏 undo/redo/取色/线宽/填充 各信号入口也补了提交，防状态悬挂）
+  - 顺序陷阱：`beginTextEdit` 必须**先 setFont 再 setPlainText**，否则文档字符格式沿用旧默认字体
+- **验证**：Release 构建通过；需实机：T → 点击输入 → 观察虚线框自适应与多行回车 → 点击框外保存
+- **教训**：QTextEdit 尺寸自适应应以 `document()->size()`（无 wrap + margin 0）为准，它由与 QPainter::drawText 相同的 QTextLayout 引擎计算，与最终标注矩形天然一致
+
+## 22. 文字多字号（字号栏）：AnnotationItem 富文本化 + 工具栏字号栏（pt）+ 字号实时联动
+- **需求**：① 文本框不许调整长宽，长宽由内容自动计算（输入第一个字后实时跟随）；② 第二行工具栏新增文字大小栏（pt，多选下拉+手动输入，合法性验证）；③ 字号栏永远体现"当前所选中或所编辑文本的大小"：选中多个不同大小文字→不显示；统一大小→显示该值；修改提交后立即作用于选中文字；无选中→显示"接下来输入文字的字号"
+- **数据层**：`AnnotationItem` 新增 `QString html`（富文本，多字号）；`text` 保留纯文本、`font` 保留默认字体（兼容旧数据/OCR 项，html 为空走纯文本路径）
+- **渲染层**（`AnnotationPainter::drawOne` Text 分支）：
+  - html 非空 → `QTextDocument`：`setDefaultFont(it.font)` + `setHtml` + `setDocumentMargin(0)` + `setTextWidth(-1)`（不换行，与输入框 NoWrap 所见一致）+ `documentLayout()->draw`（palette Text = it.color 兜底）
+  - `handlesFor(Text)` 返回**空** → 文字标注不再显示 8 个缩放控制点（长宽由内容决定，不可手动调整；拖动框内仍可整体移动）
+- **工具栏**（`ToolBar`）：
+  - 第二行"字号"标签 + `QComboBox`（`setEditable(true)` + `NoInsert`，预设 8/9/10/12/14/16/18/24/36/48，`QDoubleValidator(1.0~500.0, 1 位小数)`）
+  - 提交入口：`activated`（下拉选）+ `lineEdit()->returnPressed` + `lineEdit()->editingFinished`；非法输入不发射信号并把显示回退为当前有效值；`syncFontSizeDisplay()` 用 `m_updatingFontSize` 保护，程序性刷新不触发提交
+- **交互层**（`CaptureWindow`）：
+  - `updateFontSizeDisplay()`：输入态有选区→扫描选区片段字号（交集判定，多字号 `clearFontSize`/统一 `setFontSize`）；无选区→显示光标处当前格式（`currentCharFormat()`，即后续输入字号）；选中文字标注→扫描整条 html；其余→`m_defaultFontSize`
+  - `onFontSizeSelected(pt)` 三态：输入态→`m_textEdit->setFontPointSize(pt)`（有选区立即改选中文字，无选区设后续输入字号）+ `adjustTextEditSize()`；选中文字标注→`applyFontSizeToItem`（QTextDocument 全选 mergeCharFormat → 重算框尺寸）+ 压撤销栈；无选中→仅更新 `m_defaultFontSize`
+  - `commitTextEdit`：提交前记录 `toHtml()`（clear 后文档已空）；新建/重编辑均存 html，font 取 `document()->defaultFont()`
+  - `adjustTextEditSize`：空框保持 240×单行高，输入后宽=最长行、高=总行高（去掉原 `qMax(240, …)` 下限，输入首个字后即贴合内容）
+  - `beginTextEdit`：新建默认字号 = `m_defaultFontSize`；重编辑还原 html；**OCR 像素字号（px）换算为 pt（×72/96）** 后再进富文本
+- **验证**（`scripts/qt_font_test` 实测 + 构建 + 核心单测 tool_test 无回归）：
+  - `setTextWidth(-1)` = 默认 = 不换行（自然尺寸）；`setTextWidth(50)` 才换行
+  - QTextEdit 样式表 `color` **不嵌入** `toHtml()`（body 无颜色）→ 富文本渲染可用 palette Text 兜底标注色
+  - pt 字号 `toHtml/setHtml` 精确往返；`font-size:20px` → `pixelSize=20`；pt→px 固定 96 DPI
+- **坑**：① `QComboBox` 无 `editingFinished` 信号，须用 `lineEdit()->editingFinished()`；② 像素字号字体 `pointSizeF()` 为 -1，读取/回写前必须换算 pt；③ 富文本片段若无显式字号（继承文档默认）`fontPointSize()` 为 0，显示逻辑需回退到文档默认字体
+- **Bug（修复）**：输入态无选区时改字号不生效于下一个文本框——`onFontSizeSelected` 输入态分支只 `setFontPointSize(pt)`（改 text edit 当前格式），未同步 `m_defaultFontSize`；而 `beginTextEdit` 新建文本框用 `m_defaultFontSize`，导致"文字工具→输入12→未退出直接改14→再次点击屏幕仍输入12"。修复：输入态**无选区**时同步 `m_defaultFontSize = pt`（有选区只改选中文字，不动默认字号）
+- **Bug（修复）**：文字重编辑时原标注与编辑框双重显示——选择模式双击文字进入编辑后，`paintEvent` 仍绘制原标注项（绿色选中虚线框 + 文字），与蓝色编辑框（含相同文字）同位置重叠。修复：`paintEvent` 编辑态分支，当 `m_textEditing && m_textEditItem>=0` 时从 `m_canvas.items` 复制后 `removeAt(m_textEditItem)` 再绘制；同时跳过该选中项的绿色选中框绘制（`!(m_textEditing && m_textEditItem == m_selectedItem)`）。`renderResult` 无需处理（保存/复制/确认入口均已先 commitTextEdit）
+- **Bug（修复）**：文字颜色的应用方式与字号不一致 + 改字号/颜色后无法继续输入——① `onColorSelected` 输入态会 `commitTextEdit()` 退出编辑（取色即结束输入），与字号（输入态只改格式不提交）不一致；② 输入态点字号/色块后焦点留在工具栏控件上，用户直接打字会输进 combo 而不是编辑框，误以为"编辑框退出"。修复：
+  - 颜色与字号语义统一——`onColorSelected` 输入态**不提交**：`m_textEdit->setTextColor(c)`（有选区→立即改选中文字颜色；无选区→设为后续输入文字颜色）+ 同步 `m_canvas.color`
+  - 改字号/颜色后 `m_textEdit->setFocus()` 把焦点还给编辑框，用户可立即继续输入
+  - 新增 `m_textEditStartColor`（输入开始色）：样式表默认色与提交后渲染兜底色 `it.color` 均用开始色——输入期间改色不影响已输入文字（无显式色片段渲染用开始色）；显式色（setTextColor/选区改色）嵌入 html 精确还原。编辑中显示与提交后渲染完全一致
+- **经验**：QTextEdit 样式表 `color` 是"默认色"，不嵌入 toHtml；`setTextColor`/mergeCharFormat 设置的**显式前景色**才嵌入 html → 天然支持"每段文字各自颜色"：开始色走 it.color 兜底、后续改色走显式色嵌入，无需额外规范化

@@ -13,6 +13,16 @@ add_library(snipaste_ui STATIC
     capture/CaptureWindow.h
     capture/ToolBar.cpp
     capture/ToolBar.h
+    capture/tools/ToolBase.h
+    capture/tools/ShapeTool.h
+    capture/tools/SegmentTool.h
+    capture/tools/BrushTool.h
+    capture/tools/PencilTool.h
+    capture/tools/DoodleTool.h
+    capture/tools/MosaicTool.h
+    capture/tools/TextTool.h
+    capture/tools/EraserTool.h
+    capture/tools/ToolFactory.h
     pin/PinWindow.cpp
     pin/PinWindow.h
     result/ResultDialog.cpp

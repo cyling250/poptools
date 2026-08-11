@@ -23,8 +23,9 @@ struct AnnotationItem
     bool filled = false;      // 矩形/椭圆是否填充
     QRectF rect;              // Rect/Ellipse/Text/Mosaic 的外接矩形（局部坐标）
     QPolygonF points;         // Line/Arrow/Polyline/Freehand/Doodle 顶点（局部坐标）
-    QString text;             // Text 内容
-    QFont font;               // Text 字体
+    QString text;             // Text 内容（纯文本）
+    QFont font;               // Text 默认字体（family / bold / 默认字号）
+    QString html;             // Text 富文本内容（含多字号片段；空 = 纯文本渲染，兼容旧数据）
     QImage mosaicImage;       // Mosaic 的马赛克图像（局部坐标区域）
 };
 

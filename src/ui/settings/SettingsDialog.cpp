@@ -14,10 +14,6 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     setWindowTitle("MySnipaste 设置");
     auto *form = new QFormLayout(this);
 
-    // Tesseract 路径
-    m_tessEdit = new QLineEdit(Settings::instance().tesseractPath(), this);
-    form->addRow("Tesseract 路径:", m_tessEdit);
-
     // 翻译模式
     m_modeCombo = new QComboBox(this);
     m_modeCombo->addItem("大模型 API", "api");
@@ -46,7 +42,6 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     // 点击 OK 时保存设置
     connect(this, &QDialog::accepted, this, [this] {
         Settings &s = Settings::instance();
-        s.setTesseractPath(m_tessEdit->text().trimmed());
         s.setTranslateMode(m_modeCombo->currentData().toString());
         s.setApiBaseUrl(m_urlEdit->text().trimmed());
         s.setApiKey(m_keyEdit->text().trimmed());

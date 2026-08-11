@@ -15,10 +15,6 @@ public:
     quint32 captureHotKeyVk() const;
     void setCaptureHotKeyVk(quint32 vk);
 
-    // Tesseract 可执行文件路径（如 C:/Program Files/Tesseract-OCR/tesseract.exe）
-    QString tesseractPath() const;
-    void setTesseractPath(const QString &path);
-
     // 翻译模式: "api" 或 "local"
     QString translateMode() const;
     void setTranslateMode(const QString &mode);
