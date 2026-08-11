@@ -222,3 +222,32 @@
 - **Bug（修复）**：贴图多实例 + 位置规则 + 缩放步进——① 原来单个 PinWindow 实例重复 F3 覆盖前一张；改为每次 F3 `new PinWindow()`（`WA_DeleteOnClose`，右键清除/销毁/双击 → `close()` 自动销毁），多张贴图并存互不影响 ② 位置规则：截图模式 F3 → `copyToClipboardAndClose()` 返回**本次选区位置**（截图所在位置即张贴区域）；非截图模式 → 最近确认截图位置；两者皆无 → **鼠标当前位置**（`QCursor::pos()`）作为贴图左上角 ③ 缩放跨度：原 `angleDelta()/120` 每滚一格 m_scale ±1.0（1x→2x 翻倍），改为 `×0.1` 每格 ±0.1，0.2x~5x，以左上角为锚点（resize 保持 topLeft）
 - **Bug（修复）**：贴图阴影改为**内容下边与左边外侧手绘渐变**（光从右上照射的投影感）——弃用 QGraphicsDropShadowEffect（效果不可控/不明显），`paintEvent` 用 `QLinearGradient` 在内容左侧（宽 kShadow=14）与下侧（高 kShadow）画渐变（贴近内容最深 alpha130 → 外缘透明）；内容左上角固定于窗口内 `(kShadow, 0)`，窗口 `move(globalTopLeft - QPoint(kShadow, 0))` 保证**内容左上角 = 传入位置**；窗口尺寸 = 内容 + kShadow 边距（右/上无阴影，透出桌面）
 - **坑（pin_test 复现）**：`WA_DeleteOnClose` 的 widget 若在**栈上**创建，QApplication 析构会自动删除顶层窗口 → **double delete 堆损坏（0xC0000374）**；测试程序必须堆上 `new`。曾误判为阴影绘制问题，二分（注释阴影仍崩）后锁定根因
+
+## 25. OCR 文字栏（面板模式）+ 翻译功能
+- **需求**：工具栏新增开关控制 OCR 文字去向——画板（文本框覆盖）或文字栏（额外面板）；文字栏上半=OCR 文字、下半=翻译、中间=翻译选项（源→目标语言）+ 翻译按钮；文字栏宽度≥10 字符、优先放选区外部放不下则选区内；文字栏隐藏则不能翻译；默认不翻译需手动点按钮
+- **实现**：
+  - `ToolBar`：第二行新增"面板"开关（`panelModeToggled` 信号 + `isPanelMode()`）
+  - 新 `ui/capture/OcrPanel`：卡片式面板——上半 QTextEdit（OCR 文字）、中间行（源语言"自动" + 目标语言可编辑下拉，预设中/英/日/韩/法/德/西/俄，默认取 Settings targetLang）+ 翻译按钮、下半 QTextEdit（翻译结果）；`translateRequested(text, toLang)` 需手动点击
+  - `Translator::translate` 增加可选 `targetLang` 参数（空则用设置）
+  - `OcrController::onBoxes` 分流：面板模式把 boxes 按 y/x 排序合并为行文本 → `ctx->showOcrPanel(text)`（不覆盖画布）；画板模式维持原行为
+  - `CaptureWindow`：持有 `OcrPanel` + `Translator`（内部翻译）；`positionOcrPanel` 宽度≥10 字符、位置优先选区右侧→上方（外部），放不下则选区内（内部兜底）+ 最终夹紧窗口内；开关切回画板模式隐藏面板；`exitCapture` 隐藏
+- **验证**：Release 构建通过；烟雾测试（F1 截图模式构造面板）不崩；OCR 面板交互需实机（F1 → 框选 → 勾选"面板" → 点【文】）
+- **Bug（修复）**：文字栏面板随选区移动 + 面板箭头光标——① `m_ctx.selectionChanged` 回调在 `positionToolbar()` 后加 `if (m_ocrPanel->isVisible()) positionOcrPanel()`（面板可见时随选区移动，与工具栏一致）② `OcrPanel` 构造函数 `setCursor(Qt::ArrowCursor)`（同 DEBUG #16：子 widget 需显式设置光标，否则沿祖先链继承父窗口十字光标；面板内只读文本框/按钮保留各自光标）
+- **Bug（修复）**：选区整体移动撞到屏幕边缘时自动变小——`SelectionController::dragActive` 移动分支用 `r.intersected(m_cap.desktop)` 把选区**裁剪**到桌面内（缩小尺寸）。改为**只夹紧左上角位置**到桌面内（`qBound` 限制 topLeft，大小不变）：撞到边缘时选区顶住不动，鼠标继续移动不改变选区。缩放分支（控制点）保持 intersected 裁剪（缩放超出桌面被限制属合理行为）
+
+## 26. 智能框选（窗口矩形预先高亮 + 点击即选）
+- **需求**：截图框选前自动检测鼠标下方的窗口矩形并【预先高亮】（同时只高亮一个、无则不强选）；鼠标点击即自动框选该区域——方便一键选取某个窗口的全部
+- **实现**：
+  - 新 `core/capture/WindowDetector`：`detectWindowRect(logicalPos, excludeHwnd, dpr)`——Win32 `EnumWindows` 遍历可见顶层窗口，排除截图画布自身（`winId()`）与系统窗口（Progman/WorkerW/Shell_TrayWnd 等），`GetWindowRect` 取包含鼠标点的**最小面积**窗口，物理像素 ÷ dpr 转逻辑坐标
+  - `CaptureWindow` Selecting 态鼠标未按下时经 `QElapsedTimer` 节流（40ms）检测 `m_smartRect`；paintEvent 橙色 2px 虚线高亮（区别于框选蓝虚线）；点击时若 `m_smartRect` 有效 → `m_selection = m_smartRect` 直接进入编辑态（否则走普通框选）
+  - 生命周期：`startCapture`/`enterEditingState`/`exitCapture` 复位 `m_smartRect`
+- **坑**：`QRectF / qreal` 无该运算符（会误匹配 QMargins 的 `operator/`），物理→逻辑换算需手动逐分量除法
+- **验证**：Release 构建通过；烟雾测试（F1 → 移动鼠标触发枚举）不崩；高亮/点击效果需实机（F1 → 鼠标划过窗口看橙色虚线 → 点击即选中整窗）
+- **Bug（修复）**：智能框选区域不准确 → 升级为 **MSAA 控件级检测**（Snipaste 官方同款方案）——`detectUiElementRect`：先用 `EnumWindows` 定位鼠标下的应用窗口（排除截图窗口），再对该窗口客户区 `AccessibleObjectFromWindow(OBJID_CLIENT)` + `accHitTest` 取鼠标下 **UI 元素**（按钮/输入框/面板）精确矩形，过滤 <20px 碎块后回退窗口级；`detectWindowRect` 降级为回退。需 `OleInitialize`（COM）初始化 + 链接 `oleacc`；MSAA 对 Chrome/Firefox/Electron 等自绘应用深度有限（与 Snipaste 官方 issue #3535 同局限），此时 accHitTest 返回窗口自身 = 等效窗口检测
+- **Bug（修复，MSAA 不生效：高亮始终停在窗口级）**：MSAA 逻辑写入了但 `detectUiElementRect` 一直返回空 → 回退窗口级 → 高亮随鼠标只在窗口间切换（按钮/输入框/面板不切换）：
+  - **根因**：`accHitTest` 命中子元素时返回 `child.vt == VT_DISPATCH`（vt=9），而代码**直接**把该 VARIANT 传给 `acc->accLocation` → 返回 `E_INVALIDARG (0x80070057)`，坐标全 0 → 误判"无元素"返回空
+  - **正解（MSAA 规范）**：VT_DISPATCH 命中子元素时，须 `child.pdispVal->QueryInterface(IID_IAccessible)` 提升为**独立 IAccessible**，再以 `CHILDID_SELF`（lVal=0）调其 `accLocation`；VT_I4 数值 childID（>0）可直接用原 acc + lVal；`lVal == CHILDID_SELF` 表示命中窗口自身空白 → 无控件可高亮，返回空走窗口级回退
+  - **验证**：`scripts/detect_test`（独立工程：目标窗口 + 原生按钮 + 全屏遮挡模拟截图窗口）——插桩确认 AOFW/accHitTest 均 S_OK、vt=9；QI 提升后 accLocation 返回 `(158,181) 200x40`（=按钮，DETECT_UI_OK），修复前直接传 child 得 E_INVALIDARG (0,0) 0x0
+  - **连带修复**：`detectWindowRect` 未乘 dpr（`pt={logicalPos.x(), logicalPos.y()}`，高 DPI 屏幕窗口级回退检测点偏移）→ 与 `detectUiElementRect` 一致改为 `qRound(x*dpr)`
+- **教训**：MSAA 的 `accHitTest` 返回 VT_DISPATCH 时必须 QI 提升后再取属性（accLocation/accName 等），直接拿子 VARIANT 调父对象方法会 E_INVALIDARG；调试此类问题用独立小工程插桩打印每步 HRESULT/vt，快速锁定失败环节
+- **临时禁用（2026-08-11）**：智能区域检测算法在真实使用中仍存在问题（高亮/点选区域不准确），用户决定暂时禁用——`startCapture` 中注释 `m_smartDetectTimer.start()`，`m_smartRect` 恒为空，预高亮与点选逻辑自动失效，恢复普通拖动框选；取色卡片不受影响。恢复时取消注释即可（检测逻辑代码全部保留）

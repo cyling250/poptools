@@ -27,16 +27,6 @@ void Settings::setCaptureHotKeyVk(quint32 vk)
     m_s.setValue("hotkey/captureVk", vk);
 }
 
-QString Settings::translateMode() const
-{
-    return m_s.value("translate/mode", "api").toString(); // api | local
-}
-
-void Settings::setTranslateMode(const QString &mode)
-{
-    m_s.setValue("translate/mode", mode);
-}
-
 QString Settings::apiBaseUrl() const
 {
     return m_s.value("translate/apiBaseUrl", "https://api.deepseek.com/v1").toString();
@@ -65,16 +55,6 @@ QString Settings::apiModel() const
 void Settings::setApiModel(const QString &model)
 {
     m_s.setValue("translate/apiModel", model);
-}
-
-QString Settings::targetLang() const
-{
-    return m_s.value("translate/targetLang", "zh").toString();
-}
-
-void Settings::setTargetLang(const QString &lang)
-{
-    m_s.setValue("translate/targetLang", lang);
 }
 
 QString Settings::pinSaveDir() const

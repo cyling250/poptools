@@ -9,43 +9,55 @@
 
 namespace snipaste {
 
+namespace {
+
+// 语言代码 → 提示词中的自然语言名称（模型更易理解）
+QString langName(const QString &code)
+{
+    if (code == "zh") return "Chinese";
+    if (code == "en") return "English";
+    if (code == "ja") return "Japanese";
+    if (code == "ko") return "Korean";
+    if (code == "fr") return "French";
+    if (code == "de") return "German";
+    if (code == "es") return "Spanish";
+    if (code == "ru") return "Russian";
+    if (code == "auto") return "the source language (detect it from the text)";
+    return code; // 用户自定义（如 "pt"）
+}
+
+// 专业翻译提示词：告知文本由 OCR 从截图提取（可能有错字/标点缺失/夹杂 UI 文案），
+// 要求按实际语境翻译且只输出翻译结果，不附带任何其他内容。
+QString buildPrompt(const QString &text, const QString &fromLang, const QString &toLang)
+{
+    return QStringLiteral(
+               "You are a professional translation engine. The text below was extracted from a "
+               "screenshot via OCR, so it may contain typos, missing or incorrect punctuation, or "
+               "stray content such as UI labels, numbers, or code. Translate the text from %1 to %2 "
+               "according to its actual context and meaning. Output ONLY the translated text — no "
+               "explanations, no notes, no extra content.\n\n%3")
+        .arg(langName(fromLang), langName(toLang), text);
+}
+
+} // namespace
+
 Translator::Translator(QObject *parent)
     : QObject(parent)
 {
 }
 
-void Translator::translate(const QString &text)
+void Translator::translate(const QString &text, const QString &fromLang, const QString &toLang)
 {
     if (m_busy || text.trimmed().isEmpty())
         return;
-
-    m_busy = true;
-    if (Settings::instance().translateMode() == "local") {
-        QString out;
-        if (translateLocal(text, out))
-            emit translateFinished(true, out, QString());
-        else
-            emit translateFinished(false, QString(), "本地翻译引擎未配置");
-        m_busy = false;
-        return;
-    }
-    translateByApi(text);
+    translateByApi(text, fromLang, toLang);
 }
 
-// 本地引擎：预留接口（例如后续接入词典型/本地模型）
-bool Translator::translateLocal(const QString &text, QString &out)
-{
-    Q_UNUSED(text)
-    Q_UNUSED(out)
-    return false;
-}
-
-void Translator::translateByApi(const QString &text)
+void Translator::translateByApi(const QString &text, const QString &fromLang, const QString &toLang)
 {
     const QString baseUrl = Settings::instance().apiBaseUrl();
     const QString apiKey  = Settings::instance().apiKey();
     const QString model   = Settings::instance().apiModel();
-    const QString target  = Settings::instance().targetLang();
 
     if (baseUrl.isEmpty() || apiKey.isEmpty()) {
         m_busy = false;
@@ -58,20 +70,18 @@ void Translator::translateByApi(const QString &text)
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     req.setRawHeader("Authorization", ("Bearer " + apiKey).toUtf8());
 
+    // 单问答形式（messages 只有 system + user 两条，无历史上下文）
     QJsonObject msg1{
         {"role", "system"},
-        {"content", QString("You are a translation engine. Translate the user's text into %1. Output only the translation, no explanations.").arg(target)},
-    };
-    QJsonObject msg2{
-        {"role", "user"},
-        {"content", text},
+        {"content", buildPrompt(text, fromLang, toLang)},
     };
     QJsonObject body{
         {"model", model},
-        {"messages", QJsonArray{msg1, msg2}},
+        {"messages", QJsonArray{msg1}},
         {"temperature", 0.2},
     };
 
+    m_busy = true;
     m_reply = m_nam.post(req, QJsonDocument(body).toJson());
     connect(m_reply, &QNetworkReply::finished, this, &Translator::onReplyFinished);
 }

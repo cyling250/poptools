@@ -7,15 +7,17 @@
 
 namespace snipaste {
 
-// 翻译服务：本地引擎或大模型 API（OpenAI 兼容接口，用户可配置 base_url/api_key/model）
+// 翻译服务：仅支持大模型 API（OpenAI 兼容接口，默认 DeepSeek）
+// 单问答形式发送（无上下文），提示词说明文本来源为 OCR 截图提取。
 class Translator : public QObject
 {
     Q_OBJECT
 public:
     explicit Translator(QObject *parent = nullptr);
 
-    // 翻译文本（异步），完成后发 translateFinished
-    void translate(const QString &text);
+    // 翻译文本（异步），完成后发 translateFinished。
+    // fromLang / toLang 为语言代码（"auto" 表示源语言由模型自动识别）。
+    void translate(const QString &text, const QString &fromLang, const QString &toLang);
 
     // 是否正忙
     bool busy() const { return m_busy; }
@@ -27,11 +29,7 @@ private slots:
     void onReplyFinished();
 
 private:
-    // 本地引擎（预留：可扩展为词典/本地模型）
-    bool translateLocal(const QString &text, QString &out);
-
-    // 大模型 API（OpenAI 兼容 /chat/completions）
-    void translateByApi(const QString &text);
+    void translateByApi(const QString &text, const QString &fromLang, const QString &toLang);
 
     QNetworkAccessManager m_nam;
     QNetworkReply *m_reply = nullptr;

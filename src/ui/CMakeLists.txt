@@ -22,6 +22,8 @@ add_library(snipaste_ui STATIC
     capture/TextEditingController.h
     capture/OcrController.cpp
     capture/OcrController.h
+    capture/OcrPanel.cpp
+    capture/OcrPanel.h
     capture/OutputController.cpp
     capture/OutputController.h
     capture/ToolBar.cpp

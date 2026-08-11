@@ -17,6 +17,8 @@ add_library(snipaste_core STATIC
     annotation/AnnotationTypes.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
+    capture/WindowDetector.cpp
+    capture/WindowDetector.h
     hotkey/GlobalHotKey.cpp
     hotkey/GlobalHotKey.h
     ocr/OcrService.cpp
@@ -33,9 +35,9 @@ target_link_libraries(snipaste_core PUBLIC
     Qt6::Network
 )
 
-# Windows 全局热键需要 user32
+# Windows 全局热键需要 user32；智能框选 MSAA 需要 oleacc
 if(WIN32)
-    target_link_libraries(snipaste_core PRIVATE user32)
+    target_link_libraries(snipaste_core PRIVATE user32 oleacc)
 endif()
 
 # 导出头文件目录（core/* 以相对路径包含）

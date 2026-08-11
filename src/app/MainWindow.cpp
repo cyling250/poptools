@@ -130,7 +130,8 @@ void MainWindow::onTranslateRequested(const QString &text)
 {
     if (text.trimmed().isEmpty())
         return;
-    m_translator->translate(text);
+    // 旧结果面板入口（当前不再自动弹出）：自动识别源语言，目标语言固定中文
+    m_translator->translate(text, QStringLiteral("auto"), QStringLiteral("zh"));
 }
 
 void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &error)

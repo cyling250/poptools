@@ -3,6 +3,9 @@
 #include <QMessageBox>
 #include <QFontMetricsF>
 #include <QObject>
+#include <algorithm>
+
+#include "ToolBar.h"
 
 namespace snipaste {
 
@@ -83,6 +86,32 @@ void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString
     {
         QMessageBox::warning(nullptr, "文字识别",
                              error.isEmpty() ? QStringLiteral("未识别到文字") : error);
+        return;
+    }
+
+    // 面板模式：OCR 文字附加到文字栏（不覆盖画板），合并行文本供翻译
+    if (m_ctx->toolbar && m_ctx->toolbar->isPanelMode())
+    {
+        QVector<OcrBox> sorted = boxes;
+        std::sort(sorted.begin(), sorted.end(), [](const OcrBox &a, const OcrBox &b)
+                  {
+                      if (a.rect.y() != b.rect.y())
+                          return a.rect.y() < b.rect.y();
+                      return a.rect.x() < b.rect.x();
+                  });
+        QString text;
+        for (const OcrBox &box : sorted)
+        {
+            const QString t = box.text.trimmed();
+            if (t.isEmpty())
+                continue;
+            if (!text.isEmpty())
+                text += '\n';
+            text += t;
+        }
+        if (m_ctx->showOcrPanel)
+            m_ctx->showOcrPanel(text);
+        m_ctx->requestUpdate();
         return;
     }
 

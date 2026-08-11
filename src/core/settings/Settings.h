@@ -15,11 +15,7 @@ public:
     quint32 captureHotKeyVk() const;
     void setCaptureHotKeyVk(quint32 vk);
 
-    // 翻译模式: "api" 或 "local"
-    QString translateMode() const;
-    void setTranslateMode(const QString &mode);
-
-    // 大模型 API 配置（OpenAI 兼容接口）
+    // 大模型 API 配置（OpenAI 兼容接口，默认 DeepSeek）
     QString apiBaseUrl() const;
     void setApiBaseUrl(const QString &url);
 
@@ -28,10 +24,6 @@ public:
 
     QString apiModel() const;
     void setApiModel(const QString &model);
-
-    // 目标语言（如 "en", "zh"）
-    QString targetLang() const;
-    void setTargetLang(const QString &lang);
 
     // 贴图默认保存文件夹（F3 张贴时自动落盘）
     QString pinSaveDir() const;

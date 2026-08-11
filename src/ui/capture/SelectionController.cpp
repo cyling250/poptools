@@ -163,18 +163,22 @@ void SelectionController::dragActive(const QPoint &global)
     {
         const QRectF n = resizeRectF(QRectF(m_handleStartSel), m_activeHandle, QPointF(global), kMinSize);
         *m_ctx->selection = n.toRect().intersected(m_ctx->cap->desktop);
-        m_ctx->requestUpdate();
+        m_ctx->selectionChanged(); // 调整控制点：工具栏/文字栏随选区位置实时调整
     }
     else if (m_moving)
     {
+        // 整体移动：只夹紧位置到桌面内（选区大小不变）。
+        // 撞到屏幕边缘时选区顶住不动，鼠标继续移动不改变选区
+        const QRect desktop = m_ctx->cap->desktop;
         QRect r = m_ctx->selectionRect();
-        r.moveTopLeft(global - m_moveOffset);
-        r = r.intersected(m_ctx->cap->desktop);
-        if (r.width() >= kMinSize && r.height() >= kMinSize)
-        {
-            *m_ctx->selection = r;
-            m_ctx->selectionChanged(); // 工具栏随选区移动
-        }
+        QPoint topLeft = global - m_moveOffset;
+        const int minX = desktop.left();
+        const int minY = desktop.top();
+        topLeft.setX(qBound(minX, topLeft.x(), qMax(minX, desktop.right() - r.width() + 1)));
+        topLeft.setY(qBound(minY, topLeft.y(), qMax(minY, desktop.bottom() - r.height() + 1)));
+        r.moveTopLeft(topLeft);
+        *m_ctx->selection = r;
+        m_ctx->selectionChanged(); // 工具栏随选区移动
     }
 }
 
@@ -186,19 +190,23 @@ void SelectionController::cancelActive()
 
 // ---- 绘制 ----
 
-void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect, bool selecting) const
+void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect, bool selecting,
+                                            const QRect &highlightRect) const
 {
     const QRect sel = m_ctx->selectionRect().translated(-m_ctx->cap->desktop.topLeft());
-    if (sel.isEmpty())
+    if (sel.isEmpty() && highlightRect.isEmpty())
         return;
 
-    // 灰色蒙版：选区外变暗，选区内保持原图（高亮）
+    // 灰色蒙版：选区 / 预高亮区域外变暗，区域内保持原图（挖空全透明）
     QPainterPath mask;
     mask.addRect(windowRect);
-    mask.addRect(sel);
+    if (!sel.isEmpty())
+        mask.addRect(sel);
+    if (!highlightRect.isEmpty())
+        mask.addRect(highlightRect);
     p.fillPath(mask, QColor(0, 0, 0, 110));
 
-    if (selecting)
+    if (selecting && !sel.isEmpty())
     {
         // 框选过程中：浅蓝虚线框
         p.setPen(QPen(QColor(0, 150, 255), 1, Qt::DashLine));

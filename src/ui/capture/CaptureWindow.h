@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QPixmap>
+#include <QImage>
 #include <QPoint>
 #include <QRect>
 #include <QTimer>
@@ -23,6 +24,8 @@ class ToolDrawingController;
 class TextEditingController;
 class OcrController;
 class OutputController;
+class OcrPanel;
+class Translator;
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）—— 门面 + 事件路由
@@ -81,6 +84,20 @@ private:
     bool m_escArmed = false;
     QTimer m_escTimer;
 
+    // 智能框选：鼠标下方预先高亮的窗口矩形（全局逻辑坐标，Selecting 态检测）
+    QRect m_smartRect;
+    QTimer m_smartDetectTimer; // 智能框选检测定时器（与鼠标事件解耦，避免 MSAA 同步阻塞拖慢取色卡片）
+    QPoint m_smartMousePos;    // 当前鼠标位置缓存（定时器据此检测）
+    QPoint m_smartLastPos;     // 上次检测位置（位置未变则跳过检测）
+    void onSmartDetect();      // 定时器回调：位置变化时重新检测高亮区域
+    // 按下预高亮区域的待判定状态：未拖动 = 点选该区域；拖动超阈值 = 转为普通框选
+    QRect m_smartPressRect;     // 按下时保存的预高亮矩形
+    bool m_smartPressPending = false;
+    QPoint m_smartPressPos;     // 按下点（拖动转框选时作为锚点）
+
+    // 取色放大卡片（Selecting 态）：screen 像素图像懒加载缓存
+    mutable QImage m_screenImage;
+
     // ---- 功能控制器（组合模式：构造时装配并注册） ----
     CaptureContext m_ctx;                                // 共享上下文（依赖注入）
     std::unique_ptr<SelectionController> m_selectionCtrl;
@@ -89,6 +106,8 @@ private:
     std::unique_ptr<TextEditingController> m_textEditCtrl;
     std::unique_ptr<OcrController> m_ocrCtrl;
     std::unique_ptr<OutputController> m_outputCtrl;
+    std::unique_ptr<OcrPanel> m_ocrPanel;                // OCR 文字栏（面板模式）
+    std::unique_ptr<Translator> m_translator;            // 翻译服务（文字栏翻译）
 
     // ---- 帮助函数 ----
     QPointF toLocal(const QPoint &global) const; // 全局 → 选区局部
@@ -98,6 +117,10 @@ private:
     void confirm();            // 确认截图（Enter / 双击）
     void cancel();             // 取消截图（Esc）
     void resetInteraction();   // 停止选区/标注的拖动缩放（文字编辑等入口）
+    void showOcrPanel(const QString &text); // 面板模式：显示文字栏（OCR 文字）
+    void positionOcrPanel();   // 文字栏定位：选区外（右侧/上方）优先，放不下则选区内
+    QColor screenColorAt(const QPoint &logicalGlobal) const; // 鼠标下像素颜色（取色卡片）
+    void paintColorPicker(QPainter &p) const; // 绘制取色放大卡片（Selecting 态）
 
     // 工具栏槽（路由到控制器）
     void onToolSelected(Tool t);

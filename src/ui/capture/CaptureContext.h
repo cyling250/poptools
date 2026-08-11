@@ -45,6 +45,9 @@ struct CaptureContext
     std::function<bool()> hasDraft;
     std::function<void(QPainter &)> paintDraft;
 
+    // 面板模式：OCR 识别文字显示到文字栏（由 CaptureWindow 提供 OcrPanel）
+    std::function<void(const QString &)> showOcrPanel;
+
     QRect selectionRect() const { return selection ? *selection : QRect(); }
     int selectedIndex() const { return selectedItem ? *selectedItem : -1; }
 };

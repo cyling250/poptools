@@ -42,9 +42,12 @@ public:
     void dragActive(const QPoint &global);     // 拖动控制点或整体移动（按当前活动状态）
     void cancelActive();                       // 释放 / 取消：清活动状态
     bool isActive() const { return m_activeHandle != Handle::None || m_moving; }
+    bool resizing() const { return m_activeHandle != Handle::None; } // 正在调整选区控制点
 
     // ---- 绘制 ----
-    void paintMaskAndFrame(QPainter &p, const QRect &windowRect, bool selecting) const; // 蒙版 + 框选虚线框
+    // 蒙版 + 框选虚线框；highlightRect = 需在蒙版中挖空的区域（智能框选预高亮，窗口坐标，可空）
+    void paintMaskAndFrame(QPainter &p, const QRect &windowRect, bool selecting,
+                           const QRect &highlightRect = QRect()) const;
     void paintSelectionFrame(QPainter &p, const QRect &sel) const; // 蓝色边框 + 控制点 + 尺寸提示
 
 private:

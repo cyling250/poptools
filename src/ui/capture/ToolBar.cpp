@@ -272,9 +272,24 @@ namespace snipaste
         m_fontSizeBox->lineEdit()->setPlaceholderText(QStringLiteral("—"));
         m_fontSizeBox->setToolTip(QStringLiteral("文字大小（pt）：下拉选择预设磅数，或直接输入自定义磅数"));
         connect(m_fontSizeBox, &QComboBox::activated, this, &ToolBar::onFontSizeCommitted);
-        connect(m_fontSizeBox->lineEdit(), &QLineEdit::returnPressed, this, &ToolBar::onFontSizeCommitted);
-        connect(m_fontSizeBox->lineEdit(), &QLineEdit::editingFinished, this, &ToolBar::onFontSizeCommitted);
-        grid->addWidget(m_fontSizeBox, 1, 5, 1, 4);
+    connect(m_fontSizeBox->lineEdit(), &QLineEdit::returnPressed, this, &ToolBar::onFontSizeCommitted);
+    connect(m_fontSizeBox->lineEdit(), &QLineEdit::editingFinished, this, &ToolBar::onFontSizeCommitted);
+    grid->addWidget(m_fontSizeBox, 1, 5, 1, 4);
+
+    // ---- 第二行：OCR 结果去向开关（画板 / 文字栏） ----
+    m_panelBtn = new QToolButton(this);
+    m_panelBtn->setFixedSize(30, 24);
+    m_panelBtn->setCheckable(true);
+    m_panelBtn->setText(QStringLiteral("面板"));
+    m_panelBtn->setStyleSheet(QString(
+        "QToolButton { border: none; border-radius: 3px; background: transparent;"
+        "  color: %1; font-size: 11px; padding: 0; }"
+        "QToolButton:hover { background: %2; }"
+        "QToolButton:checked { background: #2f6feb; color: white; }")
+        .arg(iconColor().name(), hover));
+    m_panelBtn->setToolTip(QStringLiteral("OCR 结果去向：勾选=附加到文字栏（可翻译），不勾选=覆盖到画板"));
+    connect(m_panelBtn, &QToolButton::clicked, this, &ToolBar::onPanelModeClicked);
+    grid->addWidget(m_panelBtn, 1, 9);
 
         // ---- 第二行：颜色板（两行八列 + 大色块，跨两行） ----
         auto *colorPanel = new QWidget(this);
@@ -510,7 +525,20 @@ namespace snipaste
         m_updatingFontSize = false;
     }
 
-    void ToolBar::onFontSizeCommitted()
+    void ToolBar::setPanelMode(bool on)
+{
+    m_panelMode = on;
+    if (m_panelBtn)
+        m_panelBtn->setChecked(on);
+}
+
+void ToolBar::onPanelModeClicked()
+{
+    m_panelMode = m_panelBtn->isChecked();
+    emit panelModeToggled(m_panelMode);
+}
+
+void ToolBar::onFontSizeCommitted()
     {
         if (m_updatingFontSize || !m_fontSizeBox)
             return;
