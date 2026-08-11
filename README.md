@@ -88,12 +88,16 @@ cmake --build build --config Release
 
 | 配置项 | 说明 | 默认值 |
 |---|---|---|
+| 开机启动 | 登录时自动运行（写入 HKCU\...\Run，按钮随状态切换"加入/取消"） | 关闭 |
 | Tesseract 路径 | OCR 引擎可执行文件路径 | `C:\Program Files\Tesseract-OCR\tesseract.exe` |
 | 翻译模式 | `api`（大模型 API）/ `local`（本地引擎，预留） | `api` |
 | API Base URL | OpenAI 兼容端点 | `https://api.deepseek.com/v1` |
 | API Key | 密钥（自行填入） | 空 |
-| Model | 模型名 | `deepseek-chat` |
+| Model | 模型名 | `deepseek-v4-flash` |
 | 目标语言 | 翻译目标语言代码 | `zh` |
+
+> 设置持久化到**可执行文件旁**的 `MySnipaste.ini`（构建输出/安装目录下），便于查看与备份；
+> 贴图（F3）默认保存到软件目录下的 `tempSnipaste` 文件夹。
 
 > 翻译 API 可换成任意 OpenAI 兼容服务，如 Ollama 本地：`http://localhost:11434/v1`
 

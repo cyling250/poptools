@@ -1,39 +1,46 @@
 # DEBUG 记录
 
 ## 1. Qt 6.12.0 无法用 aqt 3.3.0 安装
+
 - **现象**：`aqt install-qt windows desktop 6.12.0` 报错 `Failed to locate XML data for Qt version '6.12.0'`，实际 URL 指向 `qt6_6120/qt6_6120/Updates.xml`（404）
 - **根因**：Qt 6.12 起官方仓库改为新目录布局：`qt6_6120/` 根目录 + `qt6_6120_msvc2022_64/` 架构子目录（目录名含完整补丁号）。aqt 3.3.0 仍按旧布局 `qt6_612/` 拼接 URL
 - **解决**：改用 Qt 6.8.3 LTS（旧布局，aqt 3.3.0 兼容，LTS 稳定，适合个人项目）
 - **教训**：aqt 与最新 Qt 版本存在兼容滞后；使用 LTS 版本更稳妥
 
 ## 2. 命令行直接运行 cl.exe 报错
+
 - **现象**：PowerShell 中 `cl` 无法识别
 - **根因**：MSVC 工具链不在 PATH，需通过 `vcvarsall.bat x64` 或 CMake 自动配置环境变量（INCLUDE/LIB/PATH）
 - **解决**：本项目全程用 CMake 配置 MSVC，无需手动 vcvars
 
 ## 3. F 盘消失，Qt 需要重新安装（aqt）
+
 - **现象**：CMakeLists 中 `F:/Qt/6.8.3/msvc2022_64` 不存在，`find_package(Qt6)` 失败；`-m qtbase qtsvg` 报 `The packages ['qtbase','qtsvg'] were not found`
 - **根因**：① 原 Qt 装在 F 盘但该盘已不存在；② aqt 的 `-m` 只接受"附加模块"，`qtbase` 是基础包会自动安装；③ Qt 6.8 起 `qtsvg` 已并入 qtbase（`aqt list-qt --modules` 中不再有 qtsvg 条目）
 - **解决**：`aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O D:\Qt`（不指定 -m）装到 `D:\Qt\6.8.3\msvc2022_64`
 - **经验**：Qt 路径从 CMakeLists 硬编码改为环境变量 `QT_ROOT`（env > -DQT_ROOT > 默认路径三级回退），并用 `[Environment]::SetEnvironmentVariable(..., "User")` 持久化
 
 ## 4. CMake 4.2.1 需用 VS2026 生成器
+
 - **现象**：README 中的 `-G "Visual Studio 17 2022"` 与机器上的 MSVC 2026（VS18）不符
 - **解决**：改用 `-G "Visual Studio 18 2026" -A x64`，编译通过
 
 ## 5. 工具栏图标全部消失 / 选中后所有按钮变成同一图标
+
 - **现象**：未选工具时（选择模式）9 个工具按钮图标全部不显示；点选某工具后所有按钮图标都变成该工具
 - **根因**：`ToolBar::setTool` 中循环给每个按钮重设图标时，图标名取自**当前工具参数 `t`**（同一个值）而不是按钮自身的 tool 属性；当 `t == None` 时 switch 返回空串，`QSvgRenderer` 加载失败 → 空图标
 - **解决**：图标名改为取 `btn->property("tool")` 对应的工具（`btnTool`），每个按钮恢复各自图标，仅高亮色（白/主题色）随选中状态变化
 - **教训**：批量刷新按钮状态时，图标/文案等按按钮本身属性生成，不要复用全局当前值
 
 ## 6. 矩形/椭圆向左上角拖动时起始点随鼠标漂移
+
 - **现象**：向右下角拖动正常；向左上角拖动时矩形/椭圆的"起始点"跟随鼠标一起往上跑
 - **根因**：`continueDraw` 用 `QRectF(m_draft.rect.topLeft(), pos).normalized()` 更新草稿，锚点取的是**当前规范化后矩形**的 topLeft；当鼠标越过锚点的 x/y（反向拖动）时，锚点会漂移到新的 min 角，逐次累加
 - **解决**：新增 `m_draftOrigin`（按下点）作为固定锚点，`QRectF(m_draftOrigin, pos).normalized()`
 - **教训**：拖拽图形必须以"按下点"为固定锚点，不能依赖每次归一化后的矩形角
 
 ## 7. 三个线宽档位区分度不足 + 铅笔/涂鸦/马赛克共用同一套线宽
+
 - **现象**：三个粗细画出的矩形/椭圆/线条粗细看不出区别；线宽选项的圆点大小也应不同
 - **根因**：原档位 1.5/3.0/6.0 太接近；线宽图标为横向线条，1.5px 与 3px 几乎无差别；且所有工具共用一套线宽
 - **解决**：
@@ -43,14 +50,17 @@
 - **教训**：UI 数值档位要拉开差距，图标要能体现相对大小
 
 ## 8. 马赛克由"框选区域"改为"笔刷涂抹"
+
 - **现象/需求**：马赛克应是笔刷涂抹效果，而非拖拽框选整个矩形区域像素化
 - **实现**：马赛克改为折线笔迹（`points` + 笔刷直径 `width`），`buildMosaicImage` 截取笔迹外接矩形源图整体像素化后，用圆头笔刷足迹 mask（`CompositionMode_DestinationIn`）只保留沿线区域，其余透明；拖动时实时重建
 - **连带**：马赛克命中测试从"外接矩形"改为"到笔迹折线距离"（`distanceToItem`）
 
 ## 9. 涂鸦笔（Doodle）需半透明体现高亮
+
 - **实现**：`startDraw` 中 Doodle 颜色加 alpha=100，铅笔保持不透明；两者底层均为折线绘制
 
 ## 10. 未填充矩形/椭圆内部显示为黑色（应为透明）
+
 - **现象**：关闭填充后画矩形/椭圆，内部是黑色而非透出截图
 - **根因（正解）**：`AnnotationCanvas::drawOne` 中 `p.setBrush(it.filled ? it.color : Qt::NoBrush)` —— C++ 三元运算符把 `it.color`（QColor）与 `Qt::NoBrush`（无作用域枚举，值 0）统一为 `QColor` 类型，`Qt::NoBrush` 经 `QColor(int)` 隐式转换为 **QColor(0) = 纯黑画刷**，于是未填充矩形实际上用黑色画刷 fill。此前的 setClipRect 方案被证伪：数据、蒙版、打底均正常，黑色只产生于 paintEvent 管线内
 - **验证**：插桩日志（drawOne 参数全对，brushStyle=0）→ m_screen 原图内部 0 黑点 vs 实时渲染内部 2553 黑点（锁定 paintEvent）→ `fillRect(Qt::green)` 被盖掉（确有黑画刷）→ `setBrush(Qt::green)` 显示绿色（setBrush 生效）→ 最终锁定三元运算符类型强制转换
@@ -59,6 +69,7 @@
 - **教训**：条件运算符混用 `Qt::NoBrush/NoPen` 等枚举与 `QColor/QPen` 时，必须显式 `QBrush(...)` 包装，否则枚举被隐式转成 QColor(0) 纯黑/纯色
 
 ## 11. 马赛克绘制出现"黑色填充矩形 + 内部透明路径"
+
 - **现象**：用马赛克笔刷涂抹时，笔迹 AABB 包围盒内出现一个黑色填充矩形，矩形内部笔迹路径处几乎透明
 - **根因**：`buildMosaicImage` 中 `region.toImage()` 在 Windows 返回 **Format_RGB32（无 alpha 通道）**。对无 alpha 的图像执行 `CompositionMode_DestinationIn` 时，Qt 在预乘空间按源（mask）的 alpha 乘 RGB 通道：mask 透明处（框内非笔迹区域）RGB 被乘成 **0 = 纯黑**，而 RGB32 无 alpha 永不透明 → 黑色填充矩形；笔迹处 alpha=255，RGB 保留 → 看似"透明路径"。mask 本身完全正确
 - **验证**：插桩保存中间产物：src(mode=RGB 内容正常 0 黑点)、mask(RGBA 正确：笔迹白线+其余透明)、mosaic(**mode=RGB 全不透明 84% 纯黑**) → 锁定合成目标格式错误
@@ -66,12 +77,14 @@
 - **经验**：`QPixmap::toImage()` 在 Windows 返回 RGB32（无 alpha）；凡是后续要做 alpha 合成（DestinationIn/Out 等）的图像，必须先 `convertToFormat(Format_ARGB32_Premultiplied)`
 
 ## 12. 确认/复制/保存后结果图丢失全部标注
+
 - **现象**：画完标注后按 Enter 确认（或点复制/保存），结果图/剪贴板图里没有标注（此前矩形测试"结果图无红无黑"）
 - **根因**：`confirm()/onSave()/onCopy()` 中 `p.translate(-crop.topLeft())`。result 像素 (0,0) ↔ m_screen 坐标 crop.topLeft()，标注（选区局部坐标 p）的 m_screen 坐标为 crop.topLeft()+p → 正确结果像素是 **p**；translate 后画到结果像素 p-crop.topLeft()（负坐标）→ 整条被裁剪掉
 - **解决**：删除三处 `p.translate(-crop.topLeft())`。验证：红色矩形确认后结果图红色 bbox x[65,658] y[65,350]（起点 65≈预期 67），修复前 0 红像素
 - **教训**：合成结果图时先推坐标映射：目标像素 ↔ 源图像素 ↔ 标注坐标三者关系；result 是选区裁剪，标注已是选区局部坐标，无需再平移
 
 ## 13. 截屏掉分辨率：应始终输出物理分辨率（DPI 缩放）
+
 - **现象**：任意机器上截屏都应按原始分辨率输出；本机 2560×1600 物理屏（144% 缩放）只截到 1707×1067
 - **根因**：`startCapture()` 用 `QScreen::geometry()`（**逻辑**坐标）合并虚拟桌面后 `QPixmap(m_desktop.size())` 创建 **逻辑尺寸** 画布；而 `grabWindow(0)` 返回 **物理像素** 图（带 dpr），`drawPixmap` 按 dpr 压缩进逻辑画布 → m_screen 只剩逻辑分辨率
 - **解决**：
@@ -84,6 +97,7 @@
 - **教训**：Qt 全屏截图存在两个坐标系——**逻辑坐标**（窗口/鼠标/选区）与**物理像素**（grabWindow 原图），输出时必须在边界转换；坐标换算统一按"屏幕逻辑原点×dpr + 屏幕内偏移×dpr"，且 `QRect` 右/下边界含端点，换算用 (right+1, bottom+1) 避免丢像素
 
 ## 14. 工具栏底衬丢失（命名空间导致样式表类型选择器失配）
+
 - **现象**：重构引入 `namespace snipaste` 后，工具栏灰白/深灰背景与边框消失
 - **根因**：moc 生成的 `QMetaObject::className()` 为 `"snipaste::ToolBar"`，样式表类型选择器 `ToolBar { ... }` 不再匹配（Qt 样式表类型选择器按 className 匹配，`: 与 ::` 有特殊含义无法直接写限定名）
 - **解决**：`setObjectName("annotationToolBar")` + 样式表改用 ID 选择器 `#annotationToolBar { ... }`，与命名空间解耦
@@ -91,17 +105,20 @@
 - **教训**：命名空间内的 QObject 子类（Q_OBJECT）若用样式表设置自身外观，不能用类型选择器，须用 objectName ID 选择器；Qt 全局类（QToolButton 等）不受影响
 
 ## 15. "撤销栈顺序颠倒"Issue 验证为误报
+
 - **现象（误报）**：`addItem` 被指"先 push_back(items) 快照再添加新项，顺序颠倒，撤销后应保留新项"
 - **验证**：① 静态分析：`addItem` 顺序为 `m_undoStack.push_back(items)`（保存不含新项快照）→ `items.push_back(item)`，语义正确；用户提供的"修复建议"代码与现有一致，无实际差异 ② 运行时测试（链接 snipaste_core，`scripts/undo_test/test_undo.cpp`）：add A+B → undo 回到 [A]（新项被移除）→ 二次 undo 空 → redo 恢复 [A]，PASS
 - **结论**：无需修复。误报排查成本较高，特此记录避免重复验证
 
 ## 16. 鼠标悬停工具栏仍显示十字光标（应为箭头）
+
 - **现象**：进入编辑态后，鼠标移动到标注工具栏上光标仍是十字（或选区尺寸/移动光标），不是正常箭头
 - **根因**：`ToolBar` 是 `CaptureWindow`（全屏窗口）的子 widget，构造时未设置自身光标。Qt 光标解析规则：鼠标悬停于某 widget 时，沿其祖先链向上找**第一个显式设置光标（WA_SetCursor）**的 widget —— 找到了父窗口的 `CrossCursor`；且 `CaptureWindow::mouseMoveEvent` 在编辑态未按下时持续 `setCursor(...)` 覆盖整窗，工具栏因无自身光标一并继承
 - **解决**：`ToolBar` 构造函数开头 `setCursor(Qt::ArrowCursor)`，工具栏自身携带 WA_SetCursor，悬停其上 Qt 即用箭头光标，不受父窗口光标影响
 - **教训**：子 widget 若与父窗口光标需求不同，必须在子控件上显式 `setCursor`；依赖"继承父光标"在 QWidget 上是沿祖先链找显式设置项，父窗口频繁 setCursor 会波及所有未设置光标的子控件
 
 ## 17. 标注控制点编辑增强：镜像缩放 + 线段端点控制（含 OOP 重构）
+
 - **现象/需求**：
   - 矩形/椭圆在选择模式下拖动边控制点，超过对侧起始边后被 clamp 住无法继续拖动（`resizeRectF` 用 `qMin(pos, right-minSize)` 硬限制），期望 Visio 式"拖过对侧 → 镜像翻转"
   - 直线/箭头选中态被 8 个控制点的外接矩形包围，期望只显示起点/终点两个控制点，可自由拖动改变长度与指向
@@ -118,6 +135,7 @@
 - **教训**：① 缩放的"镜像翻转"必须基于**起始矩形快照 + 固定拖动边方向**判定，不能基于当前矩形逐帧 clamp（否则翻转后无法继续拖）；② 控制点体系应按标注类型抽象（handlesFor/handlePos），窗口交互与标注类型解耦；③ 翻转后内部点映射要沿翻转轴反向，不能只缩放 newBounds
 
 ## 18. Tesseract 打包方案：仓库内置裁剪版资源，构建/安装时直接复制
+
 - **需求**：OCR 依赖 tesseract.exe，希望在开发中直接可用且随安装包一起发放；但 tesseract 依赖链巨大（UB-Mannheim 构建 libtesseract-5.dll≈97MB + libicu≈35MB 等，全量 ~200MB）
 - **方案演变**（三次迭代，最终由用户拍板"直接下载好当资源"）：
   1. ~~随安装包分发~~：体积太大不划算
@@ -133,6 +151,7 @@
 - **教训**：① NSIS `/S /D=` 静默安装到指定目录**不可靠**，7-Zip 解包 NSIS 安装包是便携方案；② 引入体积大的第三方二进制先评估"随包分发 vs 安装期联网 vs 内置资源"三条路线，内置资源对个人项目最简单可靠；③ 纯 Python 解析 PE 导入表做依赖裁剪容易踩坑（RVA→offset 映射、section 对齐），失败时全量复制 DLL 是可靠回退
 
 ## 19. 【文】点击报错 "Can not read input file" + 识别结果永远为空（两个叠加 bug）
+
 - **现象**：编辑态点工具栏【文】按钮，弹出 tesseract 报错 `Can not read input file xxx`；修复该问题后又出现"识别永远为空/退出码 0"
 - **Bug A：QTemporaryDir 生命周期** —— `OcrService::start()` 中 `QTemporaryDir dir;` 是**局部变量**，start() 返回即被析构删除目录；QProcess 是异步的，tesseract 实际读取 input.png 时文件已被删除 → `Can not read input file`。同时中间文件落在系统临时目录，不符合"放软件目录 + 用完清理"
 - **Bug B：TSV 行尾 CRLF** —— tesseract TSV 在 Windows 输出行尾为 `\r\n`，`split('\n')` 后 header 末列 `text` 变成 `text\r`，`header.indexOf("text")` 返回 **-1** → 解析函数直接返回空 → `ok=false` 且 stderr 为空 → 报"退出码 0"。该 bug 一直潜伏，此前被 Bug A（文件先没了）掩盖，修复 A 后才暴露
@@ -143,6 +162,7 @@
 - **教训**：① 异步 QProcess + 临时目录，目录/文件生命周期必须跨异步调用存活（成员变量或 RAII 延长到 finished）；② 解析文本协议（TSV/CSV）在 Windows 必须先处理 CRLF，用 `split('\n')` + 精确 `indexOf` 匹配列名极易踩坑；③ 表面 bug 修复后可能暴露被掩盖的下一层 bug，冒烟测试要在真实环境（含输出编码/行尾差异）回归
 
 ## 20. OCR 覆盖文字字号与原文字匹配（QFontMetricsF 实测逼近）
+
 - **需求**：【文】识别的文本框覆盖原图时，覆盖字体大小应与原始文字大小相当
 - **问题**：原实现 `pixelSize = 0.8 × 行框高度` 是纯经验系数，不同字体/行高（含 leading）下偏差大，无法保证"差不多"
 - **解决**：`CaptureWindow::onOcrBoxes` 改用实测迭代：
@@ -153,6 +173,7 @@
 - **关联**：`AnnotationPainter::scaledItem` 缩放 Text 时用 `pointSizeF`（若字号是 pixelSize 设置，pointSizeF() 为 -1，缩放会退回 4pt）——像素字号体系与点字号缩放混用的已知隐患，未在本轮处理
 
 ## 21. 文字工具输入框改造：QLineEdit → 多行 QTextEdit（透明底虚线框 + 内容自适应 + 点击框外结束）
+
 - **需求**：① 文本框始终 长=最长行宽、高=总行高；② 输入中无白底、透明 + 虚线标注输入区域（初始给初始长宽，输入后贴合内容）；③ 多行文本框，回车/Shift+回车均换行，输入结束方式为点击框外而非回车
 - **实现**（`CaptureWindow`）：
   - `m_textEdit` 由 `QLineEdit` 改为 `QTextEdit`：`NoWrap`（宽=最长行）+ 双滚动条 AlwaysOff + `setDocumentMargin(0)`（document size 即文本自然尺寸）；`textChanged` → `adjustTextEditSize()`
@@ -165,6 +186,7 @@
 - **教训**：QTextEdit 尺寸自适应应以 `document()->size()`（无 wrap + margin 0）为准，它由与 QPainter::drawText 相同的 QTextLayout 引擎计算，与最终标注矩形天然一致
 
 ## 22. 文字多字号（字号栏）：AnnotationItem 富文本化 + 工具栏字号栏（pt）+ 字号实时联动
+
 - **需求**：① 文本框不许调整长宽，长宽由内容自动计算（输入第一个字后实时跟随）；② 第二行工具栏新增文字大小栏（pt，多选下拉+手动输入，合法性验证）；③ 字号栏永远体现"当前所选中或所编辑文本的大小"：选中多个不同大小文字→不显示；统一大小→显示该值；修改提交后立即作用于选中文字；无选中→显示"接下来输入文字的字号"
 - **数据层**：`AnnotationItem` 新增 `QString html`（富文本，多字号）；`text` 保留纯文本、`font` 保留默认字体（兼容旧数据/OCR 项，html 为空走纯文本路径）
 - **渲染层**（`AnnotationPainter::drawOne` Text 分支）：
@@ -193,6 +215,7 @@
 - **经验**：QTextEdit 样式表 `color` 是"默认色"，不嵌入 toHtml；`setTextColor`/mergeCharFormat 设置的**显式前景色**才嵌入 html → 天然支持"每段文字各自颜色"：开始色走 it.color 兜底、后续改色走显式色嵌入，无需额外规范化
 
 ## 23. 重构：CaptureWindow"上帝类"拆分为门面 + 控制器组件（组合模式 + 依赖注入）
+
 - **问题**：`CaptureWindow.cpp` 1487 行 / 40 函数，承担窗口状态机、选区控制点几何、标注交互、文字编辑、OCR、输出合成 6 类职责，是典型上帝类；其余文件分层合理（core 纯逻辑 / ui / tools 策略模式）
 - **方案（用户拍板）**：窗口只留一个接口（门面），功能在不同文件中实现并注册到接口
 - **实现**（`ui/capture/` 扁平结构）：
@@ -207,6 +230,7 @@
 - **验证**：Release 构建通过；核心单测 `tool_test` ALL PASSED；行为为纯代码搬移（不做功能变更），交互效果需实机回归
 
 ## 24. F3 贴图功能实现（PinWindow 完整化 + 默认保存文件夹设置）
+
 - **需求**：F3 将最近一次截图（带批注）贴到屏幕顶层——初始位置 = 截图选区位置；拖动移动；右键菜单"清除"（仅清屏幕）/ "销毁"（清屏幕 + 删文件）；滚轮缩放；左下小阴影悬浮效果；**张贴同时自动保存到设置中的默认文件夹（用户自定义）**
 - **实现**：
   - `Settings` 新增 `pinSaveDir()`/`setPinSaveDir()`（默认 `图片/MySnipaste`）；`SettingsDialog` 新增"贴图保存文件夹"行（QLineEdit + 浏览按钮）
@@ -224,6 +248,7 @@
 - **坑（pin_test 复现）**：`WA_DeleteOnClose` 的 widget 若在**栈上**创建，QApplication 析构会自动删除顶层窗口 → **double delete 堆损坏（0xC0000374）**；测试程序必须堆上 `new`。曾误判为阴影绘制问题，二分（注释阴影仍崩）后锁定根因
 
 ## 25. OCR 文字栏（面板模式）+ 翻译功能
+
 - **需求**：工具栏新增开关控制 OCR 文字去向——画板（文本框覆盖）或文字栏（额外面板）；文字栏上半=OCR 文字、下半=翻译、中间=翻译选项（源→目标语言）+ 翻译按钮；文字栏宽度≥10 字符、优先放选区外部放不下则选区内；文字栏隐藏则不能翻译；默认不翻译需手动点按钮
 - **实现**：
   - `ToolBar`：第二行新增"面板"开关（`panelModeToggled` 信号 + `isPanelMode()`）
@@ -236,6 +261,7 @@
 - **Bug（修复）**：选区整体移动撞到屏幕边缘时自动变小——`SelectionController::dragActive` 移动分支用 `r.intersected(m_cap.desktop)` 把选区**裁剪**到桌面内（缩小尺寸）。改为**只夹紧左上角位置**到桌面内（`qBound` 限制 topLeft，大小不变）：撞到边缘时选区顶住不动，鼠标继续移动不改变选区。缩放分支（控制点）保持 intersected 裁剪（缩放超出桌面被限制属合理行为）
 
 ## 26. 智能框选（窗口矩形预先高亮 + 点击即选）
+
 - **需求**：截图框选前自动检测鼠标下方的窗口矩形并【预先高亮】（同时只高亮一个、无则不强选）；鼠标点击即自动框选该区域——方便一键选取某个窗口的全部
 - **实现**：
   - 新 `core/capture/WindowDetector`：`detectWindowRect(logicalPos, excludeHwnd, dpr)`——Win32 `EnumWindows` 遍历可见顶层窗口，排除截图画布自身（`winId()`）与系统窗口（Progman/WorkerW/Shell_TrayWnd 等），`GetWindowRect` 取包含鼠标点的**最小面积**窗口，物理像素 ÷ dpr 转逻辑坐标
@@ -251,3 +277,31 @@
   - **连带修复**：`detectWindowRect` 未乘 dpr（`pt={logicalPos.x(), logicalPos.y()}`，高 DPI 屏幕窗口级回退检测点偏移）→ 与 `detectUiElementRect` 一致改为 `qRound(x*dpr)`
 - **教训**：MSAA 的 `accHitTest` 返回 VT_DISPATCH 时必须 QI 提升后再取属性（accLocation/accName 等），直接拿子 VARIANT 调父对象方法会 E_INVALIDARG；调试此类问题用独立小工程插桩打印每步 HRESULT/vt，快速锁定失败环节
 - **临时禁用（2026-08-11）**：智能区域检测算法在真实使用中仍存在问题（高亮/点选区域不准确），用户决定暂时禁用——`startCapture` 中注释 `m_smartDetectTimer.start()`，`m_smartRect` 恒为空，预高亮与点选逻辑自动失效，恢复普通拖动框选；取色卡片不受影响。恢复时取消注释即可（检测逻辑代码全部保留）
+
+## 27. 安装程序打包（Inno Setup 6）
+
+- **需求**：`tools/` 下 Qt 运行库（qt_runtime）与 OCR 引擎（tesseract，含语言包 ~200MB）需随程序一起分发，需要正式安装程序
+- **方案**：Inno Setup 6（winget 安装，未随默认包带中文语言包，从 issrc 仓库 `Files/Languages/ChineseSimplified.isl` 下载放入其 Languages 目录）
+- **实施**：
+  - `packaging/MySnipaste.iss`：`[Files]` 用 `SourceDir=..\build\Release` + `recursesubdirs` **整体递归复制**（exe + Qt DLL/插件 + tesseract 一次打包，无需手工维护文件清单）；`PrivilegesRequired=lowest` + `{autopf}` → 用户级安装到 `%LOCALAPPDATA%\Programs`，免 UAC
+  - 安装包图标：Edge headless 渲染 `app_icon.svg` → PNG → Pillow 转 7 尺寸 .ico（`scripts/make_icon.py`）；一键打包脚本 `scripts/make_installer.py`（SVG→ICO→ISCC）
+  - 打包源 191.7MB / 103 文件 → 安装包 48.4MB（lzma2/ultra64 压缩），静默安装解出 106 文件（+unins×2+ico）与源 0 缺失、安装后 exe 可运行、卸载干净
+- **坑（本次踩坑）**：PowerShell 中 `& GUI程序 /VERYSILENT...` 是**异步启动**（GUI 子系统进程不挂接控制台，`&` 立即返回），导致：① 误以为安装卡死/被中断（实际子进程随后被终端回收杀掉，日志停在 Qt6Core.dll 中途）；② 等待必须用 `Start-Process -Wait -PassThru` 并取 `ExitCode`，不能 `&`
+- **经验**：Inno 安装包制作三要素——打包源用构建产物整体递归、静默测试用 `Start-Process -Wait`、卸载验证跑 unins000.exe 后检查目录清除；`[UninstallDelete]` 顺手清理运行期生成的 `{app}\ocr_tmp`（OCR 临时目录，不在安装清单内）
+
+## 28. 设置持久化改为 exe 旁 ini + 默认值调整
+- **需求**：设置持久化到 ini 文件且位于 build 目录（可执行文件旁，随安装包分发）；默认 model 改为 `deepseek-v4-flash`；默认无 API Key；贴图默认文件夹改为软件目录下 `tempSnipaste`
+- **实现**（`Settings.cpp`）：
+  - 构造函数由 `QSettings(IniFormat, UserScope, org, app)`（写入 `%APPDATA%\MySnipaste\MySnipaste.ini`）改为 `QSettings(QCoreApplication::applicationDirPath() + "/MySnipaste.ini", IniFormat)` —— 配置随 exe 走，构建/安装同一位置
+  - 默认值：`translate/apiModel` → `deepseek-v4-flash`；`translate/apiKey` 默认仍空串；`pin/saveDir` 默认 → `{exeDir}/tempSnipaste`（原为 `图片/MySnipaste`）
+  - 全部 setter 增加 `m_s.sync()`：立即落盘，程序异常退出也不丢配置
+- **验证**：独立工程 `scripts/settings_test`（链接 Settings.cpp）——默认值 4 项 + 独立 QSettings 实例读回 4 项 + ini 位于 exe 目录 → 9 项 ALL PASSED；构建后删除 ini 恢复默认态
+- **坑**：`QCoreApplication::applicationDirPath()` 须在 QApplication 创建后调用（Settings 单例首次访问在 MainWindow 构造，安全）；`settings_test` 运行需把 `build/Release` 加入 PATH 供 Qt DLL 加载，且 CMake 配置须 `-DCMAKE_PREFIX_PATH=D:/Qt/6.8.3/msvc2022_64`
+
+## 29. 设置新增开机自启（注册表 Run 键 + 按钮状态联动）
+- **需求**：设置中添加"加入到开机启动"按钮；检测到已加入则显示"取消开机启动"（点击取消）
+- **实现**：
+  - `Settings` 新增 `autoStartEnabled()`/`setAutoStartEnabled(bool)`：经独立 `QSettings("HKEY_CURRENT_USER\\...\\Run", NativeFormat)` 读写 `MySnipaste` 值；开启时写入**带引号**的 exe 路径（Run 键要求），关闭时 `remove`；`sync()` 立即生效
+  - `SettingsDialog` 新增"开机启动:"行（QPushButton）：构造时按 `autoStartEnabled()` 刷新文本（已加入→"取消开机启动"，未加入→"加入到开机启动"）；点击切换并立即刷新
+- **验证**：`settings_test` 增 4 项——初始关闭 / 开启后为 true / Run 值 = 带引号 exe 路径 / 关闭后为 false → 13 项 ALL PASSED（测试结束后清除 Run 值，不残留）
+- **经验**：开机自启用 `HKCU` Run 键（免管理员权限、随用户配置迁移）；检测即"该键是否包含本程序"，无需额外状态文件

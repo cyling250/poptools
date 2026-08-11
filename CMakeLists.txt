@@ -47,5 +47,14 @@ add_custom_command(TARGET MySnipaste POST_BUILD
     COMMENT "Copying bundled tesseract engine"
 )
 
+# Qt 运行库（windeployqt 部署到 tools/qt_runtime）：复制到可执行文件旁，
+# 使 exe 不依赖系统 PATH 中的 Qt；同时供安装程序打包
+add_custom_command(TARGET MySnipaste POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/tools/qt_runtime"
+        "$<TARGET_FILE_DIR:MySnipaste>"
+    COMMENT "Copying bundled Qt runtime"
+)
+
 # 安装规则（可选）
 install(TARGETS MySnipaste RUNTIME DESTINATION .)

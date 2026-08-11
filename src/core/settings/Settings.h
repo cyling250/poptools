@@ -29,6 +29,10 @@ public:
     QString pinSaveDir() const;
     void setPinSaveDir(const QString &dir);
 
+    // 开机自启（HKCU\...\Run 注册表项）
+    bool autoStartEnabled() const;
+    void setAutoStartEnabled(bool on);
+
 private:
     Settings();
     QSettings m_s;

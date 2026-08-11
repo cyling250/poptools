@@ -18,6 +18,16 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     setMinimumWidth(420);
     auto *form = new QFormLayout(this);
 
+    // 开机自启：点击切换加入/取消（按钮文本随当前状态变化）
+    m_autoStart = new QPushButton(this);
+    updateAutoStartButton();
+    connect(m_autoStart, &QPushButton::clicked, this, [this] {
+        Settings &s = Settings::instance();
+        s.setAutoStartEnabled(!s.autoStartEnabled());
+        updateAutoStartButton();
+    });
+    form->addRow("开机启动:", m_autoStart);
+
     // API 配置（翻译仅支持大模型，DeepSeek 官方 API）
     m_urlEdit = new QLineEdit(Settings::instance().apiBaseUrl(), this);
     form->addRow("API Base URL:", m_urlEdit);
@@ -55,6 +65,14 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         s.setApiModel(m_modelEdit->text().trimmed());
         s.setPinSaveDir(m_dirEdit->text().trimmed());
     });
+}
+
+// 按当前注册表状态刷新按钮文本：已加入 → 显示"取消开机启动"，未加入 → 显示"加入到开机启动"
+void SettingsDialog::updateAutoStartButton()
+{
+    m_autoStart->setText(Settings::instance().autoStartEnabled()
+                             ? "取消开机启动"
+                             : "加入到开机启动");
 }
 
 } // namespace snipaste
