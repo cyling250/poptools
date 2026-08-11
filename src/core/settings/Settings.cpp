@@ -1,5 +1,7 @@
 #include "Settings.h"
 
+#include <QStandardPaths>
+
 namespace snipaste {
 
 Settings::Settings()
@@ -73,6 +75,18 @@ QString Settings::targetLang() const
 void Settings::setTargetLang(const QString &lang)
 {
     m_s.setValue("translate/targetLang", lang);
+}
+
+QString Settings::pinSaveDir() const
+{
+    const QString def = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
+                        + "/MySnipaste";
+    return m_s.value("pin/saveDir", def).toString();
+}
+
+void Settings::setPinSaveDir(const QString &dir)
+{
+    m_s.setValue("pin/saveDir", dir);
 }
 
 } // namespace snipaste

@@ -33,6 +33,10 @@ public:
     QString targetLang() const;
     void setTargetLang(const QString &lang);
 
+    // 贴图默认保存文件夹（F3 张贴时自动落盘）
+    QString pinSaveDir() const;
+    void setPinSaveDir(const QString &dir);
+
 private:
     Settings();
     QSettings m_s;

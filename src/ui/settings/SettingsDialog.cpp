@@ -2,8 +2,11 @@
 #include "core/settings/Settings.h"
 
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QPushButton>
+#include <QFileDialog>
 #include <QDialogButtonBox>
 
 namespace snipaste {
@@ -12,6 +15,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle("MySnipaste 设置");
+    setMinimumWidth(420);
     auto *form = new QFormLayout(this);
 
     // 翻译模式
@@ -33,6 +37,20 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_langEdit = new QLineEdit(Settings::instance().targetLang(), this);
     form->addRow("目标语言 (zh/en...):", m_langEdit);
 
+    // 贴图默认保存文件夹（F3 张贴时自动保存到此目录）
+    auto *dirRow = new QHBoxLayout;
+    m_dirEdit = new QLineEdit(Settings::instance().pinSaveDir(), this);
+    dirRow->addWidget(m_dirEdit, 1);
+    auto *browseBtn = new QPushButton("浏览...", this);
+    dirRow->addWidget(browseBtn);
+    connect(browseBtn, &QPushButton::clicked, this, [this] {
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, "选择贴图默认保存文件夹", m_dirEdit->text().trimmed());
+        if (!dir.isEmpty())
+            m_dirEdit->setText(dir);
+    });
+    form->addRow("贴图保存文件夹:", dirRow);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     form->addRow(buttons);
 
@@ -47,6 +65,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         s.setApiKey(m_keyEdit->text().trimmed());
         s.setApiModel(m_modelEdit->text().trimmed());
         s.setTargetLang(m_langEdit->text().trimmed());
+        s.setPinSaveDir(m_dirEdit->text().trimmed());
     });
 }
 

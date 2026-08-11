@@ -49,9 +49,13 @@ public:
     // 启动截图（捕获虚拟桌面画面并全屏显示）
     void startCapture();
 
+    // 复制当前截图（含标注）到剪贴板并关闭截图模式（F3 贴图的截图模式预处理），
+    // 返回本次选区（全局逻辑矩形）；无有效选区返回空 QRect
+    QRect copyToClipboardAndClose();
+
 signals:
-    // 完成截图（选中区域画面，含标注）；null 表示取消
-    void captured(const QPixmap &pixmap);
+    // 完成截图（选中区域画面，含标注）+ 选区全局逻辑矩形（F3 贴图定位用）；null 表示取消
+    void captured(const QPixmap &pixmap, const QRect &selectionLogical);
 
 protected:
     void paintEvent(QPaintEvent *event) override;

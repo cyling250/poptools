@@ -205,3 +205,20 @@
   - `CaptureWindow.h` 若成员含 `CaptureContext` 值对象，必须 include 其头文件（前向声明不够，C2079）
   - 文字提交删除分支（空文本删标注）也要 `stateChanged()` 同步撤销按钮，否则删除后 undo 按钮状态不更新
 - **验证**：Release 构建通过；核心单测 `tool_test` ALL PASSED；行为为纯代码搬移（不做功能变更），交互效果需实机回归
+
+## 24. F3 贴图功能实现（PinWindow 完整化 + 默认保存文件夹设置）
+- **需求**：F3 将最近一次截图（带批注）贴到屏幕顶层——初始位置 = 截图选区位置；拖动移动；右键菜单"清除"（仅清屏幕）/ "销毁"（清屏幕 + 删文件）；滚轮缩放；左下小阴影悬浮效果；**张贴同时自动保存到设置中的默认文件夹（用户自定义）**
+- **实现**：
+  - `Settings` 新增 `pinSaveDir()`/`setPinSaveDir()`（默认 `图片/MySnipaste`）；`SettingsDialog` 新增"贴图保存文件夹"行（QLineEdit + 浏览按钮）
+  - `PinWindow` 完整化：`pin(pixmap, globalTopLeft)`——保存落盘（时间戳文件名 `Pin_yyyyMMdd_hhmmss_zzz.png`）+ 按选区逻辑坐标定位 + 置顶显示；窗口逻辑尺寸 = 物理像素 / 所在屏幕 dpr；拖动（frameGeometry 偏移）、滚轮缩放（0.2x~5x，基于 baseSize 非累加）、右键菜单清除/销毁（`QFile::remove`）、`QGraphicsDropShadowEffect` 左下阴影（offset(-6,6)）+ `WA_TranslucentBackground`
+  - `CaptureWindow::captured` 信号扩展为携带选区全局逻辑矩形（F3 定位用）；`MainWindow` 记录 `m_lastPixmap`/`m_lastRect`，F3 热键回调 `m_pin->pin(...)`
+- **坑**：`QSize / qreal` 返回 `QSize`（整数除法）无 `toSize()`，须先 `QSizeF(...)` 再运算；`WA_DeleteOnClose` 与外部持有时会 double delete（PinWindow 由 MainWindow 持有，故不用）
+- **验证**：Release 构建通过；需实机 F1 截图 → F3 贴图 → 拖动/滚轮/右键清除/销毁 → 检查默认文件夹落盘
+- **Bug（修复）**：Enter 不再弹结果面板 + F3 逻辑重构为"贴剪贴板" + 疑似 F3 闪退：
+  - **Enter = 仅复制**：`CaptureWindow::confirm` 改为 render → `QGuiApplication::clipboard()->setPixmap` → exitCapture → emit captured；`MainWindow::onCaptured` 只记录 `m_lastPixmap`/`m_lastRect`（供 F3 定位），**不再 show ResultDialog**（该面板不再自动弹出）
+  - **F3 = 贴剪贴板最新图片**：`onPinHotKey`——截图模式先 `m_capture->copyToClipboardAndClose()`（复制当前截图+关闭截图模式），再从 `clipboard()->pixmap()` 读图（剪贴板为文字则 pixmap 空 → 无响应），贴到 `pinPosition()`（上次截图位置，未截图则屏幕中心）
+  - **F3 闪退排查**：写 `scripts/pin_test`（链接 PinWindow/Settings/GlobalHotKey）验证——独立 pin()、全局热键回调中 pin() 均不崩；主程序伪造截图数据/截图模式场景实测均不崩。未能复现，做**防御性修复**：热键回调改为 `QTimer::singleShot(0)` 延迟执行（WM_HOTKEY 在 nativeEventFilter 中同步 emit，直接在此上下文 show 窗口/操作 UI 存在时序风险），且 F3 不再依赖 m_lastPixmap
+- **提醒**：结果面板（ResultDialog）不再自动弹出后，OCR/翻译按钮暂无入口（面板类保留未删），后续如需可把入口移到别处
+- **Bug（修复）**：贴图多实例 + 位置规则 + 缩放步进——① 原来单个 PinWindow 实例重复 F3 覆盖前一张；改为每次 F3 `new PinWindow()`（`WA_DeleteOnClose`，右键清除/销毁/双击 → `close()` 自动销毁），多张贴图并存互不影响 ② 位置规则：截图模式 F3 → `copyToClipboardAndClose()` 返回**本次选区位置**（截图所在位置即张贴区域）；非截图模式 → 最近确认截图位置；两者皆无 → **鼠标当前位置**（`QCursor::pos()`）作为贴图左上角 ③ 缩放跨度：原 `angleDelta()/120` 每滚一格 m_scale ±1.0（1x→2x 翻倍），改为 `×0.1` 每格 ±0.1，0.2x~5x，以左上角为锚点（resize 保持 topLeft）
+- **Bug（修复）**：贴图阴影改为**内容下边与左边外侧手绘渐变**（光从右上照射的投影感）——弃用 QGraphicsDropShadowEffect（效果不可控/不明显），`paintEvent` 用 `QLinearGradient` 在内容左侧（宽 kShadow=14）与下侧（高 kShadow）画渐变（贴近内容最深 alpha130 → 外缘透明）；内容左上角固定于窗口内 `(kShadow, 0)`，窗口 `move(globalTopLeft - QPoint(kShadow, 0))` 保证**内容左上角 = 传入位置**；窗口尺寸 = 内容 + kShadow 边距（右/上无阴影，透出桌面）
+- **坑（pin_test 复现）**：`WA_DeleteOnClose` 的 widget 若在**栈上**创建，QApplication 析构会自动删除顶层窗口 → **double delete 堆损坏（0xC0000374）**；测试程序必须堆上 `new`。曾误判为阴影绘制问题，二分（注释阴影仍崩）后锁定根因

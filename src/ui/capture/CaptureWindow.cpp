@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QApplication>
 #include <QGuiApplication>
+#include <QClipboard>
 
 #include "core/annotation/AnnotationPainter.h"
 
@@ -549,16 +550,31 @@ namespace snipaste
         if (m_textEditCtrl->isEditing())
             m_textEditCtrl->commit();
 
-        // 裁剪选中区域并合成标注（输出为物理分辨率，含未完成草稿）
+        // 按下回车：仅复制到剪贴板并关闭截图模式（不再弹出结果面板）
         const QPixmap result = m_outputCtrl->render();
+        const QRect selLogical = m_selection; // 记录选区位置（供 F3 贴图定位）
+        QGuiApplication::clipboard()->setPixmap(result);
         exitCapture();
-        emit captured(result);
+        emit captured(result, selLogical);
+    }
+
+    QRect CaptureWindow::copyToClipboardAndClose()
+    {
+        if (m_state == State::Idle || m_selection.isEmpty())
+            return QRect();
+        if (m_textEditCtrl->isEditing())
+            m_textEditCtrl->commit();
+        // 复制当前截图（含标注）到剪贴板，并关闭截图模式；返回选区位置供贴图定位
+        const QRect sel = m_selection;
+        QGuiApplication::clipboard()->setPixmap(m_outputCtrl->render());
+        exitCapture();
+        return sel;
     }
 
     void CaptureWindow::cancel()
     {
         exitCapture();
-        emit captured(QPixmap());
+        emit captured(QPixmap(), QRect());
     }
 
     QPointF CaptureWindow::toLocal(const QPoint &global) const
