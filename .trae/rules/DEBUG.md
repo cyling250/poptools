@@ -191,3 +191,17 @@
   - 改字号/颜色后 `m_textEdit->setFocus()` 把焦点还给编辑框，用户可立即继续输入
   - 新增 `m_textEditStartColor`（输入开始色）：样式表默认色与提交后渲染兜底色 `it.color` 均用开始色——输入期间改色不影响已输入文字（无显式色片段渲染用开始色）；显式色（setTextColor/选区改色）嵌入 html 精确还原。编辑中显示与提交后渲染完全一致
 - **经验**：QTextEdit 样式表 `color` 是"默认色"，不嵌入 toHtml；`setTextColor`/mergeCharFormat 设置的**显式前景色**才嵌入 html → 天然支持"每段文字各自颜色"：开始色走 it.color 兜底、后续改色走显式色嵌入，无需额外规范化
+
+## 23. 重构：CaptureWindow"上帝类"拆分为门面 + 控制器组件（组合模式 + 依赖注入）
+- **问题**：`CaptureWindow.cpp` 1487 行 / 40 函数，承担窗口状态机、选区控制点几何、标注交互、文字编辑、OCR、输出合成 6 类职责，是典型上帝类；其余文件分层合理（core 纯逻辑 / ui / tools 策略模式）
+- **方案（用户拍板）**：窗口只留一个接口（门面），功能在不同文件中实现并注册到接口
+- **实现**（`ui/capture/` 扁平结构）：
+  - `CaptureWindow` 瘦身为**门面 + 事件路由**（1487→569 行）：窗口状态机（Idle→Selecting→Editing）、鼠标/键盘事件分发、绘制编排、控制器装配；对外接口不变（`startCapture`/`captured`）
+  - 新增 `CaptureContext`：共享状态（cap/canvas/toolbar/selection/selectedItem 指针）+ 窗口回调（requestUpdate/stateChanged/selectionChanged/exitRequested/beginTextEdit/hasDraft/paintDraft）——各控制器经此依赖注入，与窗口解耦
+  - 新增 6 个控制器：`SelectionController`（框选/移动/控制点 + 几何纯函数 + 蒙版/选区绘制）、`AnnotationEditor`（标注选中/拖动/缩放/删除 + 文字双击重编辑）、`ToolDrawingController`（工具三阶段 + ToolContext 组装 + 马赛克）、`TextEditingController`（文字编辑全部 + 字号/颜色三态联动）、`OcrController`（OCR 流程 + 字体匹配）、`OutputController`（结果合成/保存/复制）
+  - 构造顺序：窗口填 `m_ctx` 字段 → `make_unique` 注册控制器 → `init()` 创建输入框 → 连接工具栏信号路由到控制器
+- **坑**：
+  - `connect(...)` 是 `QObject` 静态成员，在**非 QObject 类**（各 Controller）中必须写 `QObject::connect`，否则 C3861
+  - `CaptureWindow.h` 若成员含 `CaptureContext` 值对象，必须 include 其头文件（前向声明不够，C2079）
+  - 文字提交删除分支（空文本删标注）也要 `stateChanged()` 同步撤销按钮，否则删除后 undo 按钮状态不更新
+- **验证**：Release 构建通过；核心单测 `tool_test` ALL PASSED；行为为纯代码搬移（不做功能变更），交互效果需实机回归

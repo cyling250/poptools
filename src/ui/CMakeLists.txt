@@ -11,6 +11,19 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 add_library(snipaste_ui STATIC
     capture/CaptureWindow.cpp
     capture/CaptureWindow.h
+    capture/CaptureContext.h
+    capture/SelectionController.cpp
+    capture/SelectionController.h
+    capture/AnnotationEditor.cpp
+    capture/AnnotationEditor.h
+    capture/ToolDrawingController.cpp
+    capture/ToolDrawingController.h
+    capture/TextEditingController.cpp
+    capture/TextEditingController.h
+    capture/OcrController.cpp
+    capture/OcrController.h
+    capture/OutputController.cpp
+    capture/OutputController.h
     capture/ToolBar.cpp
     capture/ToolBar.h
     capture/tools/ToolBase.h
