@@ -47,7 +47,3 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-
-; OCR 运行时临时目录 {app}\ocr_tmp（OcrService 生成），卸载时一并清理
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}\ocr_tmp"

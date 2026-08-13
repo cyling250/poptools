@@ -3,13 +3,14 @@
 #include <QObject>
 #include <QString>
 #include <QImage>
-#include <QProcess>
 #include <QRect>
 #include <QVector>
+#include <QFuture>
+#include <atomic>
 
 namespace snipaste {
 
-// OCR 文本框（tesseract TSV 输出，坐标为输入图像像素）
+// OCR 文本框（行级，坐标为输入图像像素）
 struct OcrBox
 {
     QRect rect;      // 文本框包围盒（图像像素坐标）
@@ -17,12 +18,14 @@ struct OcrBox
     qreal conf = 0;  // 平均置信度 0-100
 };
 
-// OCR 服务：调用 Tesseract 命令行识别图片文字（本地离线）
+// OCR 服务：进程内加载 libtesseract-5.dll（LoadLibrary）识别图片文字（本地离线）。
+// 识别在后台线程执行，完成后经信号回主线程；对外接口与原 QProcess 版本保持一致。
 class OcrService : public QObject
 {
     Q_OBJECT
 public:
     explicit OcrService(QObject *parent = nullptr);
+    ~OcrService() override;
 
     // 识别图片中的文字（异步），完成后发 ocrFinished
     void recognize(const QImage &image);
@@ -30,29 +33,22 @@ public:
     // 识别图片中的文字并返回文本框（异步），完成后发 ocrBoxesFinished
     void recognizeBoxes(const QImage &image);
 
-    // 是否正忙
-    bool busy() const { return m_process.state() != QProcess::NotRunning; }
+    // 是否正忙（上一次识别未结束）
+    bool busy() const { return m_busy.load(std::memory_order_relaxed); }
 
-    // 引擎是否可用（tesseract.exe 是否存在）
+    // 引擎是否可用（DLL 与语言包是否齐备）
     bool available() const;
 
 signals:
     void ocrFinished(bool ok, const QString &text, const QString &error);
     void ocrBoxesFinished(bool ok, const QVector<OcrBox> &boxes, const QString &error);
 
-private slots:
-    void onFinished(int exitCode, QProcess::ExitStatus status);
-
 private:
-    // 启动识别（text 模式输出纯文本；boxes 模式输出 TSV 并解析行级文本框）
-    void start(const QImage &image, bool boxes);
-    // 删除当前 OCR 工作目录并清空 m_workDir
-    void cleanupWorkDir();
+    // 后台线程执行一次识别（text 模式输出纯文本；boxes 模式输出行级文本框）
+    void runInBackground(const QImage &image, bool boxes);
 
-    QProcess m_process;
-    QImage m_lastImage;
-    bool m_boxesMode = false;
-    QString m_workDir; // 当前 OCR 工作目录（软件目录下），识别结束后清理
+    std::atomic<bool> m_busy{false};
+    QFuture<void> m_future; // 保存后台任务，析构时等待结束，避免悬垂访问
 };
 
 } // namespace snipaste

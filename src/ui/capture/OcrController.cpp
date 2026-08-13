@@ -31,7 +31,7 @@ void OcrController::request(QWidget *parent)
     if (!m_ocr.available())
     {
         QMessageBox::warning(parent, "文字识别",
-                             "未找到 OCR 引擎 tesseract.exe，请确认其位于程序目录的 tesseract 文件夹中。");
+                             "未找到 OCR 引擎（libtesseract-5.dll），请确认其位于程序目录的 tesseract 文件夹中。");
         return;
     }
 

@@ -6,7 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg Concurrent)
 
 add_library(snipaste_core STATIC
     annotation/AnnotationCanvas.cpp
@@ -33,6 +33,7 @@ target_link_libraries(snipaste_core PUBLIC
     Qt6::Core
     Qt6::Gui
     Qt6::Network
+    Qt6::Concurrent
 )
 
 # Windows 全局热键需要 user32；智能框选 MSAA 需要 oleacc

@@ -1,11 +1,11 @@
 #include "OcrService.h"
 
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QCoreApplication>
-#include <QProcessEnvironment>
-#include <QUuid>
+#include <QtConcurrent/QtConcurrent>
+
+#include <windows.h>
 
 namespace snipaste
 {
@@ -20,240 +20,227 @@ namespace snipaste
             return QCoreApplication::applicationDirPath() + "/tesseract";
         }
 
-        // 判断文本是否包含中日韩字符（决定行文本拼接时是否加空格）
-        bool containsCjk(const QString &s)
-        {
-            for (QChar ch : s)
-            {
-                const ushort u = ch.unicode();
-                if ((u >= 0x3400 && u <= 0x4DBF)     // CJK 扩展 A
-                    || (u >= 0x4E00 && u <= 0x9FFF)  // CJK 统一表意
-                    || (u >= 0x3000 && u <= 0x30FF)  // 标点 / 假名
-                    || (u >= 0xF900 && u <= 0xFAFF)) // CJK 兼容表意
-                    return true;
-            }
-            return false;
-        }
+        // ---- libtesseract C API（动态加载，声明与本机 DLL 导出一致，见 capi.h）----
+        // 仅声明本项目用到的函数；全部为 extern "C" 导出，GetProcAddress 按名字取。
+        // 不透明句柄：只以指针使用，不需要完整定义（也避免引入 leptonica 头）
+        typedef struct TessBaseAPI TessBaseAPI;
+        typedef struct TessResultIterator TessResultIterator;
+        typedef struct TessPageIterator TessPageIterator;
 
-        // 行内词拼接：中英混排时 CJK 之间不加空格，ASCII 词之间加空格
-        QString joinWords(const QStringList &words)
+        struct TessApi
         {
-            QString out;
-            for (int i = 0; i < words.size(); ++i)
+            HMODULE dll = nullptr;
+
+            TessBaseAPI *(*Create)() = nullptr;
+            void (*Delete)(TessBaseAPI *) = nullptr;
+            int (*Init2)(TessBaseAPI *, const char *, const char *, int) = nullptr;
+            void (*SetImage)(TessBaseAPI *, const unsigned char *, int, int, int, int) = nullptr;
+            void (*SetPageSegMode)(TessBaseAPI *, int) = nullptr;
+            int (*Recognize)(TessBaseAPI *, void *) = nullptr;
+            char *(*GetUTF8Text)(TessBaseAPI *) = nullptr;
+            void (*DeleteText)(const char *) = nullptr;
+            TessResultIterator *(*GetIterator)(TessBaseAPI *) = nullptr;
+            TessPageIterator *(*ResultIteratorPageIterator)(TessResultIterator *) = nullptr;
+            int (*ResultIteratorNext)(TessResultIterator *, int) = nullptr;
+            char *(*ResultIteratorGetUTF8Text)(TessResultIterator *, int) = nullptr;
+            float (*ResultIteratorConfidence)(TessResultIterator *, int) = nullptr;
+            int (*PageIteratorBoundingBox)(TessPageIterator *, int,
+                                           int *, int *, int *, int *) = nullptr;
+
+            bool load(const QString &dir)
             {
-                if (i > 0)
+                // libtesseract 依赖同目录的 libleptonica 等 MSYS2 DLL：
+                // 先把目录加入 DLL 搜索路径，再按完整路径加载主 DLL
+                SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dir.utf16()));
+                const QString dllPath = dir + QStringLiteral("/libtesseract-5.dll");
+                dll = LoadLibraryW(reinterpret_cast<LPCWSTR>(dllPath.utf16()));
+                if (!dll)
+                    return false;
+
+                Create = (TessBaseAPI *(*)())GetProcAddress(dll, "TessBaseAPICreate");
+                Delete = (void (*)(TessBaseAPI *))GetProcAddress(dll, "TessBaseAPIDelete");
+                Init2 = (int (*)(TessBaseAPI *, const char *, const char *, int))GetProcAddress(
+                    dll, "TessBaseAPIInit2");
+                SetImage = (void (*)(TessBaseAPI *, const unsigned char *, int, int, int, int))GetProcAddress(
+                    dll, "TessBaseAPISetImage");
+                SetPageSegMode = (void (*)(TessBaseAPI *, int))GetProcAddress(
+                    dll, "TessBaseAPISetPageSegMode");
+                Recognize = (int (*)(TessBaseAPI *, void *))GetProcAddress(dll, "TessBaseAPIRecognize");
+                GetUTF8Text = (char *(*)(TessBaseAPI *))GetProcAddress(dll, "TessBaseAPIGetUTF8Text");
+                DeleteText = (void (*)(const char *))GetProcAddress(dll, "TessDeleteText");
+                GetIterator = (TessResultIterator *(*)(TessBaseAPI *))GetProcAddress(
+                    dll, "TessBaseAPIGetIterator");
+                ResultIteratorPageIterator = (TessPageIterator *(*)(TessResultIterator *))GetProcAddress(
+                    dll, "TessResultIteratorGetPageIterator");
+                ResultIteratorNext = (int (*)(TessResultIterator *, int))GetProcAddress(
+                    dll, "TessResultIteratorNext");
+                ResultIteratorGetUTF8Text = (char *(*)(TessResultIterator *, int))GetProcAddress(
+                    dll, "TessResultIteratorGetUTF8Text");
+                ResultIteratorConfidence = (float (*)(TessResultIterator *, int))GetProcAddress(
+                    dll, "TessResultIteratorConfidence");
+                PageIteratorBoundingBox = (int (*)(TessPageIterator *, int,
+                                                   int *, int *, int *, int *))GetProcAddress(
+                    dll, "TessPageIteratorBoundingBox");
+                return dll && Create && Delete && Init2 && SetImage && SetPageSegMode
+                       && Recognize && GetUTF8Text && DeleteText && GetIterator
+                       && ResultIteratorPageIterator && ResultIteratorNext
+                       && ResultIteratorGetUTF8Text && ResultIteratorConfidence
+                       && PageIteratorBoundingBox;
+            }
+
+            void unload()
+            {
+                if (dll)
                 {
-                    const bool prevCjk = containsCjk(words[i - 1]);
-                    const bool curCjk = containsCjk(words[i]);
-                    if (!prevCjk && !curCjk)
-                        out += QLatin1Char(' ');
+                    FreeLibrary(dll);
+                    dll = nullptr;
                 }
-                out += words[i];
             }
-            return out;
-        }
+        };
 
-        // 解析 tesseract TSV（stdout）：按 (block, par, line) 把 word 行聚合为行级文本框，
-        // 保证"连成一段的连续文字"处于同一个文本框而非逐字拆分。
-        QVector<OcrBox> parseOcrTsv(const QByteArray &raw)
-        {
-            QVector<OcrBox> boxes;
-            // Windows 下 tesseract TSV 行尾为 \r\n：先移除 \r，否则 header 末列 "text" 变成
-            // "text\r"，indexOf 匹配失败导致解析直接返回空（曾表现为识别结果永远为空）
-            const QStringList lines =
-                QString::fromUtf8(raw).remove(QLatin1Char('\r')).split(QLatin1Char('\n'));
-            if (lines.size() < 2)
-                return boxes;
-
-            const QStringList header = lines[0].split(QLatin1Char('\t'));
-            const int iLevel = header.indexOf(QLatin1String("level"));
-            const int iBlock = header.indexOf(QLatin1String("block_num"));
-            const int iPar = header.indexOf(QLatin1String("par_num"));
-            const int iLine = header.indexOf(QLatin1String("line_num"));
-            const int iLeft = header.indexOf(QLatin1String("left"));
-            const int iTop = header.indexOf(QLatin1String("top"));
-            const int iW = header.indexOf(QLatin1String("width"));
-            const int iH = header.indexOf(QLatin1String("height"));
-            const int iConf = header.indexOf(QLatin1String("conf"));
-            const int iText = header.indexOf(QLatin1String("text"));
-            if (iLevel < 0 || iText < 0 || iBlock < 0 || iLine < 0)
-                return boxes;
-
-            struct LineAgg
-            {
-                QRect rect;
-                QStringList words;
-                double confSum = 0;
-                int confN = 0;
-            };
-            QMap<QString, LineAgg> groups; // key: "block/par/line"
-            QStringList order;             // 保持组出现顺序（TSV 本身即阅读顺序）
-
-            for (int i = 1; i < lines.size(); ++i)
-            {
-                const QStringList c = lines[i].split(QLatin1Char('\t'));
-                if (c.size() <= iText || c[iLevel].trimmed() != QLatin1String("5"))
-                    continue; // 仅取 word 级行
-                const QString text = c[iText].trimmed();
-                const double conf = c[iConf].toDouble();
-                if (text.isEmpty() || conf < 30.0)
-                    continue; // 跳过空词 / 低置信度词
-
-                const QString key = QStringLiteral("%1/%2/%3")
-                                        .arg(c[iBlock], c[iPar], c[iLine]);
-                if (!groups.contains(key))
-                    order.append(key);
-                LineAgg &g = groups[key];
-                const QRect w(c[iLeft].toInt(), c[iTop].toInt(), c[iW].toInt(), c[iH].toInt());
-                g.rect = g.rect.isNull() ? w : g.rect.united(w);
-                g.words << text;
-                g.confSum += conf;
-                g.confN++;
-            }
-
-            for (const QString &key : order)
-            {
-                const LineAgg &g = groups[key];
-                if (g.confN == 0 || g.rect.isNull())
-                    continue;
-                OcrBox b;
-                b.rect = g.rect;
-                b.text = joinWords(g.words);
-                b.conf = g.confSum / g.confN;
-                boxes.append(b);
-            }
-            return boxes;
-        }
+        // capi.h 常量（与本机 libtesseract-5.dll 保持一致）
+        constexpr int OEM_LSTM_ONLY = 1;
+        constexpr int PSM_SINGLE_BLOCK = 6; // 与原命令行 --psm 6 一致
+        constexpr int RIL_TEXTLINE = 2;
+        constexpr float kMinConfidence = 30.0f; // 与原 TSV 解析的置信度阈值一致
 
     } // namespace
 
     OcrService::OcrService(QObject *parent)
         : QObject(parent)
     {
-        connect(&m_process, &QProcess::finished,
-                this, &OcrService::onFinished);
-        connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-            cleanupWorkDir();
-        });
     }
 
-    void OcrService::cleanupWorkDir()
+    OcrService::~OcrService()
     {
-        if (!m_workDir.isEmpty()) {
-            const QString parent = QFileInfo(m_workDir).absolutePath();
-            QDir(m_workDir).removeRecursively();
-            // 顺手删除空壳父目录（ocr_tmp/），非空（异常残留）则保留
-            if (QDir(parent).exists())
-                QDir(parent).rmdir(parent);
-            m_workDir.clear();
-        }
+        // 等待后台识别线程结束，避免析构后悬垂访问
+        m_future.waitForFinished();
     }
 
     bool OcrService::available() const
     {
-        return QFileInfo::exists(tesseractDir() + "/tesseract.exe");
+        const QString dir = tesseractDir();
+        return QFileInfo::exists(dir + QStringLiteral("/libtesseract-5.dll"))
+               && (QFileInfo::exists(dir + QStringLiteral("/tessdata/chi_sim.traineddata"))
+                   || QFileInfo::exists(dir + QStringLiteral("/tessdata/eng.traineddata")));
     }
 
     void OcrService::recognize(const QImage &image)
     {
-        start(image, false);
+        runInBackground(image, false);
     }
 
     void OcrService::recognizeBoxes(const QImage &image)
     {
-        start(image, true);
+        runInBackground(image, true);
     }
 
-    void OcrService::start(const QImage &image, bool boxes)
+    void OcrService::runInBackground(const QImage &image, bool boxes)
     {
         if (busy() || image.isNull())
             return;
+        m_busy.store(true, std::memory_order_relaxed);
+        m_future = QtConcurrent::run([this, image, boxes]() {
+            const QString dir = tesseractDir();
+            const QString dllPath = dir + QStringLiteral("/libtesseract-5.dll");
 
-        m_lastImage = image;
-        m_boxesMode = boxes;
+            TessApi api;
+            if (!QFileInfo::exists(dllPath) || !api.load(dir))
+            {
+                m_busy.store(false, std::memory_order_relaxed);
+                emit ocrFinished(false, QString(),
+                                 QStringLiteral("未找到 OCR 引擎: %1").arg(dllPath));
+                return;
+            }
 
-        // OCR 工作目录放在软件目录（exe 旁）而非系统临时目录：
-        // ① 此前用 QTemporaryDir 局部变量，start() 返回即被析构删除，而 QProcess 异步运行，
-        //    tesseract 读取 input.png 时文件已不存在 → "Can not read input file"；
-        // ② 中间文件统一落盘在软件目录，识别结束后（onFinished / errorOccurred）清理。
-        const QString base = QCoreApplication::applicationDirPath();
-        m_workDir = base + "/ocr_tmp/"
-                    + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-        if (!QDir().mkpath(m_workDir))
-        {
-            emit ocrFinished(false, QString(), "无法创建 OCR 工作目录");
-            return;
-        }
-        const QString imgPath = m_workDir + "/input.png";
-        if (!image.save(imgPath, "PNG"))
-        {
-            cleanupWorkDir();
-            emit ocrFinished(false, QString(), "图片保存失败");
-            return;
-        }
+            // 引擎生命周期：Create → Init → SetImage → Recognize → 取结果 → Delete
+            TessBaseAPI *handle = api.Create();
+            if (!handle)
+            {
+                m_busy.store(false, std::memory_order_relaxed);
+                emit ocrFinished(false, QString(), QStringLiteral("创建 OCR 引擎失败"));
+                return;
+            }
 
-        // 引擎固定在 exe 旁统一目录（tesseract\），不允许用户修改
-        const QString tessPath = tesseractDir() + "/tesseract.exe";
-        if (!QFileInfo::exists(tessPath))
-        {
-            cleanupWorkDir();
-            emit ocrFinished(false, QString(),
-                             QString("未找到 tesseract: %1").arg(tessPath));
-            return;
-        }
+            const QString tessdata = dir + QStringLiteral("/tessdata");
+            const QByteArray tessdata8 = QFileInfo::exists(tessdata)
+                                             ? tessdata.toUtf8()
+                                             : QByteArray();
+            const QByteArray lang8 = "chi_sim+eng";
+            // OEM_LSTM_ONLY：仅用 LSTM 引擎，与语言包（tessdata_fast）匹配
+            const int initRet = api.Init2(handle,
+                                          tessdata8.isEmpty() ? nullptr : tessdata8.constData(),
+                                          lang8.constData(), OEM_LSTM_ONLY);
+            if (initRet != 0)
+            {
+                api.Delete(handle);
+                m_busy.store(false, std::memory_order_relaxed);
+                emit ocrFinished(false, QString(),
+                                 QStringLiteral("tesseract 初始化失败（tessdata 语言包缺失？）"));
+                return;
+            }
 
-        // tesseract input.png stdout -l chi_sim+eng --psm 6 [tsv]
-        QStringList args;
-        args << imgPath << "stdout"
-             << "-l" << "chi_sim+eng"
-             << "--psm" << "6";
-        if (boxes)
-            args << "tsv"; // 输出 TSV（含行级包围盒）
+            // 灰度图直接喂给引擎（坐标为输入图像像素，与 OcrBox 语义一致）
+            const QImage gray = image.convertToFormat(QImage::Format_Grayscale8);
+            const int bpp = 1; // 8 位灰度
+            const int stride = gray.bytesPerLine();
+            api.SetImage(handle, gray.constBits(), gray.width(), gray.height(), bpp, stride);
+            api.SetPageSegMode(handle, PSM_SINGLE_BLOCK);
+            api.Recognize(handle, nullptr);
 
-        // tessdata 优先级：统一目录 tessdata > exe 旁 tessdata > tesseract 默认
-        const QString appTessdata = tesseractDir() + "/tessdata";
-        const QString sidecarTessdata =
-            QCoreApplication::applicationDirPath() + "/tessdata";
-        const QString tessdata =
-            QFileInfo::exists(appTessdata)       ? appTessdata
-            : QFileInfo::exists(sidecarTessdata) ? sidecarTessdata
-                                                 : QString();
-        if (!tessdata.isEmpty())
-        {
-            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-            env.insert("TESSDATA_PREFIX", tessdata);
-            m_process.setProcessEnvironment(env);
-        }
+            QString error;
+            if (boxes)
+            {
+                QVector<OcrBox> result;
+                TessResultIterator *iter = api.GetIterator(handle);
+                if (iter)
+                {
+                    // 遍历每个文本行：迭代器初始在最高层级，先 Next 到行级再取内容
+                    // （与官方 examples/api_test.cpp 用法一致）
+                    while (api.ResultIteratorNext(iter, RIL_TEXTLINE))
+                    {
+                        TessPageIterator *pageIter = api.ResultIteratorPageIterator(iter);
+                        int left = 0, top = 0, right = 0, bottom = 0;
+                        if (api.PageIteratorBoundingBox(pageIter, RIL_TEXTLINE,
+                                                        &left, &top, &right, &bottom))
+                        {
+                            char *utf8 = api.ResultIteratorGetUTF8Text(iter, RIL_TEXTLINE);
+                            const float conf = api.ResultIteratorConfidence(iter, RIL_TEXTLINE);
+                            if (utf8)
+                            {
+                                const QString text = QString::fromUtf8(utf8).trimmed();
+                                api.DeleteText(utf8);
+                                if (!text.isEmpty() && conf >= kMinConfidence)
+                                {
+                                    OcrBox b;
+                                    b.rect = QRect(left, top, right - left, bottom - top);
+                                    b.text = text;
+                                    b.conf = conf;
+                                    result.append(b);
+                                }
+                            }
+                        }
+                    }
+                }
+                if (result.isEmpty())
+                    error = QStringLiteral("未识别到文字");
+                m_busy.store(false, std::memory_order_relaxed);
+                api.Delete(handle);
+                emit ocrBoxesFinished(!result.isEmpty(), result,
+                                     result.isEmpty() ? error : QString());
+                return;
+            }
 
-        m_process.start(tessPath, args);
-    }
-
-    void OcrService::onFinished(int exitCode, QProcess::ExitStatus status)
-    {
-        const bool normal = (status == QProcess::NormalExit && exitCode == 0);
-
-        if (m_boxesMode)
-        {
-            const QByteArray raw = m_process.readAllStandardOutput();
-            QString err = QString::fromUtf8(m_process.readAllStandardError()).trimmed();
-            const QVector<OcrBox> boxes = parseOcrTsv(raw);
-            const bool ok = normal && !boxes.isEmpty();
-            if (!ok && err.isEmpty())
-                err = QString("tesseract 退出码 %1").arg(exitCode);
-            emit ocrBoxesFinished(ok, boxes, ok ? QString() : err);
-            cleanupWorkDir();
-            return;
-        }
-
-        const QString text = QString::fromUtf8(m_process.readAllStandardOutput()).trimmed();
-        QString err = QString::fromUtf8(m_process.readAllStandardError()).trimmed();
-
-        const bool ok = normal && !text.isEmpty();
-        if (!ok && err.isEmpty())
-            err = QString("tesseract 退出码 %1").arg(exitCode);
-
-        emit ocrFinished(ok, text, ok ? QString() : err);
-        cleanupWorkDir();
+            char *utf8 = api.GetUTF8Text(handle);
+            const QString text = utf8 ? QString::fromUtf8(utf8).trimmed() : QString();
+            if (utf8)
+                api.DeleteText(utf8);
+            if (text.isEmpty())
+                error = QStringLiteral("未识别到文字");
+            m_busy.store(false, std::memory_order_relaxed);
+            api.Delete(handle);
+            emit ocrFinished(!text.isEmpty(), text, text.isEmpty() ? error : QString());
+        });
     }
 
 } // namespace snipaste

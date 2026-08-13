@@ -120,7 +120,7 @@ void MainWindow::onOcrRequested()
         return;
     if (!m_ocr->available()) {
         QMessageBox::warning(m_result, "OCR",
-            "未找到 tesseract.exe，请在设置中配置 Tesseract 路径。");
+            "未找到 OCR 引擎（libtesseract-5.dll），请确认其位于程序目录的 tesseract 文件夹中。");
         return;
     }
     m_ocr->recognize(m_lastPixmap.toImage());
