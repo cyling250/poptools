@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QStandardPaths>
+#include <QMessageBox>
 
 #include "core/annotation/AnnotationPainter.h"
 
@@ -36,7 +37,10 @@ void OutputController::save(QWidget *parent)
         "PNG 图片 (*.png);;JPEG 图片 (*.jpg)");
     if (path.isEmpty())
         return; // 用户取消对话框 → 留在编辑界面
-    result.save(path);
+    if (!result.save(path)) {
+        QMessageBox::warning(parent, "保存失败", "无法保存截图到所选路径。\n\n路径: " + path);
+        return; // 保存失败，留在编辑界面
+    }
     m_ctx->exitRequested(); // 保存后退出截图界面（显式操作才退出，防误触）
 }
 

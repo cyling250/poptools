@@ -116,7 +116,10 @@ ResultDialog::ResultDialog(QWidget *parent)
     connect(m_ocrBtn, &QPushButton::clicked, this, &ResultDialog::onOcrClicked);
     connect(m_translateBtn, &QPushButton::clicked, this, &ResultDialog::onTranslateClicked);
     connect(copyBtn, &QPushButton::clicked, this, [this] {
-        QGuiApplication::clipboard()->setText(m_ocrText + "\n\n" + m_translateLabel->text());
+        const QString ocr = m_ocrText.isEmpty() ? QString() : m_ocrText;
+        const QString tr  = m_translateResult.isEmpty() ? QString() : m_translateResult;
+        QGuiApplication::clipboard()->setText(
+            ocr + (ocr.isEmpty() || tr.isEmpty() ? QString() : "\n\n") + tr);
     });
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
 }
@@ -136,6 +139,7 @@ void ResultDialog::setOcrText(const QString &text)
 
 void ResultDialog::setTranslateText(const QString &text)
 {
+    m_translateResult = text;
     m_translateLabel->setText(text.isEmpty() ? "（尚未翻译）" : text);
 }
 

@@ -280,9 +280,9 @@ std::vector<QRect> detectImageBorders(const QImage &physImage,
         return {};
 
     // 统一为 RGBA 连续内存，适配 OpenCV Mat
-    const QImage rgba = physImage.convertToFormat(QImage::Format_RGBA8888);
+    QImage rgba = physImage.convertToFormat(QImage::Format_RGBA8888);
     cv::Mat img(rgba.height(), rgba.width(), CV_8UC4,
-                const_cast<uchar *>(rgba.constBits()), rgba.bytesPerLine());
+                rgba.bits(), rgba.bytesPerLine());
     const int w = img.cols;
     const int h = img.rows;
 

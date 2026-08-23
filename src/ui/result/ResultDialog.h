@@ -32,6 +32,7 @@ private:
     QPushButton *m_ocrBtn;
     QPushButton *m_translateBtn;
     QString m_ocrText;
+    QString m_translateResult;
 };
 
 } // namespace snipaste

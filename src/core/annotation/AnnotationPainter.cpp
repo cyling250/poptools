@@ -85,6 +85,14 @@ AnnotationItem AnnotationPainter::scaledItem(const AnnotationItem &src, const QR
         const qreal s = newBounds.height() / oldBounds.height();
         it.font.setPointSizeF(qMax(4.0, it.font.pointSizeF() * s));
     }
+    if (it.type == AnnotationType::Mosaic && !it.mosaicImage.isNull()
+        && oldBounds.width() > 0 && oldBounds.height() > 0) {
+        // 马赛克图像随框等比缩放，避免多次缩放后质量严重下降
+        it.mosaicImage = it.mosaicImage.scaled(
+            qMax(1, qRound(it.mosaicImage.width() * newBounds.width() / oldBounds.width())),
+            qMax(1, qRound(it.mosaicImage.height() * newBounds.height() / oldBounds.height())),
+            Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
     return it;
 }
 
@@ -94,16 +102,18 @@ qreal AnnotationPainter::distanceToItem(const QPointF &pos, const AnnotationItem
     switch (it.type) {
     case AnnotationType::Rect:
     case AnnotationType::Ellipse:
-    case AnnotationType::Text:
+    case AnnotationType::Text: {
         // 命中测试：点在图形边界附近（取外接矩形外扩 tol）
-        d = it.rect.adjusted(-6, -6, 6, 6).contains(pos)
+        const bool inside = it.rect.adjusted(-6, -6, 6, 6).contains(pos);
+        d = inside
                 ? qMin(qAbs(pos.x() - it.rect.left()), qMin(qAbs(pos.x() - it.rect.right()),
                                                             qMin(qAbs(pos.y() - it.rect.top()),
                                                                  qAbs(pos.y() - it.rect.bottom()))))
                 : 1e9;
-        if (it.rect.adjusted(-6, -6, 6, 6).contains(pos) && d > 6)
+        if (inside && d > 6)
             d = 0; // 点在框内（填充/文本区域）
         break;
+    }
     case AnnotationType::Line:
     case AnnotationType::Arrow:
     case AnnotationType::Polyline:

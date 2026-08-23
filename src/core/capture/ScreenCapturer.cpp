@@ -8,6 +8,8 @@ namespace snipaste {
 
 QRect ScreenCapturer::screenPhysicalRect(const QScreen *s)
 {
+    if (!s)
+        return {};
     const qreal dpr = s->devicePixelRatio();
     const QRect lg = s->geometry();
     const QPoint tl(qRound(lg.left() * dpr), qRound(lg.top() * dpr));

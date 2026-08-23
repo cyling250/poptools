@@ -24,6 +24,7 @@ MainWindow::MainWindow(QObject *parent)
     m_tray->setToolTip("MySnipaste\n按 F1 截图");
 
     m_menu = new QMenu();
+    m_menu->setObjectName("TrayMenu");
     // 菜单标题显示当前模式（托盘区域文字提示）
     m_menu->setTitle("MySnipaste");
     m_menu->addAction("截图 (F1)", this, [this] {
@@ -45,7 +46,7 @@ MainWindow::MainWindow(QObject *parent)
     m_tray->setContextMenu(m_menu);
     m_tray->show();
 
-    // 截图窗口
+    // 截图窗口（无父窗口，顶层窗口由 QApplication 在退出时清理）
     m_capture = new CaptureWindow();
     connect(m_capture, &CaptureWindow::captured, this, &MainWindow::onCaptured);
 
@@ -56,7 +57,7 @@ MainWindow::MainWindow(QObject *parent)
     connect(m_translator, &Translator::translateFinished,
             this, &MainWindow::onTranslateFinished);
 
-    // 结果面板
+    // 结果面板（无父窗口，顶层窗口由 QApplication 在退出时清理）
     m_result = new ResultDialog();
     connect(m_result, &ResultDialog::ocrRequested, this, &MainWindow::onOcrRequested);
     connect(m_result, &ResultDialog::translateRequested,
@@ -154,6 +155,8 @@ void MainWindow::onShowSettings()
 {
     SettingsDialog dlg(m_result);
     dlg.exec();
+    // 设置保存后刷新运行时组件：Translator 每次 translate() 读取最新 Settings，
+    // 无需额外操作；若有缓存配置的组件，在此处刷新。
 }
 
 } // namespace snipaste

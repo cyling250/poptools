@@ -53,6 +53,25 @@ namespace snipaste
         m_ctx.selectedItem = &m_selectedItem;
         m_ctx.requestUpdate = [this]
         { update(); };
+        // ---- OCR 文字栏（面板模式）与翻译服务（在 selectionChanged 之前创建，避免悬垂访问）----
+        m_ocrPanel = std::make_unique<OcrPanel>(this);
+        m_ocrPanel->hide();
+        m_translator = std::make_unique<Translator>(this);
+        m_ctx.showOcrPanel = [this](const QString &text)
+        { showOcrPanel(text); };
+        // 【译】按钮：OCR 原文自动翻译（目标语言取面板当前选择）
+        m_ctx.translateRequested = [this](const QString &text)
+        { m_translator->translate(text, m_ocrPanel->sourceLang(), m_ocrPanel->targetLang()); };
+        m_ctx.setPanelBusy = [this](bool busy)
+        { m_ocrPanel->setBusy(busy); };
+        // 面板内"翻译"按钮：手动重新翻译（源/目标语言取自面板下拉）
+        QObject::connect(m_ocrPanel.get(), &OcrPanel::translateRequested, this,
+                         [this](const QString &text, const QString &fromLang, const QString &toLang)
+                         {
+                             m_ocrPanel->setBusy(true);
+                             m_translator->translate(text, fromLang, toLang);
+                         });
+
         m_ctx.stateChanged = [this]
         {
             m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
@@ -86,25 +105,6 @@ namespace snipaste
         m_ocrCtrl = std::make_unique<OcrController>(&m_ctx);
         m_outputCtrl = std::make_unique<OutputController>(&m_ctx);
         m_textEditCtrl->init(this); // 创建文字内嵌输入框
-
-        // ---- OCR 文字栏（面板模式）与翻译服务 ----
-        m_ocrPanel = std::make_unique<OcrPanel>(this);
-        m_ocrPanel->hide();
-        m_translator = std::make_unique<Translator>(this);
-        m_ctx.showOcrPanel = [this](const QString &text)
-        { showOcrPanel(text); };
-        // 【译】按钮：OCR 原文自动翻译（目标语言取面板当前选择）
-        m_ctx.translateRequested = [this](const QString &text)
-        { m_translator->translate(text, m_ocrPanel->sourceLang(), m_ocrPanel->targetLang()); };
-        m_ctx.setPanelBusy = [this](bool busy)
-        { m_ocrPanel->setBusy(busy); };
-        // 面板内"翻译"按钮：手动重新翻译（源/目标语言取自面板下拉）
-        QObject::connect(m_ocrPanel.get(), &OcrPanel::translateRequested, this,
-                         [this](const QString &text, const QString &fromLang, const QString &toLang)
-                         {
-                             m_ocrPanel->setBusy(true);
-                             m_translator->translate(text, fromLang, toLang);
-                         });
         QObject::connect(m_translator.get(), &Translator::translateFinished, this,
                          [this](bool ok, const QString &result, const QString &error)
                          {
@@ -712,7 +712,7 @@ namespace snipaste
     // GUI 线程有死锁风险），故放到 QtConcurrent 工作线程，完成后回到主线程生效。
     void CaptureWindow::rebuildSmartCandidates()
     {
-        if (m_smartCandidatesBusy.load())
+        if (m_smartCandidatesBusy.exchange(true))
             return; // 已有构建进行中，避免重复
 
         // 在工作线程内所需的快照（不访问本对象成员，避免跨线程共享）
@@ -727,7 +727,6 @@ namespace snipaste
         const int gen = m_smartGen;
 
         m_smartCandidatesReady = false;
-        m_smartCandidatesBusy.store(true);
 
         auto worker = QtConcurrent::run(
             [dpr, exclude, phys, localOrigin, useImage]() -> std::vector<QRect> {

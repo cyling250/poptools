@@ -45,6 +45,8 @@ namespace snipaste
     static QIcon svgIcon(const QString &name, const QColor &color, int size = 20)
     {
         QSvgRenderer renderer(QString(":/icons/%1.svg").arg(name));
+        if (!renderer.isValid())
+            return QIcon(); // 资源缺失时返回空图标（调用方应能处理）
         QPixmap src(size, size);
         src.fill(Qt::transparent);
         {

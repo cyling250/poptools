@@ -87,12 +87,14 @@ add_custom_command(TARGET MySnipaste POST_BUILD
 )
 
 # 部署 OpenCV 运行库（opencv_world 动态库）到可执行文件旁，供窗口识别算法使用
-if(EXISTS "${OPENCV_ROOT}/build/x64/vc16/bin/opencv_world4100.dll")
+# DLL 名按 OpenCV 版本生成：opencv_world${MAJOR}${MINOR}${PATCH}0.dll
+set(OPENCV_DLL_NAME "opencv_world${OpenCV_VERSION_MAJOR}${OpenCV_VERSION_MINOR}${OpenCV_VERSION_PATCH}0.dll")
+if(EXISTS "${OPENCV_ROOT}/build/x64/vc16/bin/${OPENCV_DLL_NAME}")
     add_custom_command(TARGET MySnipaste POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${OPENCV_ROOT}/build/x64/vc16/bin/opencv_world4100.dll"
-            "$<TARGET_FILE_DIR:MySnipaste>/opencv_world4100.dll"
-        COMMENT "Deploying OpenCV runtime (opencv_world4100.dll)"
+            "${OPENCV_ROOT}/build/x64/vc16/bin/${OPENCV_DLL_NAME}"
+            "$<TARGET_FILE_DIR:MySnipaste>/${OPENCV_DLL_NAME}"
+        COMMENT "Deploying OpenCV runtime (${OPENCV_DLL_NAME})"
     )
 endif()
 

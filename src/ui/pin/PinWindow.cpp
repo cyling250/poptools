@@ -30,7 +30,6 @@ PinWindow::PinWindow(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
     // 支持多张贴图并存：每次 F3 创建新实例，关闭（清除/销毁/双击）即销毁
     setAttribute(Qt::WA_DeleteOnClose);
-    setMouseTracking(true);
 }
 
 void PinWindow::pin(const QPixmap &pixmap, const QPoint &globalTopLeft)

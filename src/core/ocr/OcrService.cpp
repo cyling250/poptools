@@ -50,9 +50,15 @@ namespace snipaste
 
         bool load(const QString &dir)
         {
+            // 临时将 DLL 搜索目录设为 tesseract 目录（仅影响 LoadLibrary 调用）
+            // 保存旧目录并在加载后恢复，避免影响进程中其他 DLL 加载行为
+            WCHAR oldDir[MAX_PATH] = {};
+            DWORD oldLen = GetDllDirectoryW(MAX_PATH, oldDir);
             SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dir.utf16()));
             const QString dllPath = dir + QStringLiteral("/libtesseract-5.dll");
             dll = LoadLibraryW(reinterpret_cast<LPCWSTR>(dllPath.utf16()));
+            // 恢复旧的 DLL 搜索目录
+            SetDllDirectoryW(oldLen > 0 ? oldDir : nullptr);
             if (!dll)
                 return false;
 
@@ -149,8 +155,12 @@ namespace snipaste
             if (!api)
             {
                 m_busy.store(false, std::memory_order_relaxed);
-                emit ocrFinished(false, QString(),
-                                 QStringLiteral("未找到 OCR 引擎（libtesseract-5.dll）"));
+                if (boxes)
+                    emit ocrBoxesFinished(false, QVector<OcrBox>(),
+                                          QStringLiteral("未找到 OCR 引擎（libtesseract-5.dll）"));
+                else
+                    emit ocrFinished(false, QString(),
+                                     QStringLiteral("未找到 OCR 引擎（libtesseract-5.dll）"));
                 return;
             }
 
@@ -159,7 +169,11 @@ namespace snipaste
             if (!handle)
             {
                 m_busy.store(false, std::memory_order_relaxed);
-                emit ocrFinished(false, QString(), QStringLiteral("创建 OCR 引擎失败"));
+                if (boxes)
+                    emit ocrBoxesFinished(false, QVector<OcrBox>(),
+                                          QStringLiteral("创建 OCR 引擎失败"));
+                else
+                    emit ocrFinished(false, QString(), QStringLiteral("创建 OCR 引擎失败"));
                 return;
             }
 
@@ -222,8 +236,8 @@ namespace snipaste
                 }
                 if (result.isEmpty())
                     error = QStringLiteral("未识别到文字");
-                m_busy.store(false, std::memory_order_relaxed);
                 api->Delete(handle);
+                m_busy.store(false, std::memory_order_relaxed);
                 emit ocrBoxesFinished(!result.isEmpty(), result,
                                      result.isEmpty() ? error : QString());
                 return;
