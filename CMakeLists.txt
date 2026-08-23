@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(MySnipaste VERSION 0.1.0 LANGUAGES CXX)
+project(MySnipaste VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,19 +61,6 @@ target_link_libraries(MySnipaste PRIVATE
     snipaste_ui
 )
 
-# 内置 OCR 引擎：构建后把 tools/tesseract 复制到可执行文件旁（开发/安装同布局）。
-# 运行时 OcrService 进程内 LoadLibrary 加载 {exeDir}/tesseract/libtesseract-5.dll
-# （依赖 DLL 与 tessdata 语言包同目录分发，不依赖外部 tesseract.exe）；
-# 未下载 OCR 引擎时跳过，不阻断构建
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/tesseract")
-    add_custom_command(TARGET MySnipaste POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/tools/tesseract"
-            "$<TARGET_FILE_DIR:MySnipaste>/tesseract"
-        COMMENT "Copying bundled tesseract engine"
-    )
-endif()
-
 # Qt 运行库：构建（make）完成后由本地 Qt 套件自带的 windeployqt 自动部署到
 # 可执行文件旁（Release 输出目录），使 exe 不依赖全局 Qt 安装；同时供安装程序打包
 set(QT_BIN_DIR "${CMAKE_PREFIX_PATH}/bin")
@@ -95,6 +82,21 @@ if(EXISTS "${OPENCV_ROOT}/build/x64/vc16/bin/${OPENCV_DLL_NAME}")
             "${OPENCV_ROOT}/build/x64/vc16/bin/${OPENCV_DLL_NAME}"
             "$<TARGET_FILE_DIR:MySnipaste>/${OPENCV_DLL_NAME}"
         COMMENT "Deploying OpenCV runtime (${OPENCV_DLL_NAME})"
+    )
+endif()
+
+# 部署 PaddleOCR-json（离线 OCR 引擎，QProcess 子进程调用）
+# 整个 paddleocr 目录复制到可执行文件旁，包含 exe、模型、配置文件
+# 复制后删除 opencv_world4100.dll（PaddleOCR-json 不依赖它，根目录已有一份）
+set(PADDLEOCR_DIR "${CMAKE_SOURCE_DIR}/tools/paddleocr")
+if(EXISTS "${PADDLEOCR_DIR}/PaddleOCR-json.exe")
+    add_custom_command(TARGET MySnipaste POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PADDLEOCR_DIR}"
+            "$<TARGET_FILE_DIR:MySnipaste>/paddleocr"
+        COMMAND ${CMAKE_COMMAND} -E remove
+            "$<TARGET_FILE_DIR:MySnipaste>/paddleocr/opencv_world4100.dll"
+        COMMENT "Deploying PaddleOCR-json engine"
     )
 endif()
 

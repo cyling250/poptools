@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Qt 6.8](https://img.shields.io/badge/Qt-6.8.3-41CD52)
-![Tesseract 5](https://img.shields.io/badge/OCR-Tesseract%205-FF6F00)
+![PaddleOCR](https://img.shields.io/badge/OCR-PaddleOCR%20v1.4-5C3EE8)
 
 个人使用的全场景截图软件 —— **Snipaste 免费替代方案**，内置本地离线 OCR 文字识别与大模型翻译，无需购买 Snipaste PRO。
 
@@ -19,7 +19,7 @@
 |------|------|--------|
 | **区域截图** | 多屏拼接捕捉，支持标注工具栏（矩形/椭圆/箭头/文字/马赛克等） | `F1` |
 | **贴图** | 将截图钉到屏幕上，支持拖动/滚轮缩放/右键清除 | `F3` |
-| **OCR 文字识别** | 本地离线 Tesseract 5，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏【文】【译】 |
+| **OCR 文字识别** | 本地离线 PaddleOCR，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏【文】【译】 |
 | **大模型翻译** | OpenAI 兼容 API（DeepSeek / Ollama 等），支持截图翻译与划词翻译 | - |
 | **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换 | `Ctrl+X` |
 | **窗口智能识别** | 自动检测窗口边缘 + 图像边缘识别，辅助精确框选 | 截图时自动 |
@@ -43,7 +43,7 @@ build/Release/MySnipaste.exe
 | 语言 | C++17 |
 | GUI | Qt 6.8.3 LTS（LGPL v3 动态链接，本地套件 `tools/qt`） |
 | 构建 | CMake + MSVC（Visual Studio 2022/2026） |
-| OCR | Tesseract 5（`libtesseract-5.dll` 进程内 LoadLibrary，无外挂 exe） |
+| OCR | PaddleOCR（PaddleOCR-json.exe 子进程管道模式，本地离线） |
 | 翻译 | OpenAI 兼容 `/chat/completions` API（DeepSeek / Ollama 等） |
 | 窗口识别 | OpenCV 4.10（图像边缘检测，eSearch 算法移植，`tools/opencv`） |
 | 热键 | Windows `RegisterHotKey`（user32） |
@@ -59,7 +59,7 @@ build/Release/MySnipaste.exe
 │   │   ├── annotation/         #   标注模型 + 渲染（AnnotationCanvas/Painter）
 │   │   ├── capture/            #   多屏捕获 + DPI 映射 + 窗口检测
 │   │   ├── hotkey/             #   全局热键（GlobalHotKey）
-│   │   ├── ocr/                #   OCR 服务（进程内加载 libtesseract-5.dll）
+│   │   ├── ocr/                #   OCR 服务（PaddleOCR-json 子进程调用）
 │   │   ├── settings/           #   设置持久化（INI）
 │   │   └── translation/        #   翻译服务 + 划词翻译
 │   ├── ui/                     # 界面层（静态库 snipaste_ui）
@@ -73,7 +73,7 @@ build/Release/MySnipaste.exe
 ├── temp_scripts/               # 临时脚本与中间产物（不推送）
 ├── tools/                      # 第三方二进制（不推送，由脚本生成）
 │   ├── qt/6.8.3/msvc2022_64/   #   Qt 套件
-│   ├── tesseract/              #   OCR 引擎（libtesseract-5.dll + tessdata）
+│   ├── paddleocr/              #   OCR 引擎（PaddleOCR-json.exe + models）
 │   └── opencv/                 #   OpenCV 4.10（opencv_world 动态库）
 ├── packaging/                  # 安装脚本
 │   └── MySnipaste.iss
@@ -92,13 +92,13 @@ python scripts/install_qt.py
 
 经 `127.0.0.1:7897` 代理访问 Qt 官方仓库，仅下载 `qtbase` / `qtsvg` / `qttools` 模块。构建后 `windeployqt` 自动部署 DLL 到 exe 旁。
 
-### 2. Tesseract OCR → `tools/tesseract`
+### 2. PaddleOCR → `tools/paddleocr`
 
 ```powershell
-python scripts/install_tesseract.py
+python scripts/install_paddleocr.py
 ```
 
-免安装，下载 UB-Mannheim 官方包 + 7-Zip 便携解压 + 补齐 `eng` / `chi_sim` 语言包。
+免安装，下载 PaddleOCR-json v1.4.1 发布包 + 7-Zip 解压，附带简中/繁中/英/日/韩/俄模型。运行时由 PaddleOcrService 通过 QProcess 子进程管道模式调用。
 
 ### 3. OpenCV 4.10 → `tools/opencv`
 
@@ -113,7 +113,7 @@ python scripts/install_opencv.py
 ```powershell
 # 前置：安装依赖
 python scripts/install_qt.py
-python scripts/install_tesseract.py
+python scripts/install_paddleocr.py
 python scripts/install_opencv.py
 
 # 配置（VS 2022）
@@ -127,7 +127,7 @@ build/Release/MySnipaste.exe
 ```
 
 > 环境变量 `QT_ROOT` 或 CMake 参数 `-DQT_ROOT=...` 可覆盖 Qt 套件路径。
-> 若 `tools/tesseract` 不存在，构建跳过 OCR 引擎拷贝，不阻断构建（运行时 OCR 提示不可用）。
+> 若 `tools/paddleocr` 不存在，构建跳过 OCR 引擎拷贝，不阻断构建（运行时 OCR 提示不可用）。
 
 ## 使用指南
 

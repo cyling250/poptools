@@ -4,19 +4,19 @@
 #include <QString>
 #include <QVector>
 
-#include "core/ocr/OcrService.h"
+#include "core/ocr/PaddleOcrService.h"
 #include "CaptureContext.h"
 
 namespace snipaste {
 
 // ============================================================
-// OCR 控制器：把选区内图像（物理分辨率）交给本地 Tesseract，
+// OCR 控制器：把选区内图像（物理分辨率）交给 PaddleOCR，
 // 结果文本框映射回选区局部坐标并作为文字标注添加到画板。
 // ============================================================
 class OcrController
 {
 public:
-    explicit OcrController(CaptureContext *ctx); // 构造时连接 OcrService 完成信号
+    explicit OcrController(CaptureContext *ctx); // 构造时连接 PaddleOcrService 完成信号
     ~OcrController();
 
     bool busy() const { return m_ocr.busy(); }
@@ -32,7 +32,7 @@ private:
     static QFont fitFontHeight(const QRectF &local); // 覆盖文字字号与原文字匹配（实测逼近）
 
     CaptureContext *m_ctx;
-    OcrService m_ocr;
+    PaddleOcrService m_ocr;
     QImage m_ocrImg; // 传给 OCR 的选区裁剪图（物理像素）
     bool m_translateMode = false; // 当前 OCR 请求是否为"识别并翻译"（【译】按钮）
     QString m_lastText; // 最近一次识别文字（供【译】触发翻译）

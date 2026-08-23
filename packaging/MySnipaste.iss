@@ -1,9 +1,9 @@
 ; MySnipaste 安装程序脚本（Inno Setup 6）
-; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + tesseract OCR 引擎）
+; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + PaddleOCR 引擎）
 ; 编译：ISCC.exe packaging\MySnipaste.iss
 
 #define MyAppName "MySnipaste"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "MySnipaste"
 #define MyAppExeName "MySnipaste.exe"
 #define MyAppAssocName "MySnipaste 截图"
@@ -35,9 +35,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-; build/Release 即完整运行目录（含 tesseract 引擎与 Qt 插件），整体递归复制
+; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; OpenCV 运行库（窗口识别用），直接从 tools 源路径引用，确保安装包始终包含
+Source: "{#SourcePath}\..\tools\opencv\opencv\build\x64\vc16\bin\opencv_world4100.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "MySnipaste.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

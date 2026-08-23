@@ -1,6 +1,6 @@
 #include "MainWindow.h"
 
-#include "core/ocr/OcrService.h"
+#include "core/ocr/PaddleOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Translator.h"
 #include "ui/settings/SettingsDialog.h"
@@ -35,10 +35,10 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addSeparator();
     m_menu->addAction("关于", this, [this] {
         QMessageBox::about(m_result, "MySnipaste",
-            "MySnipaste v0.1.0\n\n"
+            "MySnipaste v0.1.1\n\n"
             "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
             "快捷键：F1 截图\n"
-            "OCR 引擎：Tesseract 5（本地离线）\n"
+            "OCR 引擎：PaddleOCR（本地离线）\n"
             "翻译：OpenAI 兼容大模型 API（可配置）");
     });
     m_menu->addSeparator();
@@ -51,8 +51,8 @@ MainWindow::MainWindow(QObject *parent)
     connect(m_capture, &CaptureWindow::captured, this, &MainWindow::onCaptured);
 
     // OCR 与翻译
-    m_ocr = new OcrService(this);
-    connect(m_ocr, &OcrService::ocrFinished, this, &MainWindow::onOcrFinished);
+    m_ocr = new PaddleOcrService(this);
+    connect(m_ocr, &PaddleOcrService::ocrFinished, this, &MainWindow::onOcrFinished);
     m_translator = new Translator(this);
     connect(m_translator, &Translator::translateFinished,
             this, &MainWindow::onTranslateFinished);
@@ -134,7 +134,7 @@ void MainWindow::onOcrRequested()
         return;
     if (!m_ocr->available()) {
         QMessageBox::warning(m_result, "OCR",
-            "未找到 OCR 引擎（libtesseract-5.dll），请确认其位于程序目录的 tesseract 文件夹中。");
+            "未找到 OCR 引擎（PaddleOCR-json.exe），请确认其位于程序目录的 paddleocr 文件夹中。");
         return;
     }
     m_ocr->recognize(m_lastPixmap.toImage());

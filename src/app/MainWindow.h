@@ -16,7 +16,7 @@
 
 namespace snipaste {
 
-class OcrService;      // 前向声明（定义于 core/ocr）
+class PaddleOcrService; // 前向声明（定义于 core/ocr）
 class Translator;      // 前向声明（定义于 core/translation）
 
 // ============================================================
@@ -55,7 +55,7 @@ private:
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
     CaptureWindow *m_capture;
-    OcrService *m_ocr;
+    PaddleOcrService *m_ocr;
     Translator *m_translator;
     SelectionTranslator *m_selTranslator;   // 划词翻译：获取选中文本
     ResultDialog *m_result;

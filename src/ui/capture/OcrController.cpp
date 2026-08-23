@@ -13,7 +13,7 @@ OcrController::OcrController(CaptureContext *ctx)
     : m_ctx(ctx)
 {
     // 连接识别完成信号（用 m_ocr 自身作 context 对象，避免本类继承 QObject）
-    QObject::connect(&m_ocr, &OcrService::ocrBoxesFinished, &m_ocr,
+    QObject::connect(&m_ocr, &PaddleOcrService::ocrBoxesFinished, &m_ocr,
                      [this](bool ok, const QVector<OcrBox> &boxes, const QString &error)
                      {
                          if (m_translateMode)
@@ -55,7 +55,7 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
         if (m_ctx->ocrBusy)
             m_ctx->ocrBusy(false); // 确保结束态（防止 start 未调用）
         QMessageBox::warning(parent, "文字识别",
-                             "未找到 OCR 引擎（libtesseract-5.dll），请确认其位于程序目录的 tesseract 文件夹中。");
+                             "未找到 OCR 引擎（PaddleOCR-json.exe），请确认其位于程序目录的 paddleocr 文件夹中。");
         return false;
     }
 
