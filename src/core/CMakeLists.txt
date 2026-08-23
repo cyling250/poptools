@@ -36,9 +36,13 @@ target_link_libraries(snipaste_core PUBLIC
     Qt6::Concurrent
 )
 
-# Windows 全局热键需要 user32；智能框选 MSAA 需要 oleacc
+# eSearch 窗口识别算法移植：图像边缘检测使用 OpenCV（imgproc 内置于 opencv_world）
+target_link_libraries(snipaste_core PRIVATE ${OpenCV_LIBS})
+target_include_directories(snipaste_core PRIVATE ${OpenCV_INCLUDE_DIRS})
+
+# Windows 全局热键与窗口识别枚举需要 user32
 if(WIN32)
-    target_link_libraries(snipaste_core PRIVATE user32 oleacc)
+    target_link_libraries(snipaste_core PRIVATE user32)
 endif()
 
 # 导出头文件目录（core/* 以相对路径包含）

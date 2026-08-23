@@ -127,21 +127,21 @@ namespace snipaste
         // 改用 objectName ID 选择器（#annotationToolBar）与命名空间解耦。
         setObjectName("annotationToolBar");
         // 面板：浅色=灰白底+黑边；深色=深灰底+浅灰边；选中：蓝底白图标；悬停：跟随主题
-        const QString bg = m_dark ? "#2d2d2d" : "#f1f1f1";
-        const QString border = m_dark ? "#6b6b6b" : "#000000";
-        const QString hover = m_dark ? "#3f3f3f" : "#e6f2ff";
+        const QString bg = m_dark ? "#2C2C2C" : "#F5F5F5";
+        const QString border = m_dark ? "#5E5E5E" : "#D0D0D0";
+        const QString hover = m_dark ? "#3A3A3C" : "#E8F0FE";
         setStyleSheet(QString(
                           "#annotationToolBar { background: %1; border: 1px solid %2;"
                           "  border-radius: 4px; }"
                           "QToolButton { border: none; border-radius: 3px;"
                           "  background: transparent; padding: 2px; }"
                           "QToolButton:hover { background: %3; }"
-                          "QToolButton:checked { background: #2f6feb; }")
+                          "QToolButton:checked { background: #2B6FF2; }")
                           .arg(bg, border, hover));
 
         auto *grid = new QGridLayout(this);
         grid->setContentsMargins(4, 4, 4, 4);
-        grid->setSpacing(2);
+        grid->setSpacing(3);
 
         // ---- 第一行：绘图工具（互斥） ----
         struct
@@ -181,10 +181,16 @@ namespace snipaste
             default: return QString();
             } }());
             connect(btn, &QToolButton::clicked, this, &ToolBar::onToolClicked);
-            // 文字工具(索引7)后插入【文】按钮，eraser 顺延一列
-            grid->addWidget(btn, 0, i >= 8 ? i + 1 : i);
+            // 文字工具(索引7)后插入【文】【译】按钮，eraser 顺延两列
+            grid->addWidget(btn, 0, i >= 8 ? i + 3 : i);
             m_toolButtons.append(btn);
         }
+
+        // 工具组与操作组之间的分隔线
+        auto *sep1 = new QFrame(this);
+        sep1->setFrameShape(QFrame::VLine);
+        sep1->setStyleSheet(QString("QFrame { color: %1; margin: 3px 0; }").arg(m_dark ? "#484848" : "#E0E0E0"));
+        grid->addWidget(sep1, 0, 10, 2, 1);
 
         // 第一行操作按钮：撤销 重做 | 保存 复制
         m_undoBtn = new QToolButton(this);
@@ -192,30 +198,36 @@ namespace snipaste
         m_undoBtn->setIcon(svgIcon("undo", iconColor()));
         m_undoBtn->setToolTip("撤销");
         connect(m_undoBtn, &QToolButton::clicked, this, &ToolBar::undoRequested);
-        grid->addWidget(m_undoBtn, 0, 10);
+        grid->addWidget(m_undoBtn, 0, 12);
 
         m_redoBtn = new QToolButton(this);
         m_redoBtn->setFixedSize(26, 26);
         m_redoBtn->setIcon(svgIcon("redo", iconColor()));
         m_redoBtn->setToolTip("重做");
         connect(m_redoBtn, &QToolButton::clicked, this, &ToolBar::redoRequested);
-        grid->addWidget(m_redoBtn, 0, 11);
+        grid->addWidget(m_redoBtn, 0, 13);
+
+        // 操作组与保存组之间的分隔线
+        auto *sep2 = new QFrame(this);
+        sep2->setFrameShape(QFrame::VLine);
+        sep2->setStyleSheet(QString("QFrame { color: %1; margin: 3px 0; }").arg(m_dark ? "#484848" : "#E0E0E0"));
+        grid->addWidget(sep2, 0, 14, 2, 1);
 
         auto *saveBtn = new QToolButton(this);
         saveBtn->setFixedSize(26, 26);
         saveBtn->setIcon(svgIcon("save", iconColor()));
         saveBtn->setToolTip("保存");
         connect(saveBtn, &QToolButton::clicked, this, &ToolBar::saveRequested);
-        grid->addWidget(saveBtn, 0, 13);
+        grid->addWidget(saveBtn, 0, 15);
 
         auto *copyBtn = new QToolButton(this);
         copyBtn->setFixedSize(26, 26);
         copyBtn->setIcon(svgIcon("copy", iconColor()));
         copyBtn->setToolTip("复制");
         connect(copyBtn, &QToolButton::clicked, this, &ToolBar::copyRequested);
-        grid->addWidget(copyBtn, 0, 14);
+        grid->addWidget(copyBtn, 0, 16);
 
-        // 文字识别按钮（替代原【✓】完成按钮；确认仍可用 Enter / 双击选区）
+        // 文字识别按钮【文】：OCR 结果以文本框覆盖到画布（不打开面板）
         // 置于文字工具(T)之后；样式与其他按钮一致（透明底 + 主题色文字 + 悬停高亮）
         auto *ocrBtn = new QToolButton(this);
         ocrBtn->setFixedSize(26, 26);
@@ -225,9 +237,22 @@ namespace snipaste
                                   "  color: %1; font-weight: bold; padding: 0; }"
                                   "QToolButton:hover { background: %2; }")
                                   .arg(iconColor().name(), hover));
-        ocrBtn->setToolTip("文字识别（OCR）：识别选区文字并以文本框覆盖到画布");
+        ocrBtn->setToolTip("文字识别（OCR）：识别选区文字，以文本框覆盖到画布");
         connect(ocrBtn, &QToolButton::clicked, this, &ToolBar::ocrRequested);
         grid->addWidget(ocrBtn, 0, 8);
+
+        // 文字识别并翻译按钮（置于【文】之后）：识别后把原始文字与翻译结果一起显示到文字栏面板
+        auto *translateBtn = new QToolButton(this);
+        translateBtn->setFixedSize(26, 26);
+        translateBtn->setText(QStringLiteral("译"));
+        translateBtn->setStyleSheet(QString(
+                                        "QToolButton { border: none; border-radius: 3px; background: transparent;"
+                                        "  color: %1; font-weight: bold; padding: 0; }"
+                                        "QToolButton:hover { background: %2; }")
+                                        .arg(iconColor().name(), hover));
+        translateBtn->setToolTip(QStringLiteral("识别并翻译：识别选区文字，自动打开面板并显示原文与翻译结果"));
+        connect(translateBtn, &QToolButton::clicked, this, &ToolBar::translateRequested);
+        grid->addWidget(translateBtn, 0, 9);
 
         // ---- 第二行：线宽 / 填充（档位值/图标由 applyWidthOptions 按工具刷新） ----
         for (int i = 0; i < 3; ++i)
@@ -253,7 +278,7 @@ namespace snipaste
 
         // ---- 第二行：字号栏（pt，多选下拉 + 手动输入；非法输入回退） ----
         auto *sizeLabel = new QLabel(QStringLiteral("字号"), this);
-        sizeLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(iconColor().name()));
+        sizeLabel->setStyleSheet(QString("QLabel { color: %1; font-size: 12px; }").arg(iconColor().name()));
         grid->addWidget(sizeLabel, 1, 4);
 
         m_fontSizeBox = new QComboBox(this);
@@ -261,6 +286,16 @@ namespace snipaste
         m_fontSizeBox->setInsertPolicy(QComboBox::NoInsert); // 手动输入不自动加入下拉列表
         m_fontSizeBox->setMaxVisibleItems(12);
         m_fontSizeBox->setFixedSize(56, 24);
+        m_fontSizeBox->setStyleSheet(QString(
+            "QComboBox { background: transparent; border: 1px solid %1; border-radius: 3px;"
+            "  color: %2; padding: 1px 4px; }"
+            "QComboBox:hover { border-color: #2B6FF2; }"
+            "QComboBox::drop-down { border: none; width: 14px; }"
+            "QComboBox QAbstractItemView { background: %3; color: %2;"
+            "  border: 1px solid %1; selection-background-color: #E8F0FE; }")
+            .arg(m_dark ? "#5E5E5E" : "#D0D0D0",
+                 iconColor().name(),
+                 m_dark ? "#2C2C2C" : "#F5F5F5"));
         const int presets[] = {8, 9, 10, 12, 14, 16, 18, 24, 36, 48};
         for (int v : presets)
             m_fontSizeBox->addItem(QString::number(v));
@@ -276,22 +311,7 @@ namespace snipaste
     connect(m_fontSizeBox->lineEdit(), &QLineEdit::editingFinished, this, &ToolBar::onFontSizeCommitted);
     grid->addWidget(m_fontSizeBox, 1, 5, 1, 4);
 
-    // ---- 第二行：OCR 结果去向开关（画板 / 文字栏） ----
-    m_panelBtn = new QToolButton(this);
-    m_panelBtn->setFixedSize(30, 24);
-    m_panelBtn->setCheckable(true);
-    m_panelBtn->setText(QStringLiteral("面板"));
-    m_panelBtn->setStyleSheet(QString(
-        "QToolButton { border: none; border-radius: 3px; background: transparent;"
-        "  color: %1; font-size: 11px; padding: 0; }"
-        "QToolButton:hover { background: %2; }"
-        "QToolButton:checked { background: #2f6feb; color: white; }")
-        .arg(iconColor().name(), hover));
-    m_panelBtn->setToolTip(QStringLiteral("OCR 结果去向：勾选=附加到文字栏（可翻译），不勾选=覆盖到画板"));
-    connect(m_panelBtn, &QToolButton::clicked, this, &ToolBar::onPanelModeClicked);
-    grid->addWidget(m_panelBtn, 1, 9);
-
-        // ---- 第二行：颜色板（两行八列 + 大色块，跨两行） ----
+    // ---- 第二行：颜色板（两行八列 + 大色块，跨两行） ----
         auto *colorPanel = new QWidget(this);
         colorPanel->setStyleSheet("QWidget { background: transparent; }");
         auto *colorGrid = new QGridLayout(colorPanel);
@@ -322,24 +342,24 @@ namespace snipaste
             btn->setFixedSize(18, 18);
             btn->setProperty("color", presetColors[i].name());
             btn->setStyleSheet(QString(
-                                   "QToolButton { border: 1px solid #bbb; background: %1; padding: 0; }"
-                                   "QToolButton:hover { border: 1px solid #2f6feb; }")
-                                   .arg(presetColors[i].name()));
+                                   "QToolButton { border: 1px solid %1; background: %2; padding: 0; }"
+                                   "QToolButton:hover { border: 1px solid #2B6FF2; }")
+                                   .arg(m_dark ? "#5E5E5E" : "#C8C8C8", presetColors[i].name()));
             connect(btn, &QToolButton::clicked, this, &ToolBar::onColorClicked);
             colorGrid->addWidget(btn, i / 8, i % 8);
             m_colorButtons.append(btn);
         }
-        grid->addWidget(colorPanel, 0, 15, 2, 1);
+        grid->addWidget(colorPanel, 0, 17, 2, 1);
 
         // 当前颜色大色块（占两行，右侧）
         m_colorBig = new QToolButton(this);
         m_colorBig->setFixedSize(22, 22);
         m_colorBig->setEnabled(false);
         m_colorBig->setStyleSheet(QString(
-                                      "QToolButton { border: 1px solid #555; background: %1; }")
-                                      .arg(m_currentColor.name()));
+                                      "QToolButton { border: 1px solid %1; background: %2; }")
+                                      .arg(m_dark ? "#5E5E5E" : "#C8C8C8", m_currentColor.name()));
         m_colorBig->setToolTip("当前颜色");
-        grid->addWidget(m_colorBig, 0, 16, 2, 1);
+        grid->addWidget(m_colorBig, 0, 18, 2, 1);
 
         // 默认工具：None（选择模式）—— 无按钮高亮（同时按默认档位初始化线宽按钮）
         setTool(Tool::None);
@@ -377,8 +397,8 @@ namespace snipaste
     {
         m_currentColor = c;
         m_colorBig->setStyleSheet(QString(
-                                      "QToolButton { border: 1px solid #555; background: %1; }")
-                                      .arg(c.name()));
+                                      "QToolButton { border: 1px solid %1; background: %2; }")
+                                      .arg(m_dark ? "#5E5E5E" : "#C8C8C8", c.name()));
         for (QToolButton *btn : m_colorButtons)
             btn->setChecked(btn->property("color").toString() == c.name());
     }
@@ -434,7 +454,7 @@ namespace snipaste
     QColor ToolBar::iconColor() const
     {
         // 深色面板上用浅色图标保证可见性
-        return m_dark ? QColor("#e0e0e0") : QColor("#333");
+        return m_dark ? QColor("#E0E0E0") : QColor("#1A1A1A");
     }
 
     void ToolBar::setUndoRedoEnabled(bool undo, bool redo)
@@ -524,19 +544,6 @@ namespace snipaste
             m_fontSizeBox->setCurrentText(QString::number(m_fontSize));
         m_updatingFontSize = false;
     }
-
-    void ToolBar::setPanelMode(bool on)
-{
-    m_panelMode = on;
-    if (m_panelBtn)
-        m_panelBtn->setChecked(on);
-}
-
-void ToolBar::onPanelModeClicked()
-{
-    m_panelMode = m_panelBtn->isChecked();
-    emit panelModeToggled(m_panelMode);
-}
 
 void ToolBar::onFontSizeCommitted()
     {

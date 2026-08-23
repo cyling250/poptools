@@ -85,15 +85,17 @@ void PinWindow::paintEvent(QPaintEvent *event)
     p.setRenderHint(QPainter::SmoothPixmapTransform); // 缩放时平滑
     const QSize content = contentSize();
 
-    // 左侧阴影：内容左边缘向左渐变淡出（x=kShadow 处贴近内容最深，x=0 处透明）
+    // 左侧阴影：三阶渐变，光从右上照射，左边缘最深
     QLinearGradient leftGrad(0, 0, kShadow, 0);
     leftGrad.setColorAt(0, QColor(0, 0, 0, 0));
-    leftGrad.setColorAt(1, QColor(0, 0, 0, 130));
+    leftGrad.setColorAt(0.5, QColor(0, 0, 0, 60));
+    leftGrad.setColorAt(1, QColor(0, 0, 0, 110));
     p.fillRect(QRect(0, 0, kShadow, content.height()), QBrush(leftGrad));
 
-    // 底部阴影：内容下边缘向下渐变淡出（含左下角，y=content.height() 处最深）
+    // 底部阴影：三阶渐变，下边缘最深
     QLinearGradient bottomGrad(0, content.height(), 0, content.height() + kShadow);
-    bottomGrad.setColorAt(0, QColor(0, 0, 0, 130));
+    bottomGrad.setColorAt(0, QColor(0, 0, 0, 110));
+    bottomGrad.setColorAt(0.5, QColor(0, 0, 0, 60));
     bottomGrad.setColorAt(1, QColor(0, 0, 0, 0));
     p.fillRect(QRect(0, content.height(), kShadow + content.width(), kShadow), QBrush(bottomGrad));
 

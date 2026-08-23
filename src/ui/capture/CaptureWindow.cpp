@@ -9,8 +9,14 @@
 #include <QScreen>
 #include <QClipboard>
 
+#include <QtConcurrent/QtConcurrent>
+#include <QFutureWatcher>
+
+#include <climits>
+
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/WindowDetector.h"
+#include "core/settings/Settings.h"
 
 #include "ToolBar.h"
 #include "CaptureContext.h"
@@ -87,7 +93,12 @@ namespace snipaste
         m_translator = std::make_unique<Translator>(this);
         m_ctx.showOcrPanel = [this](const QString &text)
         { showOcrPanel(text); };
-        // 翻译需用户手动点击按钮（面板默认不翻译）；源/目标语言取自面板下拉
+        // 【译】按钮：OCR 原文自动翻译（目标语言取面板当前选择）
+        m_ctx.translateRequested = [this](const QString &text)
+        { m_translator->translate(text, m_ocrPanel->sourceLang(), m_ocrPanel->targetLang()); };
+        m_ctx.setPanelBusy = [this](bool busy)
+        { m_ocrPanel->setBusy(busy); };
+        // 面板内"翻译"按钮：手动重新翻译（源/目标语言取自面板下拉）
         QObject::connect(m_ocrPanel.get(), &OcrPanel::translateRequested, this,
                          [this](const QString &text, const QString &fromLang, const QString &toLang)
                          {
@@ -101,6 +112,26 @@ namespace snipaste
                              m_ocrPanel->setTranslateText(ok ? result
                                                              : QStringLiteral("翻译失败：%1").arg(error));
                          });
+
+        // ---- OCR 扫描动效：点击【文】时选区内的扫描线，提示用户"没卡死" ----
+        m_ctx.ocrBusy = [this](bool busy) {
+            if (busy) {
+                m_ocrScanning = true;
+                m_ocrScanPos = 0.0;
+                m_ocrScanTimer.start();
+            } else {
+                m_ocrScanning = false;
+                m_ocrScanTimer.stop();
+                update();
+            }
+        };
+        m_ocrScanTimer.setInterval(30);
+        connect(&m_ocrScanTimer, &QTimer::timeout, this, [this] {
+            m_ocrScanPos += 0.018; // 一次完整扫描约 1.7 秒
+            if (m_ocrScanPos > 1.0)
+                m_ocrScanPos = 0.0; // 循环扫描
+            update();
+        });
 
         // ---- 工具栏信号（路由到控制器） ----
         connect(m_toolbar, &ToolBar::toolSelected, this, &CaptureWindow::onToolSelected);
@@ -141,11 +172,7 @@ namespace snipaste
                     m_outputCtrl->copy();
                 });
         connect(m_toolbar, &ToolBar::ocrRequested, this, &CaptureWindow::onOcrRequested);
-        connect(m_toolbar, &ToolBar::panelModeToggled, this, [this](bool on)
-                {
-                    if (!on)
-                        m_ocrPanel->hide(); // 切回画板模式：隐藏文字栏（隐藏即不能翻译）
-                });
+        connect(m_toolbar, &ToolBar::translateRequested, this, &CaptureWindow::onTranslateRequested);
 
         // ESC 二次退出提示：2 秒后消退（重新按两次才会退出）
         m_escTimer.setSingleShot(true);
@@ -176,8 +203,12 @@ namespace snipaste
         m_screenImage = QImage(); // 取色缓存失效（screen 画面已更新）
         m_smartMousePos = QCursor::pos(); // 检测起点为当前鼠标位置
         m_smartLastPos = m_smartMousePos;
-        // 智能区域检测暂时禁用（算法存在问题，待修复后再启用）：
-        // m_smartDetectTimer.start();
+        // 候选区失效（新一轮截图画面已更新，下一次检测时异步重建）；启用智能区域检测
+        m_smartCandidates.clear();
+        m_smartCandidatesReady = false;
+        m_smartCandidatesBusy.store(false);
+        ++m_smartGen; // 新捕获代次，丢弃仍在进行的旧候选区异步结果
+        m_smartDetectTimer.start();
         m_canvas.clear();
         m_canvas.tool = Tool::None; // 默认选择模式
         m_toolDrawing->setTool(Tool::None); // 清空上一轮工具实例
@@ -185,6 +216,8 @@ namespace snipaste
         m_annotationEditor->clearSelection();
         m_escArmed = false; // 重置 ESC 二次退出提示
         m_escTimer.stop();
+        m_ocrScanning = false; // 重置 OCR 扫描动效
+        m_ocrScanTimer.stop();
         m_toolbar->hide();
         setGeometry(m_cap.desktop);
         show();
@@ -202,6 +235,8 @@ namespace snipaste
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 释放取色缓存
         m_smartDetectTimer.stop(); // 停止智能框选检测
+        m_ocrScanning = false; // 停止 OCR 扫描动效
+        m_ocrScanTimer.stop();
         m_toolbar->hide();
         m_ocrPanel->hide(); // 隐藏 OCR 文字栏
         m_selectionCtrl->cancelActive();
@@ -282,6 +317,18 @@ namespace snipaste
         if (m_textEditCtrl->isEditing())
             m_textEditCtrl->commit();
         m_ocrCtrl->request(this);
+    }
+
+    // 【译】：识别并翻译。面板先显示"翻译中…"，识别完成自动打开面板、回填原文并发起翻译
+    void CaptureWindow::onTranslateRequested()
+    {
+        if (m_state != State::Editing || m_selection.isEmpty())
+            return;
+        if (m_textEditCtrl->isEditing())
+            m_textEditCtrl->commit();
+        m_ocrPanel->setBusy(true);
+        m_ocrPanel->setTranslateText(QStringLiteral("翻译中…"));
+        m_ocrCtrl->requestTranslate(this);
     }
 
     // 面板模式：OCR 识别文字显示到文字栏（清空上次翻译，重新定位）
@@ -382,23 +429,42 @@ namespace snipaste
             m_selectionCtrl->paintSelectionFrame(p, sel);
         }
 
-        // ESC 二次退出提示：半透明灰框 + 蓝字（第一次 ESC 时显示，2 秒后消退）
+        // ESC 二次退出提示：半透明圆角框 + 蓝字 + 图标（第一次 ESC 时显示，2 秒后消退）
         if (m_escArmed)
         {
-            const QRectF box(0, 0, 200, 52);
+            const QRectF box(0, 0, 210, 52);
             const QPointF c = rect().center();
+            const QRectF boxRect(c.x() - box.width() / 2, c.y() - box.height() / 2,
+                                 box.width(), box.height());
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(60, 60, 60, 200)); // 半透明灰色
-            p.drawRoundedRect(QRectF(c.x() - box.width() / 2, c.y() - box.height() / 2,
-                                     box.width(), box.height()),
-                              10, 10);
+            p.setBrush(QColor(50, 50, 50, 210));
+            p.drawRoundedRect(boxRect, 10, 10);
+
+            // 提示文字
             QFont hintFont = p.font();
             hintFont.setPointSizeF(13);
             p.setFont(hintFont);
-            p.setPen(QColor(0, 120, 255)); // 蓝色提示文字
-            p.drawText(QRectF(c.x() - box.width() / 2, c.y() - box.height() / 2,
-                              box.width(), box.height()),
-                       Qt::AlignCenter, "再按 ESC 退出");
+            p.setPen(QColor(0, 120, 255));
+            p.drawText(boxRect, Qt::AlignCenter, "再按 ESC 退出");
+        }
+
+        // ---- OCR 扫描动效：选区内的扫描线（提示用户 OCR 正在运行） ----
+        if (m_ocrScanning && m_state == State::Editing && !m_selection.isEmpty())
+        {
+            const QRect sel = m_selection.translated(-m_cap.desktop.topLeft());
+            const int scanY = sel.top() + qRound(sel.height() * m_ocrScanPos);
+
+            // 发光带：扫描线上下各 4px 的半透明渐变
+            QLinearGradient glow(0, scanY - 4, 0, scanY + 4);
+            glow.setColorAt(0, QColor(0, 150, 255, 0));
+            glow.setColorAt(0.4, QColor(0, 150, 255, 50));
+            glow.setColorAt(0.6, QColor(0, 150, 255, 50));
+            glow.setColorAt(1, QColor(0, 150, 255, 0));
+            p.fillRect(sel.left(), scanY - 4, sel.width(), 8, glow);
+
+            // 扫描线：2px 亮蓝实线
+            p.setPen(QPen(QColor(0, 150, 255, 200), 2));
+            p.drawLine(sel.left(), scanY, sel.right(), scanY);
         }
     }
 
@@ -605,26 +671,97 @@ namespace snipaste
         }
     }
 
-    // 智能框选检测定时器回调：鼠标位置变化时重新检测高亮区域（40ms 节流，MSAA 不阻塞鼠标事件）
+    // 智能框选检测定时器回调：鼠标位置变化时，在当前候选区下选择"最合适"的区域高亮。
+    // 候选区（图像边缘 + 系统窗口）在一次捕获内懒加载构建一次，静止时零开销
     void CaptureWindow::onSmartDetect()
     {
         if (m_state != State::Selecting || m_smartPressPending)
             return;
+        if (!m_smartCandidatesReady)
+            rebuildSmartCandidates();
         if (m_smartMousePos == m_smartLastPos)
             return; // 位置未变，跳过检测（静止时零开销）
         m_smartLastPos = m_smartMousePos;
 
-        const QScreen *scr = QGuiApplication::screenAt(m_smartMousePos);
-        const qreal dpr = scr ? scr->devicePixelRatio() : 1.0;
-        void *exclude = reinterpret_cast<void *>(winId());
-        QRect smart = detectUiElementRect(m_smartMousePos, exclude, dpr); // MSAA 控件级
-        if (smart.isEmpty())
-            smart = detectWindowRect(m_smartMousePos, exclude, dpr); // 回退窗口级
+        // 取包含鼠标点的最小面积候选（同原"最小面积窗口"回退语义）
+        QRect smart;
+        int bestArea = INT_MAX;
+        for (const QRect &r : m_smartCandidates)
+        {
+            if (r.contains(m_smartMousePos))
+            {
+                const int area = r.width() * r.height();
+                if (area < bestArea)
+                {
+                    bestArea = area;
+                    smart = r;
+                }
+            }
+        }
         if (smart != m_smartRect)
         {
             m_smartRect = smart;
             update();
         }
+    }
+
+    // 异步构建智能框选候选区。照搬 eSearch 默认行为：
+    //   系统窗口（识别窗口=true）始终作为候选；图像边缘识别（eSearch「图像识别」）
+    //   默认关，仅当用户在设置中开启时才叠加，避免文字笔画产生的内外圈噪声框。
+    // 窗口枚举（EnumWindows）与整屏图像识别都不能在 GUI 线程同步执行（EnumWindows 在
+    // GUI 线程有死锁风险），故放到 QtConcurrent 工作线程，完成后回到主线程生效。
+    void CaptureWindow::rebuildSmartCandidates()
+    {
+        if (m_smartCandidatesBusy.load())
+            return; // 已有构建进行中，避免重复
+
+        // 在工作线程内所需的快照（不访问本对象成员，避免跨线程共享）
+        const QScreen *scr = QGuiApplication::screenAt(m_smartMousePos);
+        if (!scr)
+            scr = QGuiApplication::primaryScreen();
+        const qreal dpr = scr ? scr->devicePixelRatio() : 1.0;
+        void *exclude = reinterpret_cast<void *>(winId());
+        const QImage phys = m_cap.screen.toImage();
+        const QPoint localOrigin = m_cap.desktop.topLeft();
+        const bool useImage = Settings::instance().smartImageRecognitionEnabled();
+        const int gen = m_smartGen;
+
+        m_smartCandidatesReady = false;
+        m_smartCandidatesBusy.store(true);
+
+        auto worker = QtConcurrent::run(
+            [dpr, exclude, phys, localOrigin, useImage]() -> std::vector<QRect> {
+                std::vector<QRect> out;
+
+                // 1) 系统窗口候选（已为逻辑全局坐标）——始终启用（识别窗口=true）
+                std::vector<QRect> wins = detectRealWindows(exclude, dpr);
+                out.insert(out.end(), wins.begin(), wins.end());
+
+                // 2) 图像边缘候选（镜像 eSearch「图像识别」，默认关）：
+                //    检测结果（物理像素/图像坐标）→ 全局逻辑坐标；图像 (0,0)=逻辑桌面左上角
+                if (useImage)
+                {
+                    const std::vector<QRect> boxes = detectImageBorders(phys);
+                    out.reserve(out.size() + boxes.size());
+                    for (const QRect &b : boxes)
+                        out.push_back(
+                            QRect(b.x() / dpr, b.y() / dpr, b.width() / dpr, b.height() / dpr)
+                                .translated(localOrigin));
+                }
+                return out;
+            });
+
+        auto *watcher = new QFutureWatcher<std::vector<QRect>>(this);
+        connect(watcher, &QFutureWatcher<std::vector<QRect>>::finished, this,
+                [this, watcher, gen]() {
+                    watcher->deleteLater();
+                    if (gen != m_smartGen)
+                        return; // 已经进入新一轮截屏，丢弃过期结果
+                    m_smartCandidates = watcher->result();
+                    m_smartCandidatesReady = true;
+                    m_smartCandidatesBusy.store(false);
+                });
+        watcher->setFuture(worker);
     }
 
     void CaptureWindow::mouseDoubleClickEvent(QMouseEvent *event)
@@ -843,10 +980,15 @@ namespace snipaste
         p.drawText(colorRect.adjusted(0, kColorH / 2, 0, 0), Qt::AlignCenter,
                    QString("RGB(%1, %2, %3)").arg(center.red()).arg(center.green()).arg(center.blue()));
 
+        // 卡片阴影（右下偏移 2px，半透明）
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 40));
+        p.drawRect(cardRect.translated(2, 2));
+
         // 卡片边框
-        p.setPen(QPen(QColor(0, 0, 0, 120), 1));
+        p.setPen(QPen(QColor(0, 0, 0, 80), 1));
         p.setBrush(Qt::NoBrush);
-        p.drawRect(cardRect.adjusted(0, 0, -1, -1));
+        p.drawRect(cardRect);
     }
 
 } // namespace snipaste

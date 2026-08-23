@@ -24,6 +24,27 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg Concurrent)
 
 qt_standard_project_setup()
 
+# ---- OpenCV SDK 位置（本地下载，仿 Qt 模式）----
+# 优先级：环境变量/dp OPENCV_ROOT > 项目本地 tools/opencv/opencv
+# 由 script/install_opencv.py 下载官方 Windows 预编译包，供 eSearch 窗口识别算法移植使用
+if(DEFINED ENV{OPENCV_ROOT} AND NOT "$ENV{OPENCV_ROOT}" STREQUAL "")
+    set(OPENCV_ROOT "$ENV{OPENCV_ROOT}")
+elseif(DEFINED OPENCV_ROOT)
+    # OPENCV_ROOT 透传
+else()
+    set(OPENCV_ROOT "${CMAKE_SOURCE_DIR}/tools/opencv/opencv")
+endif()
+if(NOT EXISTS "${OPENCV_ROOT}/build/OpenCVConfig.cmake")
+    message(FATAL_ERROR "未找到 OpenCV：${OPENCV_ROOT}/build/OpenCVConfig.cmake 不存在。"
+        "请先运行 script/install_opencv.py 下载 OpenCV 到 tools/opencv（或设置 OPENCV_ROOT 指向含 build/ 的 OpenCV SDK 目录）")
+endif()
+set(OpenCV_DIR "${OPENCV_ROOT}/build")
+# 官方 Windows 包仅提供 x64/vc16 运行时库；新编译器如 MSVC 19.51（VS18）不被
+# OpenCVConfig.cmake 识别，故显式指定 ARCH/RUNTIME 让 find_package 正确找到 vc16 二进制
+set(OpenCV_ARCH "x64")
+set(OpenCV_RUNTIME "vc16")
+find_package(OpenCV REQUIRED)
+
 # ---- 分层：core（核心域） + ui（界面层） + app（可执行） ----
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
@@ -64,6 +85,16 @@ add_custom_command(TARGET MySnipaste POST_BUILD
     COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release "$<TARGET_FILE:MySnipaste>"
     COMMENT "Deploying Qt runtime via windeployqt"
 )
+
+# 部署 OpenCV 运行库（opencv_world 动态库）到可执行文件旁，供窗口识别算法使用
+if(EXISTS "${OPENCV_ROOT}/build/x64/vc16/bin/opencv_world4100.dll")
+    add_custom_command(TARGET MySnipaste POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${OPENCV_ROOT}/build/x64/vc16/bin/opencv_world4100.dll"
+            "$<TARGET_FILE_DIR:MySnipaste>/opencv_world4100.dll"
+        COMMENT "Deploying OpenCV runtime (opencv_world4100.dll)"
+    )
+endif()
 
 # 安装规则（可选）
 install(TARGETS MySnipaste RUNTIME DESTINATION .)

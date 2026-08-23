@@ -204,7 +204,7 @@ void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect
         mask.addRect(sel);
     if (!highlightRect.isEmpty())
         mask.addRect(highlightRect);
-    p.fillPath(mask, QColor(0, 0, 0, 110));
+    p.fillPath(mask, QColor(0, 0, 0, 105));
 
     if (selecting && !sel.isEmpty())
     {
@@ -217,17 +217,17 @@ void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect
 
 void SelectionController::paintSelectionFrame(QPainter &p, const QRect &sel) const
 {
-    // 蓝色 1.5pt 实线边框
+    // 蓝色 1.5pt 实线边框（使用主色 #2B6FF2）
     p.setPen(QPen(QColor(0, 120, 255), 1.5, Qt::SolidLine));
     p.setBrush(Qt::NoBrush);
     p.drawRect(sel);
 
-    // 8 个控制点（白色方块 + 蓝色描边）
+    // 8 个控制点（白色方块 + 蓝色描边，半透明内填充）
     const Handle handles[] = {
         Handle::TL, Handle::T, Handle::TR,
         Handle::R, Handle::BR, Handle::B,
         Handle::BL, Handle::L};
-    p.setBrush(Qt::white);
+    p.setBrush(QColor(255, 255, 255, 230));
     p.setPen(QPen(QColor(0, 120, 255), 1));
     for (Handle h : handles)
         p.drawRect(handleRect(h).translated(-m_ctx->cap->desktop.topLeft()));

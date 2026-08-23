@@ -7,6 +7,8 @@
 #include <QRect>
 #include <QTimer>
 #include <memory>
+#include <atomic>
+#include <vector>
 
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/capture/ScreenCapturer.h"
@@ -86,10 +88,18 @@ private:
 
     // 智能框选：鼠标下方预先高亮的窗口矩形（全局逻辑坐标，Selecting 态检测）
     QRect m_smartRect;
-    QTimer m_smartDetectTimer; // 智能框选检测定时器（与鼠标事件解耦，避免 MSAA 同步阻塞拖慢取色卡片）
+    QTimer m_smartDetectTimer; // 智能框选检测定时器（与鼠标事件解耦，避免检测同步阻塞拖慢取色卡片）
     QPoint m_smartMousePos;    // 当前鼠标位置缓存（定时器据此检测）
     QPoint m_smartLastPos;     // 上次检测位置（位置未变则跳过检测）
-    void onSmartDetect();      // 定时器回调：位置变化时重新检测高亮区域
+    // 智能框选候选区：图像边缘 + 系统窗口合并后的候选矩形（全局逻辑坐标），一次捕获懒加载。
+    // 候选区构建在 QtConcurrent 工作线程异步执行（窗口枚举/图像识别不能在 GUI 线程同步跑，
+    // EnumWindows 在 GUI 线程有死锁风险），完成后回到主线程生效。
+    std::vector<QRect> m_smartCandidates;
+    bool m_smartCandidatesReady = false;
+    std::atomic<bool> m_smartCandidatesBusy{false}; // 候选区构建是否进行中（防重复触发）
+    int m_smartGen = 0; // 捕获代次：丢弃过期（上一轮截屏）的异步结果
+    void onSmartDetect();          // 定时器回调：位置变化时在候选区下重新选择最合适区域
+    void rebuildSmartCandidates(); // 异步构建候选区（eSearch 窗口识别算法，工作线程执行）
     // 按下预高亮区域的待判定状态：未拖动 = 点选该区域；拖动超阈值 = 转为普通框选
     QRect m_smartPressRect;     // 按下时保存的预高亮矩形
     bool m_smartPressPending = false;
@@ -97,6 +107,11 @@ private:
 
     // 取色放大卡片（Selecting 态）：screen 像素图像懒加载缓存
     mutable QImage m_screenImage;
+
+    // ---- OCR 扫描动效（点击【文】时选区内的扫描线，提示用户"没卡死"） ----
+    bool m_ocrScanning = false;
+    qreal m_ocrScanPos = 0.0; // 扫描线位置 0.0~1.0（选区顶部→底部）
+    QTimer m_ocrScanTimer;
 
     // ---- 功能控制器（组合模式：构造时装配并注册） ----
     CaptureContext m_ctx;                                // 共享上下文（依赖注入）
@@ -126,7 +141,8 @@ private:
     void onToolSelected(Tool t);
     void onColorSelected(const QColor &c);
     void onFontSizeSelected(qreal pt);
-    void onOcrRequested();
+    void onOcrRequested();        // 【文】：OCR 结果以文本框覆盖到画布，不打开面板
+    void onTranslateRequested();  // 【译】：OCR + 翻译，自动打开面板显示原文与翻译结果
 };
 
 } // namespace snipaste
