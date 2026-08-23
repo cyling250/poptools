@@ -102,6 +102,24 @@ void Settings::setAutoStartEnabled(bool on)
     reg.sync();
 }
 
+// 划词翻译热键：默认 Ctrl+X（VK_X = 0x58, MOD_CONTROL = 0x0002）
+quint32 Settings::selectionTranslateHotKeyVk() const
+{
+    return m_s.value("hotkey/selectionTranslateVk", 0x58 /* X */).toUInt();
+}
+
+quint32 Settings::selectionTranslateHotKeyModifiers() const
+{
+    return m_s.value("hotkey/selectionTranslateMod", 0x0002 /* MOD_CONTROL */).toUInt();
+}
+
+void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
+{
+    m_s.setValue("hotkey/selectionTranslateVk", vk);
+    m_s.setValue("hotkey/selectionTranslateMod", modifiers);
+    m_s.sync();
+}
+
 // 镜像 eSearch「框选.自动框选.图像识别」默认 false：图片边缘识别默认不启用，
 // 仅当用户手动开启时，智能框选才叠加图像边缘候选（eSearch 中还需按 S 触发）
 bool Settings::smartImageRecognitionEnabled() const

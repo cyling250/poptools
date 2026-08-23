@@ -36,6 +36,7 @@ private:
     QImage m_ocrImg; // 传给 OCR 的选区裁剪图（物理像素）
     bool m_translateMode = false; // 当前 OCR 请求是否为"识别并翻译"（【译】按钮）
     QString m_lastText; // 最近一次识别文字（供【译】触发翻译）
+    QWidget *m_parent = nullptr; // 当前操作父窗口（供 QMessageBox 使用，避免被置顶窗口遮挡）
 };
 
 } // namespace snipaste

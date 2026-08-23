@@ -28,14 +28,21 @@ QString langName(const QString &code)
 
 // 专业翻译提示词：告知文本由 OCR 从截图提取（可能有错字/标点缺失/夹杂 UI 文案），
 // 要求按实际语境翻译且只输出翻译结果，不附带任何其他内容。
-QString buildPrompt(const QString &text, const QString &fromLang, const QString &toLang)
+QString buildPrompt(const QString &text, const QString &fromLang, const QString &toLang, bool isOcr)
 {
+    if (isOcr) {
+        return QStringLiteral(
+                   "You are a professional translation engine. The text below was extracted from a "
+                   "screenshot via OCR, so it may contain typos, missing or incorrect punctuation, or "
+                   "stray content such as UI labels, numbers, or code. Translate the text from %1 to %2 "
+                   "according to its actual context and meaning. Output ONLY the translated text — no "
+                   "explanations, no notes, no extra content.\n\n%3")
+            .arg(langName(fromLang), langName(toLang), text);
+    }
+    // 划词翻译：文本直接来自用户选中，无 OCR 噪声
     return QStringLiteral(
-               "You are a professional translation engine. The text below was extracted from a "
-               "screenshot via OCR, so it may contain typos, missing or incorrect punctuation, or "
-               "stray content such as UI labels, numbers, or code. Translate the text from %1 to %2 "
-               "according to its actual context and meaning. Output ONLY the translated text — no "
-               "explanations, no notes, no extra content.\n\n%3")
+               "You are a professional translation engine. Translate the text below from %1 to %2. "
+               "Output ONLY the translated text — no explanations, no notes, no extra content.\n\n%3")
         .arg(langName(fromLang), langName(toLang), text);
 }
 
@@ -46,14 +53,14 @@ Translator::Translator(QObject *parent)
 {
 }
 
-void Translator::translate(const QString &text, const QString &fromLang, const QString &toLang)
+void Translator::translate(const QString &text, const QString &fromLang, const QString &toLang, bool isOcr)
 {
     if (m_busy || text.trimmed().isEmpty())
         return;
-    translateByApi(text, fromLang, toLang);
+    translateByApi(text, fromLang, toLang, isOcr);
 }
 
-void Translator::translateByApi(const QString &text, const QString &fromLang, const QString &toLang)
+void Translator::translateByApi(const QString &text, const QString &fromLang, const QString &toLang, bool isOcr)
 {
     const QString baseUrl = Settings::instance().apiBaseUrl();
     const QString apiKey  = Settings::instance().apiKey();
@@ -73,7 +80,7 @@ void Translator::translateByApi(const QString &text, const QString &fromLang, co
     // 单问答形式（messages 只有 system + user 两条，无历史上下文）
     QJsonObject msg1{
         {"role", "system"},
-        {"content", buildPrompt(text, fromLang, toLang)},
+        {"content", buildPrompt(text, fromLang, toLang, isOcr)},
     };
     QJsonObject body{
         {"model", model},

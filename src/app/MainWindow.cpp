@@ -57,16 +57,27 @@ MainWindow::MainWindow(QObject *parent)
     connect(m_translator, &Translator::translateFinished,
             this, &MainWindow::onTranslateFinished);
 
+    // 划词翻译（获取选中文本）
+    m_selTranslator = new SelectionTranslator(this);
+    connect(m_selTranslator, &SelectionTranslator::textAcquired,
+            this, &MainWindow::onSelectionTranslateText);
+    connect(m_selTranslator, &SelectionTranslator::errorOccurred,
+            this, &MainWindow::onSelectionTranslateError);
+
     // 结果面板（无父窗口，顶层窗口由 QApplication 在退出时清理）
     m_result = new ResultDialog();
     connect(m_result, &ResultDialog::ocrRequested, this, &MainWindow::onOcrRequested);
     connect(m_result, &ResultDialog::translateRequested,
             this, &MainWindow::onTranslateRequested);
 
-    // 全局热键：F1 截图 / F3 贴图
+    // 全局热键：F1 截图 / F3 贴图 / Ctrl+X 划词翻译
     const quint32 vk = Settings::instance().captureHotKeyVk();
     m_hotKey.registerKey(vk, kCaptureHotKeyId);
     m_hotKey.registerKey(0x72 /* VK_F3 */, kPinHotKeyId);
+    m_hotKey.registerKey(
+        Settings::instance().selectionTranslateHotKeyVk(),
+        kSelectionTranslateHotKeyId,
+        Settings::instance().selectionTranslateHotKeyModifiers());
     connect(&m_hotKey, &GlobalHotKey::activated, this, [this](int id) {
         if (id == kCaptureHotKeyId) {
             if (!m_capture->isVisible())
@@ -74,6 +85,8 @@ MainWindow::MainWindow(QObject *parent)
         } else if (id == kPinHotKeyId) {
             // 热键在原生事件过滤器中触发：UI 操作延迟到事件循环，避免窗口创建/激活时序问题
             QTimer::singleShot(0, this, [this] { onPinHotKey(); });
+        } else if (id == kSelectionTranslateHotKeyId) {
+            QTimer::singleShot(0, this, [this] { onSelectionTranslateHotKey(); });
         }
     });
 }
@@ -135,6 +148,54 @@ void MainWindow::onTranslateRequested(const QString &text)
     m_translator->translate(text, QStringLiteral("auto"), QStringLiteral("zh"));
 }
 
+void MainWindow::onSelectionTranslateHotKey()
+{
+    // 截图中不触发划词翻译
+    if (m_capture->isVisible())
+        return;
+    m_selTranslator->trigger();
+}
+
+void MainWindow::onSelectionTranslateText(const QString &text)
+{
+    m_selSourceText = text;
+    if (m_translator->busy()) {
+        // 翻译器正忙（例如 OCR 结果面板翻译中），放弃本次划词翻译
+        m_selSourceText.clear();
+        return;
+    }
+
+    // 弹出卡片，显示原文 + 语言控件，等待用户点击翻译
+    auto *card = new TranslateCard();
+    card->setSourceText(text);
+    card->show();
+    m_selTranslateCard = card;
+
+    // 连接翻译请求：用户点击卡片内的翻译按钮时触发
+    connect(card, &TranslateCard::translateRequested, this,
+            [this, card](const QString &text, const QString &fromLang, const QString &toLang) {
+                m_selSourceText = text;
+                m_selTranslateCard = card;
+                m_translator->translate(text, fromLang, toLang, false);
+            });
+
+    // 卡片关闭时清理状态
+    connect(card, &TranslateCard::closed, this, [this]() {
+        m_selSourceText.clear();
+        m_selTranslateCard.clear();
+    });
+}
+
+void MainWindow::onSelectionTranslateError(const QString &error)
+{
+    // 如果卡片已弹出但获取文本失败，在卡片中显示错误
+    if (m_selTranslateCard) {
+        m_selTranslateCard->showError(error);
+        m_selSourceText.clear();
+        m_selTranslateCard.clear();
+    }
+}
+
 void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &error)
 {
     if (ok)
@@ -145,6 +206,20 @@ void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &erro
 
 void MainWindow::onTranslateFinished(bool ok, const QString &result, const QString &error)
 {
+    // 划词翻译：用 TranslateCard 展示，不影响现有 ResultDialog 流程
+    if (!m_selSourceText.isEmpty()) {
+        if (m_selTranslateCard) {
+            if (ok)
+                m_selTranslateCard->setTranslateResult(result);
+            else
+                m_selTranslateCard->showError(error);
+        }
+        m_selSourceText.clear();
+        m_selTranslateCard.clear();
+        return;
+    }
+
+    // 原有流程：结果面板翻译
     if (ok)
         m_result->setTranslateText(result);
     else

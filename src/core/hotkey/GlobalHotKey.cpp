@@ -23,16 +23,16 @@ GlobalHotKey::~GlobalHotKey()
         unregisterKey(id);
 }
 
-bool GlobalHotKey::registerKey(quint32 vk, int id)
+bool GlobalHotKey::registerKey(quint32 vk, int id, quint32 modifiers)
 {
     if (m_keys.contains(id) && m_keys[id].registered)
         return false; // 已注册
 #ifdef Q_OS_WIN
-    const bool ok = RegisterHotKey(nullptr, id, 0, vk) != 0;
+    const bool ok = RegisterHotKey(nullptr, id, modifiers, vk) != 0;
 #else
     const bool ok = false; // 其它平台暂未实现
 #endif
-    m_keys[id] = {vk, ok};
+    m_keys[id] = {vk, modifiers, ok};
     return ok;
 }
 

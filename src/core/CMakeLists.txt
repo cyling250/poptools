@@ -27,6 +27,8 @@ add_library(snipaste_core STATIC
     settings/Settings.h
     translation/Translator.cpp
     translation/Translator.h
+    translation/SelectionTranslator.cpp
+    translation/SelectionTranslator.h
 )
 
 target_link_libraries(snipaste_core PUBLIC

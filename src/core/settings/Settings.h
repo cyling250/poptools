@@ -33,6 +33,11 @@ public:
     bool autoStartEnabled() const;
     void setAutoStartEnabled(bool on);
 
+    // 划词翻译热键（默认 Ctrl+Alt+X，VK_X = 0x58, MOD_CONTROL = 0x0002, MOD_ALT = 0x0001）
+    quint32 selectionTranslateHotKeyVk() const;
+    quint32 selectionTranslateHotKeyModifiers() const;
+    void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);
+
     // 智能框选·图像识别（镜像 eSearch「框选.自动框选.图像识别」，默认关；
     // 关时为纯系统窗口识别，避免文字笔画产生的内外圈噪声）
     bool smartImageRecognitionEnabled() const;

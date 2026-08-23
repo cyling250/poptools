@@ -23,8 +23,9 @@ public:
     explicit GlobalHotKey(QObject *parent = nullptr);
     ~GlobalHotKey() override;
 
-    // 注册全局热键（vk 为虚拟键码），成功返回 true；重复注册返回 false
-    bool registerKey(quint32 vk, int id);
+    // 注册全局热键（vk 为虚拟键码，modifiers 为 MOD_ALT/MOD_CONTROL 等组合，默认 0 无修饰键）
+    // 成功返回 true；重复注册返回 false
+    bool registerKey(quint32 vk, int id, quint32 modifiers = 0);
     // 注销指定 id 的热键
     void unregisterKey(int id);
     // 指定 id 是否已注册
@@ -40,6 +41,7 @@ protected:
 private:
     struct Entry {
         quint32 vk = 0;
+        quint32 modifiers = 0;
         bool registered = false;
     };
     QHash<int, Entry> m_keys;

@@ -154,13 +154,13 @@ namespace snipaste
             TessApi *api = ensureLoaded();
             if (!api)
             {
-                m_busy.store(false, std::memory_order_relaxed);
                 if (boxes)
                     emit ocrBoxesFinished(false, QVector<OcrBox>(),
                                           QStringLiteral("未找到 OCR 引擎（libtesseract-5.dll）"));
                 else
                     emit ocrFinished(false, QString(),
                                      QStringLiteral("未找到 OCR 引擎（libtesseract-5.dll）"));
+                m_busy.store(false, std::memory_order_relaxed);
                 return;
             }
 
@@ -168,12 +168,12 @@ namespace snipaste
             TessBaseAPI *handle = api->Create();
             if (!handle)
             {
-                m_busy.store(false, std::memory_order_relaxed);
                 if (boxes)
                     emit ocrBoxesFinished(false, QVector<OcrBox>(),
                                           QStringLiteral("创建 OCR 引擎失败"));
                 else
                     emit ocrFinished(false, QString(), QStringLiteral("创建 OCR 引擎失败"));
+                m_busy.store(false, std::memory_order_relaxed);
                 return;
             }
 
@@ -189,9 +189,9 @@ namespace snipaste
             if (initRet != 0)
             {
                 api->Delete(handle);
-                m_busy.store(false, std::memory_order_relaxed);
                 emit ocrFinished(false, QString(),
                                  QStringLiteral("tesseract 初始化失败（tessdata 语言包缺失？）"));
+                m_busy.store(false, std::memory_order_relaxed);
                 return;
             }
 
@@ -237,9 +237,9 @@ namespace snipaste
                 if (result.isEmpty())
                     error = QStringLiteral("未识别到文字");
                 api->Delete(handle);
-                m_busy.store(false, std::memory_order_relaxed);
                 emit ocrBoxesFinished(!result.isEmpty(), result,
                                      result.isEmpty() ? error : QString());
+                m_busy.store(false, std::memory_order_relaxed);
                 return;
             }
 
@@ -249,9 +249,9 @@ namespace snipaste
                 api->DeleteText(utf8);
             if (text.isEmpty())
                 error = QStringLiteral("未识别到文字");
-            m_busy.store(false, std::memory_order_relaxed);
             api->Delete(handle);
             emit ocrFinished(!text.isEmpty(), text, text.isEmpty() ? error : QString());
+            m_busy.store(false, std::memory_order_relaxed);
         });
     }
 

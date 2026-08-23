@@ -45,6 +45,7 @@ void OcrController::requestTranslate(QWidget *parent)
 // 公共准备：检查状态 + 裁剪选区图像 + 启动识别；不可用时返回 false
 bool OcrController::prepareAndRecognize(QWidget *parent)
 {
+    m_parent = parent; // 保存父窗口供 onBoxes/onBoxesTranslate 中 QMessageBox 使用，避免被置顶窗口遮挡
     if (m_ctx->selectionRect().isEmpty())
         return false;
     if (m_ocr.busy())
@@ -116,7 +117,7 @@ void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString
 
     if (!ok)
     {
-        QMessageBox::warning(nullptr, "文字识别",
+        QMessageBox::warning(m_parent, "文字识别",
                              error.isEmpty() ? QStringLiteral("未识别到文字") : error);
         return;
     }
@@ -162,7 +163,7 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
         // 识别失败：解除面板忙状态，避免翻译按钮一直"翻译中…"
         if (m_ctx->setPanelBusy)
             m_ctx->setPanelBusy(false);
-        QMessageBox::warning(nullptr, "文字识别",
+        QMessageBox::warning(m_parent, "文字识别",
                              error.isEmpty() ? QStringLiteral("未识别到文字") : error);
         return;
     }

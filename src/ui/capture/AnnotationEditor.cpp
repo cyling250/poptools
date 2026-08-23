@@ -26,6 +26,8 @@ Handle AnnotationEditor::handleAt(const AnnotationItem &it, const QPointF &pos) 
 
 bool AnnotationEditor::tryPress(const QPointF &local)
 {
+    Q_ASSERT(m_ctx->canvas);
+    Q_ASSERT(m_ctx->selectedItem);
     const int selIdx = m_ctx->selectedIndex();
     if (selIdx >= 0 && selIdx < m_ctx->canvas->items.size())
     {

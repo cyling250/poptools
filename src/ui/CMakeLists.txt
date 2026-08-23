@@ -44,6 +44,8 @@ add_library(snipaste_ui STATIC
     result/ResultDialog.h
     settings/SettingsDialog.cpp
     settings/SettingsDialog.h
+    translate/TranslateCard.cpp
+    translate/TranslateCard.h
 )
 
 target_link_libraries(snipaste_ui PUBLIC
