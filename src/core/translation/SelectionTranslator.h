@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
 namespace snipaste {
 
@@ -9,12 +10,13 @@ namespace snipaste {
 // 划词翻译：获取 Windows 当前选中文本
 //
 // 职责：
-//   * 保存当前剪贴板内容
-//   * 模拟 Ctrl+C 复制选中文本到剪贴板
-//   * 读取剪贴板文本后恢复原始内容
-//   * 发出 textAcquired(text) 信号供外部调用翻译
+//   * 模拟 Ctrl+C 复制选中文本到剪贴板（选中内容保留在剪贴板中）
+//   * 轮询 Windows 剪贴板序列号（GetClipboardSequenceNumber），
+//     检测复制生效后直接用 Win32 API 读取文本
+//   * 约 600ms 未生效时重发一次 Ctrl+C；总超时（复制未生效/无选中文本）发出 errorOccurred
 //
-// 线程安全：主线程调用（热键处理链），异步通过 QTimer 延迟读剪贴板。
+// 线程安全：主线程调用（热键处理链）；读取不依赖 Qt 剪贴板缓存，
+// 避免信号/缓存时序导致读到旧内容。
 // ============================================================
 class SelectionTranslator : public QObject
 {
@@ -22,25 +24,27 @@ class SelectionTranslator : public QObject
 public:
     explicit SelectionTranslator(QObject *parent = nullptr);
 
-    // 触发获取选中文本（模拟 Ctrl+C → 延迟读剪贴板 → 恢复）
+    // 触发获取选中文本（模拟 Ctrl+C → 轮询剪贴板序列号 → 读取）
     void trigger();
 
 signals:
     // 成功获取到选中文本
     void textAcquired(const QString &text);
-    // 获取失败（无选中文本/剪贴板不可用等）
+    // 获取失败（无选中文本/复制未生效等）
     void errorOccurred(const QString &error);
 
 private slots:
-    void onClipboardReady();
+    void onPollTick();
 
 private:
-    void saveClipboard();
-    void restoreClipboard();
     void simulateCtrlC();
+    QString readClipboardText() const;
+    void finish(const QString &text);
+    void fail();
 
-    QString m_savedText;       // 原始剪贴板文本（用于恢复）
-    bool m_hasSavedText = false;
+    QTimer m_pollTimer;      // 轮询剪贴板序列号
+    quint32 m_beforeSeq = 0; // 复制前的剪贴板序列号
+    int m_pollCount = 0;     // 轮询计数（重发/超时控制）
 };
 
 } // namespace snipaste

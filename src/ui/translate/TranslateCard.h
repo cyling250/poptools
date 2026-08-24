@@ -26,6 +26,10 @@ public:
     void setTranslateResult(const QString &text);
     // 显示错误信息
     void showError(const QString &errorMsg);
+    // 立即执行一次翻译（弹出卡片后自动调用；用户亦可点击翻译按钮再次翻译）
+    void translateNow();
+    // 定位到鼠标位置附近（屏幕边界内）
+    void moveNearCursor();
 
 signals:
     // 用户关闭卡片

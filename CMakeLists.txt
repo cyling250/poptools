@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 # CMake 3.30+ 策略 CMP0144：find_package 使用与包名大小写一致的 <PackageName>_ROOT
 # （如 OpenCV_ROOT）而非全大写 <PACKAGENAME>_ROOT，显式启用新行为以消除兼容性警告
 cmake_policy(SET CMP0144 NEW)
-project(Snipaste VERSION 0.1.2 LANGUAGES CXX)
+project(Snipaste VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

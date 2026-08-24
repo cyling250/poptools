@@ -52,6 +52,8 @@ private slots:
     void onShowSettings();
 
 private:
+    void closeSelectionCard(); // 关闭当前划词翻译卡片并清理状态（全局仅保留一张）
+
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
     CaptureWindow *m_capture;

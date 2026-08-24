@@ -151,6 +151,11 @@ void TranslateCard::setSourceText(const QString &text)
     m_sourceText->setText(text);
     adjustSize();
     // 定位到鼠标位置
+    moveNearCursor();
+}
+
+void TranslateCard::moveNearCursor()
+{
     const QRect screenGeo = QGuiApplication::screenAt(QCursor::pos())->availableGeometry();
     QPoint pos = QCursor::pos() + QPoint(12, 12);
     if (pos.x() + width() > screenGeo.right())
@@ -200,7 +205,7 @@ void TranslateCard::onSwapLanguages()
     }
 }
 
-void TranslateCard::onTranslateClicked()
+void TranslateCard::translateNow()
 {
     if (m_originalText.trimmed().isEmpty())
         return;
@@ -209,6 +214,11 @@ void TranslateCard::onTranslateClicked()
     m_translateText->setText(QString());
     emit translateRequested(m_originalText, langCode(m_fromCombo->currentText()),
                             langCode(m_toCombo->currentText()));
+}
+
+void TranslateCard::onTranslateClicked()
+{
+    translateNow();
 }
 
 QString TranslateCard::langCode(const QString &display) const

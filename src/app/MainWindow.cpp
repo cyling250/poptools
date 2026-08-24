@@ -35,7 +35,7 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addSeparator();
     m_menu->addAction("关于", this, [this] {
         QMessageBox::about(m_result, "Snipaste",
-            "Snipaste v0.1.2\n\n"
+            "Snipaste v0.1.3\n\n"
             "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
             "快捷键：F1 截图\n"
             "OCR 引擎：PaddleOCR（本地离线）\n"
@@ -158,14 +158,18 @@ void MainWindow::onSelectionTranslateHotKey()
 
 void MainWindow::onSelectionTranslateText(const QString &text)
 {
-    m_selSourceText = text;
     if (m_translator->busy()) {
-        // 翻译器正忙（例如 OCR 结果面板翻译中），放弃本次划词翻译
+        // 翻译器正忙（例如上一张卡片翻译中），放弃本次划词翻译
         m_selSourceText.clear();
         return;
     }
 
-    // 弹出卡片，显示原文 + 语言控件，等待用户点击翻译
+    // 全局仅保留一张划词翻译卡片：先关闭上一张
+    closeSelectionCard();
+
+    m_selSourceText = text;
+
+    // 弹出卡片，显示原文 + 语言控件
     auto *card = new TranslateCard();
     card->setSourceText(text);
     card->show();
@@ -184,16 +188,36 @@ void MainWindow::onSelectionTranslateText(const QString &text)
         m_selSourceText.clear();
         m_selTranslateCard.clear();
     });
+
+    // 立即执行一次翻译（默认 自动→中文），用户可更改语言后手动再译
+    card->translateNow();
 }
 
 void MainWindow::onSelectionTranslateError(const QString &error)
 {
-    // 如果卡片已弹出但获取文本失败，在卡片中显示错误
-    if (m_selTranslateCard) {
-        m_selTranslateCard->showError(error);
+    // 全局仅保留一张划词翻译卡片：先关闭上一张
+    closeSelectionCard();
+
+    // 弹出仅含错误信息的卡片，提示获取选中文本失败
+    auto *card = new TranslateCard();
+    card->showError(error);
+    card->show();
+    card->moveNearCursor();
+    connect(card, &TranslateCard::closed, this, [this]() {
         m_selSourceText.clear();
         m_selTranslateCard.clear();
+    });
+}
+
+void MainWindow::closeSelectionCard()
+{
+    if (m_selTranslateCard) {
+        // 断开旧卡片的信号回调，避免其清理逻辑误清新卡片状态
+        disconnect(m_selTranslateCard, nullptr, this, nullptr);
+        m_selTranslateCard->close(); // WA_DeleteOnClose → 自动销毁
+        m_selTranslateCard.clear();
     }
+    m_selSourceText.clear();
 }
 
 void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &error)
