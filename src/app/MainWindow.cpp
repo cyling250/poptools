@@ -21,12 +21,12 @@ MainWindow::MainWindow(QObject *parent)
 {
     // 托盘（使用资源图标：Material Design 相机图标，Apache 2.0 许可）
     m_tray = new QSystemTrayIcon(QIcon(":/app_icon.svg"), this);
-    m_tray->setToolTip("MySnipaste\n按 F1 截图");
+    m_tray->setToolTip("Snipaste\n按 F1 截图");
 
     m_menu = new QMenu();
     m_menu->setObjectName("TrayMenu");
     // 菜单标题显示当前模式（托盘区域文字提示）
-    m_menu->setTitle("MySnipaste");
+    m_menu->setTitle("Snipaste");
     m_menu->addAction("截图 (F1)", this, [this] {
         if (!m_capture->isVisible())
             m_capture->startCapture();
@@ -34,8 +34,8 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addAction("设置...", this, &MainWindow::onShowSettings);
     m_menu->addSeparator();
     m_menu->addAction("关于", this, [this] {
-        QMessageBox::about(m_result, "MySnipaste",
-            "MySnipaste v0.1.1\n\n"
+        QMessageBox::about(m_result, "Snipaste",
+            "Snipaste v0.1.2\n\n"
             "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
             "快捷键：F1 截图\n"
             "OCR 引擎：PaddleOCR（本地离线）\n"
@@ -70,7 +70,7 @@ MainWindow::MainWindow(QObject *parent)
     connect(m_result, &ResultDialog::translateRequested,
             this, &MainWindow::onTranslateRequested);
 
-    // 全局热键：F1 截图 / F3 贴图 / Ctrl+X 划词翻译
+    // 全局热键：F1 截图 / F3 贴图 / Ctrl+Alt+Shift+X 划词翻译
     const quint32 vk = Settings::instance().captureHotKeyVk();
     m_hotKey.registerKey(vk, kCaptureHotKeyId);
     m_hotKey.registerKey(0x72 /* VK_F3 */, kPinHotKeyId);

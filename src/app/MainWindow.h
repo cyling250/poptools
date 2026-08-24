@@ -37,12 +37,12 @@ public:
     // 热键 ID（注册到 GlobalHotKey）
     static constexpr int kCaptureHotKeyId = 1; // F1 截图
     static constexpr int kPinHotKeyId = 2;     // F3 贴图
-    static constexpr int kSelectionTranslateHotKeyId = 3; // Ctrl+X 划词翻译
+    static constexpr int kSelectionTranslateHotKeyId = 3; // Ctrl+Alt+Shift+X 划词翻译
 
 private slots:
     void onCaptured(const QPixmap &pixmap, const QRect &selectionLogical);
     void onPinHotKey(); // F3：贴剪贴板最新图片（截图模式先复制+关闭；多张并存）
-    void onSelectionTranslateHotKey(); // Ctrl+X：划词翻译
+    void onSelectionTranslateHotKey(); // Ctrl+Alt+Shift+X：划词翻译
     void onSelectionTranslateText(const QString &text); // 获取到选中文本
     void onSelectionTranslateError(const QString &error); // 获取选中文本失败
     void onOcrRequested();

@@ -7,7 +7,7 @@ namespace snipaste {
 
 // 配置文件存放在可执行文件旁（构建输出/安装目录），随程序打包分发、便于查看
 Settings::Settings()
-    : m_s(QCoreApplication::applicationDirPath() + "/MySnipaste.ini",
+    : m_s(QCoreApplication::applicationDirPath() + "/Snipaste.ini",
           QSettings::IniFormat)
 {
 }
@@ -85,7 +85,7 @@ void Settings::setPinSaveDir(const QString &dir)
 
 bool Settings::autoStartEnabled() const
 {
-    return autoStartRegistry().contains("MySnipaste");
+    return autoStartRegistry().contains("Snipaste");
 }
 
 void Settings::setAutoStartEnabled(bool on)
@@ -95,14 +95,14 @@ void Settings::setAutoStartEnabled(bool on)
         // Run 值要求带引号的可执行文件路径
         const QString exe =
             "\"" + QDir::toNativeSeparators(QCoreApplication::applicationFilePath()) + "\"";
-        reg.setValue("MySnipaste", exe);
+        reg.setValue("Snipaste", exe);
     } else {
-        reg.remove("MySnipaste");
+        reg.remove("Snipaste");
     }
     reg.sync();
 }
 
-// 划词翻译热键：默认 Ctrl+X（VK_X = 0x58, MOD_CONTROL = 0x0002）
+// 划词翻译热键：默认 Ctrl+Alt+Shift+X（VK_X = 0x58, MOD_CONTROL = 0x0002, MOD_ALT = 0x0001, MOD_SHIFT = 0x0004）
 quint32 Settings::selectionTranslateHotKeyVk() const
 {
     return m_s.value("hotkey/selectionTranslateVk", 0x58 /* X */).toUInt();
@@ -110,7 +110,7 @@ quint32 Settings::selectionTranslateHotKeyVk() const
 
 quint32 Settings::selectionTranslateHotKeyModifiers() const
 {
-    return m_s.value("hotkey/selectionTranslateMod", 0x0002 /* MOD_CONTROL */).toUInt();
+    return m_s.value("hotkey/selectionTranslateMod", 0x0007 /* MOD_CONTROL|MOD_ALT|MOD_SHIFT */).toUInt();
 }
 
 void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)

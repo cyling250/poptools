@@ -18,7 +18,7 @@ namespace snipaste {
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("MySnipaste 设置");
+    setWindowTitle("Snipaste 设置");
     setMinimumWidth(460);
 
     // 对话框整体样式

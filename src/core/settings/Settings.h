@@ -33,7 +33,7 @@ public:
     bool autoStartEnabled() const;
     void setAutoStartEnabled(bool on);
 
-    // 划词翻译热键（默认 Ctrl+Alt+X，VK_X = 0x58, MOD_CONTROL = 0x0002, MOD_ALT = 0x0001）
+    // 划词翻译热键（默认 Ctrl+Alt+Shift+X，VK_X = 0x58, MOD_CONTROL = 0x0002, MOD_ALT = 0x0001, MOD_SHIFT = 0x0004）
     quint32 selectionTranslateHotKeyVk() const;
     quint32 selectionTranslateHotKeyModifiers() const;
     void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);

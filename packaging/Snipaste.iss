@@ -1,12 +1,12 @@
-; MySnipaste 安装程序脚本（Inno Setup 6）
+; Snipaste 安装程序脚本（Inno Setup 6）
 ; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + PaddleOCR 引擎）
-; 编译：ISCC.exe packaging\MySnipaste.iss
+; 编译：ISCC.exe packaging\Snipaste.iss
 
-#define MyAppName "MySnipaste"
-#define MyAppVersion "0.1.1"
-#define MyAppPublisher "MySnipaste"
-#define MyAppExeName "MySnipaste.exe"
-#define MyAppAssocName "MySnipaste 截图"
+#define MyAppName "Snipaste"
+#define MyAppVersion "0.1.2"
+#define MyAppPublisher "Snipaste"
+#define MyAppExeName "Snipaste.exe"
+#define MyAppAssocName "Snipaste 截图"
 #define SourceDir "..\build\Release"
 
 [Setup]
@@ -19,12 +19,12 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=MySnipaste-Setup-{#MyAppVersion}
+OutputBaseFilename=Snipaste-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=MySnipaste.ico
-UninstallDisplayIcon={app}\MySnipaste.exe
+SetupIconFile=Snipaste.ico
+UninstallDisplayIcon={app}\Snipaste.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName}
@@ -40,11 +40,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; OpenCV 运行库（窗口识别用），直接从 tools 源路径引用，确保安装包始终包含
 Source: "{#SourcePath}\..\tools\opencv\opencv\build\x64\vc16\bin\opencv_world4100.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "MySnipaste.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Snipaste.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\MySnipaste.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\MySnipaste.ico"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Snipaste.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Snipaste.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

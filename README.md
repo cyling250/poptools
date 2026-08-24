@@ -1,4 +1,4 @@
-# MySnipaste
+# Snipaste
 
 > 全场景截图软件：截图 + OCR 文字识别 + 大模型翻译 + 贴图，无需购买 Snipaste PRO
 
@@ -21,7 +21,7 @@
 | **贴图** | 将截图钉到屏幕上，支持拖动/滚轮缩放/右键清除 | `F3` |
 | **OCR 文字识别** | 本地离线 PaddleOCR，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏【文】【译】 |
 | **大模型翻译** | OpenAI 兼容 API（DeepSeek / Ollama 等），支持截图翻译与划词翻译 | - |
-| **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换 | `Ctrl+X` |
+| **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换 | `Ctrl+Alt+Shift+X` |
 | **窗口智能识别** | 自动检测窗口边缘 + 图像边缘识别，辅助精确框选 | 截图时自动 |
 | **系统托盘常驻** | 后台运行，托盘菜单快捷操作，开机自启可选 | - |
 
@@ -31,7 +31,7 @@
 # 构建并运行
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
-build/Release/MySnipaste.exe
+build/Release/Snipaste.exe
 ```
 
 > 首次运行前需获取 Qt 套件与 OCR 引擎，见下方「外部依赖获取」。
@@ -76,7 +76,7 @@ build/Release/MySnipaste.exe
 │   ├── paddleocr/              #   OCR 引擎（PaddleOCR-json.exe + models）
 │   └── opencv/                 #   OpenCV 4.10（opencv_world 动态库）
 ├── packaging/                  # 安装脚本
-│   └── MySnipaste.iss
+│   └── Snipaste.iss
 └── build/                      # 构建输出（CMake 生成，忽略）
 ```
 
@@ -123,7 +123,7 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 
 # 运行
-build/Release/MySnipaste.exe
+build/Release/Snipaste.exe
 ```
 
 > 环境变量 `QT_ROOT` 或 CMake 参数 `-DQT_ROOT=...` 可覆盖 Qt 套件路径。
@@ -153,7 +153,7 @@ build/Release/MySnipaste.exe
 ### 翻译
 
 - **截图翻译**：文字栏面板中选择源/目标语言，点击「翻译」按钮
-- **划词翻译**（`Ctrl+X`）：选中任意文字后，弹出翻译卡片，选择语言后点击「翻译」
+- **划词翻译**（`Ctrl+Alt+Shift+X`）：选中任意文字后，弹出翻译卡片，选择语言后点击「翻译」
 - 翻译使用 OpenAI 兼容 API，在设置中配置 Base URL / API Key / Model
 
 ### 贴图（F3）
@@ -179,11 +179,11 @@ build/Release/MySnipaste.exe
 | API Base URL | OpenAI 兼容端点 | `https://api.deepseek.com/v1` |
 | API Key | 密钥（自行填入） | 空 |
 | Model | 模型名 | `deepseek-v4-flash` |
-| 划词翻译热键 | 虚拟键码 + 修饰符 | `Ctrl+X` |
+| 划词翻译热键 | 虚拟键码 + 修饰符 | `Ctrl+Alt+Shift+X` |
 | 框选图像识别 | 启用图像边缘检测辅助框选 | 关闭 |
 | 贴图保存目录 | 贴图自动保存路径 | `exe目录/tempSnipaste/` |
 
-> 设置持久化到 `exe目录/MySnipaste.ini`，便于查看与备份。
+> 设置持久化到 `exe目录/Snipaste.ini`，便于查看与备份。
 > 翻译 API 可换成任意 OpenAI 兼容服务，如 Ollama 本地：`http://localhost:11434/v1`
 
 ## 项目架构

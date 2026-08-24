@@ -13,7 +13,7 @@ namespace snipaste {
 ResultDialog::ResultDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("MySnipaste - 截图结果");
+    setWindowTitle("Snipaste - 截图结果");
     setMinimumSize(560, 480);
     setStyleSheet(
         "QDialog { background: #F5F5F5; }"

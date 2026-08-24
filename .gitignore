@@ -14,7 +14,7 @@ __pycache__/
 temp_scripts/
 
 # ===== 第三方二进制资源（tesseract 引擎等，体积大，不推送，由本地组装） =====
-tools/
+/tools/
 
 # ===== 日志与临时文件 =====
 *.log
