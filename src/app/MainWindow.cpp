@@ -144,8 +144,9 @@ void MainWindow::onTranslateRequested(const QString &text)
 {
     if (text.trimmed().isEmpty())
         return;
-    // 旧结果面板入口（当前不再自动弹出）：自动识别源语言，目标语言固定中文
-    m_translator->translate(text, QStringLiteral("auto"), QStringLiteral("zh"));
+    // 旧结果面板入口（当前不再自动弹出）：自动识别源语言，目标语言用记忆值
+    m_translator->translate(text, QStringLiteral("auto"),
+                            Settings::instance().translateTargetLang());
 }
 
 void MainWindow::onSelectionTranslateHotKey()
@@ -189,7 +190,7 @@ void MainWindow::onSelectionTranslateText(const QString &text)
         m_selTranslateCard.clear();
     });
 
-    // 立即执行一次翻译（默认 自动→中文），用户可更改语言后手动再译
+    // 立即执行一次翻译（目标语言为用户记忆值，默认 自动→中文）
     card->translateNow();
 }
 

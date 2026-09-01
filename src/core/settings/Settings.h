@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QSettings>
+#include <QPair>
+#include <QList>
 
 namespace snipaste {
 
@@ -24,6 +27,19 @@ public:
 
     QString apiModel() const;
     void setApiModel(const QString &model);
+
+    // 记忆的目标语言（划词翻译卡片与 OCR 文字栏共用）：用户切换目标语言时立即保存，
+    // 下次弹出/自动翻译直接使用记忆值，而不是每次都回到默认中文
+    QString translateTargetLang() const;
+    void setTranslateTargetLang(const QString &code);
+
+    // 翻译领域（如"医学 / 法律"）与专有名词翻译对，注入 Translator 的系统提示词
+    QStringList translateDomains() const;
+    void setTranslateDomains(const QStringList &domains);
+
+    typedef QPair<QString, QString> TermPair; // first=原文, second=译文
+    QList<TermPair> translateTerms() const;
+    void setTranslateTerms(const QList<TermPair> &terms);
 
     // 贴图默认保存文件夹（F3 张贴时自动落盘）
     QString pinSaveDir() const;

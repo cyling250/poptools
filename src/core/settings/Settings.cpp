@@ -70,6 +70,56 @@ void Settings::setApiModel(const QString &model)
     m_s.sync();
 }
 
+// 记忆的目标语言，默认中文（zh）
+QString Settings::translateTargetLang() const
+{
+    return m_s.value("translate/targetLang", "zh").toString();
+}
+
+void Settings::setTranslateTargetLang(const QString &code)
+{
+    m_s.setValue("translate/targetLang", code);
+    m_s.sync();
+}
+
+QStringList Settings::translateDomains() const
+{
+    return m_s.value("translate/domains", QStringList()).toStringList();
+}
+
+void Settings::setTranslateDomains(const QStringList &domains)
+{
+    m_s.setValue("translate/domains", domains);
+    m_s.sync();
+}
+
+// 术语对用两个平行的字符串列表存储（termSources/termTargets），
+// 避免自选分隔符与术语内容冲突
+QList<Settings::TermPair> Settings::translateTerms() const
+{
+    const QStringList sources = m_s.value("translate/termSources", QStringList()).toStringList();
+    const QStringList targets = m_s.value("translate/termTargets", QStringList()).toStringList();
+    QList<TermPair> terms;
+    const int n = qMin(sources.size(), targets.size());
+    for (int i = 0; i < n; ++i)
+        terms.append({sources.at(i), targets.at(i)});
+    return terms;
+}
+
+void Settings::setTranslateTerms(const QList<TermPair> &terms)
+{
+    QStringList sources, targets;
+    for (const TermPair &term : terms) {
+        if (term.first.isEmpty() || term.second.isEmpty())
+            continue;
+        sources << term.first;
+        targets << term.second;
+    }
+    m_s.setValue("translate/termSources", sources);
+    m_s.setValue("translate/termTargets", targets);
+    m_s.sync();
+}
+
 QString Settings::pinSaveDir() const
 {
     // 默认贴图文件夹：软件目录（exe 旁）下的 tempSnipaste

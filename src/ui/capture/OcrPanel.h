@@ -6,6 +6,7 @@
 class QTextEdit;
 class QComboBox;
 class QPushButton;
+class QShowEvent;
 
 namespace snipaste {
 
@@ -38,6 +39,11 @@ signals:
     void translateRequested(const QString &text, const QString &fromLang, const QString &toLang);
     // 面板被关闭（关闭按钮点击），用于通知外部清理翻译缓存
     void closed();
+
+protected:
+    // 每次打开面板（新翻译任务）把源语言重置为"自动"：源语言不做记忆，
+    // 始终交由模型自动检测（用户仍可在面板打开期间手动指定）
+    void showEvent(QShowEvent *event) override;
 
 private:
     QTextEdit *m_ocrEdit = nullptr;

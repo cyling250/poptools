@@ -1,5 +1,8 @@
 #include "OcrPanel.h"
 
+#include "core/settings/Settings.h"
+#include "core/translation/Languages.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -67,17 +70,19 @@ OcrPanel::OcrPanel(QWidget *parent)
     auto *toolRow = new QHBoxLayout;
     toolRow->setSpacing(4);
     m_fromCombo = new QComboBox(this);
-    const QStringList langs = {QStringLiteral("自动"), QStringLiteral("中文"), QStringLiteral("英文"),
-                               QStringLiteral("日文"), QStringLiteral("韩文"), QStringLiteral("法文"),
-                               QStringLiteral("德文"), QStringLiteral("西文"), QStringLiteral("俄文")};
-    m_fromCombo->addItems(langs);
+    m_fromCombo->addItems(languageDisplays());
     toolRow->addWidget(m_fromCombo);
     auto *arrow = new QLabel(QStringLiteral("→"), this);
     toolRow->addWidget(arrow);
     m_toCombo = new QComboBox(this);
     m_toCombo->setEditable(true);
-    m_toCombo->addItems(langs.mid(1));
-    m_toCombo->setCurrentText(QStringLiteral("中文"));
+    m_toCombo->addItems(languageDisplays().mid(1));
+    // 恢复记忆的目标语言（用户上次切换的语言，划词卡片与文字栏共用）
+    m_toCombo->setCurrentText(langCodeToDisplay(Settings::instance().translateTargetLang()));
+    // 用户切换目标语言 → 立即记忆
+    connect(m_toCombo, &QComboBox::currentTextChanged, this, [](const QString &display) {
+        Settings::instance().setTranslateTargetLang(displayToLangCode(display));
+    });
     toolRow->addWidget(m_toCombo, 1);
     m_translateBtn = new QPushButton(QStringLiteral("翻译"), this);
     m_translateBtn->setToolTip(QStringLiteral("将识别文字翻译为目标语言（需手动点击）"));
@@ -127,52 +132,26 @@ void OcrPanel::setTranslateText(const QString &text)
 
 QString OcrPanel::sourceLang() const
 {
-    const QString s = m_fromCombo->currentText().trimmed();
-    if (s.contains(QStringLiteral("中")))
-        return QStringLiteral("zh");
-    if (s.contains(QStringLiteral("英")))
-        return QStringLiteral("en");
-    if (s.contains(QStringLiteral("日")))
-        return QStringLiteral("ja");
-    if (s.contains(QStringLiteral("韩")))
-        return QStringLiteral("ko");
-    if (s.contains(QStringLiteral("法")))
-        return QStringLiteral("fr");
-    if (s.contains(QStringLiteral("德")))
-        return QStringLiteral("de");
-    if (s.contains(QStringLiteral("西")))
-        return QStringLiteral("es");
-    if (s.contains(QStringLiteral("俄")))
-        return QStringLiteral("ru");
-    return QStringLiteral("auto");
+    return displayToLangCode(m_fromCombo->currentText());
 }
 
 QString OcrPanel::targetLang() const
 {
-    const QString t = m_toCombo->currentText().trimmed();
-    if (t.contains(QStringLiteral("中")))
-        return QStringLiteral("zh");
-    if (t.contains(QStringLiteral("英")))
-        return QStringLiteral("en");
-    if (t.contains(QStringLiteral("日")))
-        return QStringLiteral("ja");
-    if (t.contains(QStringLiteral("韩")))
-        return QStringLiteral("ko");
-    if (t.contains(QStringLiteral("法")))
-        return QStringLiteral("fr");
-    if (t.contains(QStringLiteral("德")))
-        return QStringLiteral("de");
-    if (t.contains(QStringLiteral("西")))
-        return QStringLiteral("es");
-    if (t.contains(QStringLiteral("俄")))
-        return QStringLiteral("ru");
-    return t;
+    return displayToLangCode(m_toCombo->currentText());
 }
 
 void OcrPanel::setBusy(bool busy)
 {
     m_translateBtn->setDisabled(busy);
     m_translateBtn->setText(busy ? QStringLiteral("翻译中…") : QStringLiteral("翻译"));
+}
+
+// 面板每次显示（新截图翻译任务）源语言回到"自动检测"：只有目标语言做记忆，
+// 源语言交给模型自动识别（面板打开期间用户仍可手动指定）
+void OcrPanel::showEvent(QShowEvent *event)
+{
+    m_fromCombo->setCurrentIndex(0);
+    QWidget::showEvent(event);
 }
 
 } // namespace snipaste

@@ -48,8 +48,6 @@ private slots:
     void onTranslateClicked();
 
 private:
-    QString langCode(const QString &display) const;
-
     QLabel *m_sourceText = nullptr;
     QLabel *m_translateText = nullptr;
     QComboBox *m_fromCombo = nullptr;

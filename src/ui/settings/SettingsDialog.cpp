@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include "core/settings/Settings.h"
+#include "core/translation/ApiTester.h"
 
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -12,6 +13,9 @@
 #include <QCheckBox>
 #include <QFrame>
 #include <QLabel>
+#include <QPlainTextEdit>
+#include <QRegularExpression>
+#include <QToolButton>
 
 namespace snipaste {
 
@@ -32,7 +36,10 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         "  padding: 4px 12px; color: #1A1A1A; }"
         "QPushButton:hover { background: #E8F0FE; border-color: #2B6FF2; color: #2B6FF2; }"
         "QCheckBox { color: #1A1A1A; }"
-        "QLabel { color: #555; }");
+        "QLabel { color: #555; }"
+        "QToolButton { background: #fff; border: 1px solid #D0D0D0; border-radius: 3px;"
+        "  padding: 3px 8px; color: #1A1A1A; }"
+        "QToolButton:hover { background: #E8F0FE; border-color: #2B6FF2; color: #2B6FF2; }");
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->setSpacing(0);
@@ -81,11 +88,83 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_keyEdit = new QLineEdit(Settings::instance().apiKey(), this);
     m_keyEdit->setEchoMode(QLineEdit::Password);
     m_keyEdit->setPlaceholderText("sk-xxxxxxxxxxxxxxxx");
-    apiForm->addRow("API Key:", m_keyEdit);
+    // 密码框看不见内容、粘贴错 Key 无法察觉（401 报错难排查），提供显示切换
+    m_keyToggle = new QToolButton(this);
+    m_keyToggle->setText(QStringLiteral("显示"));
+    m_keyToggle->setToolTip(QStringLiteral("显示/隐藏 API Key，便于核对是否粘贴正确"));
+    connect(m_keyToggle, &QToolButton::clicked, this, [this] {
+        const bool show = m_keyEdit->echoMode() == QLineEdit::Password;
+        m_keyEdit->setEchoMode(show ? QLineEdit::Normal : QLineEdit::Password);
+        m_keyToggle->setText(show ? QStringLiteral("隐藏") : QStringLiteral("显示"));
+    });
+    auto *keyRow = new QHBoxLayout;
+    keyRow->setContentsMargins(0, 0, 0, 0);
+    keyRow->setSpacing(6);
+    keyRow->addWidget(m_keyEdit, 1);
+    keyRow->addWidget(m_keyToggle);
+    apiForm->addRow("API Key:", keyRow);
     m_modelEdit = new QLineEdit(Settings::instance().apiModel(), this);
     m_modelEdit->setPlaceholderText("deepseek-chat");
     apiForm->addRow("Model:", m_modelEdit);
     mainLayout->addLayout(apiForm);
+
+    // 测试连接：用表单当前值（未保存前也能测）发一次真实请求，结果就地显示
+    m_testBtn = new QPushButton(QStringLiteral("测试连接"), this);
+    m_testBtn->setToolTip(QStringLiteral("用上方填写的 Base URL / API Key / Model 发起一次真实翻译请求"));
+    m_testStatus = new QLabel(this);
+    m_tester = new ApiTester(this);
+    connect(m_tester, &ApiTester::finished, this, [this](bool ok, const QString &message) {
+        m_testBtn->setEnabled(true);
+        m_testBtn->setText(QStringLiteral("测试连接"));
+        m_testStatus->setText(ok ? QStringLiteral("✓ ") + message
+                                 : QStringLiteral("✗ ") + message);
+        m_testStatus->setStyleSheet(ok ? "QLabel { color: #1E8E3E; }"
+                                       : "QLabel { color: #D93025; }");
+    });
+    connect(m_testBtn, &QPushButton::clicked, this, [this] {
+        if (m_tester->busy())
+            return;
+        m_testBtn->setEnabled(false);
+        m_testBtn->setText(QStringLiteral("测试中…"));
+        m_testStatus->setText(QString());
+        m_tester->test(m_urlEdit->text(), m_keyEdit->text(), m_modelEdit->text());
+    });
+    auto *testRow = new QHBoxLayout;
+    testRow->setContentsMargins(0, 4, 0, 0);
+    testRow->setSpacing(8);
+    testRow->addWidget(m_testBtn);
+    testRow->addWidget(m_testStatus, 1);
+    mainLayout->addLayout(testRow);
+
+    addSeparator();
+
+    // ---- 翻译领域与术语 ----
+    addSection("翻译领域与术语");
+    auto *domainForm = new QFormLayout;
+    domainForm->setContentsMargins(0, 0, 0, 0);
+    domainForm->setSpacing(6);
+    domainForm->setLabelAlignment(Qt::AlignRight);
+
+    // 领域：逗号/顿号分隔，注入提示词让模型按领域术语翻译
+    m_domainEdit = new QLineEdit(Settings::instance().translateDomains().join(", "), this);
+    m_domainEdit->setPlaceholderText("如：医学, 法律, 计算机（逗号分隔，可留空）");
+    domainForm->addRow("领域:", m_domainEdit);
+
+    // 专有名词翻译对：每行一条 "原文=译文"，整体注入提示词强制按术语表翻译
+    m_termsEdit = new QPlainTextEdit(this);
+    QString termLines;
+    for (const auto &term : Settings::instance().translateTerms())
+        termLines += term.first + "=" + term.second + "\n";
+    m_termsEdit->setPlainText(termLines);
+    m_termsEdit->setPlaceholderText(
+        "每行一条：原文=译文\n如：\nworkflow=工作流\nmyocardial infarction=心肌梗死");
+    m_termsEdit->setFixedHeight(88);
+    m_termsEdit->setStyleSheet(
+        "QPlainTextEdit { background: #fff; border: 1px solid #D0D0D0; border-radius: 3px;"
+        "  padding: 4px 6px; color: #1A1A1A; }"
+        "QPlainTextEdit:focus { border-color: #2B6FF2; }");
+    domainForm->addRow("术语表:", m_termsEdit);
+    mainLayout->addLayout(domainForm);
 
     addSeparator();
 
@@ -143,9 +222,43 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         s.setApiBaseUrl(m_urlEdit->text().trimmed());
         s.setApiKey(m_keyEdit->text().trimmed());
         s.setApiModel(m_modelEdit->text().trimmed());
+        s.setTranslateDomains(parseDomains());
+        s.setTranslateTerms(parseTerms());
         s.setPinSaveDir(m_dirEdit->text().trimmed());
         s.setSmartImageRecognitionEnabled(m_smartImageCheck->isChecked());
     });
+}
+
+// 领域输入 → 列表：中英文逗号、顿号、分号均可作分隔符，空白项丢弃
+QStringList SettingsDialog::parseDomains() const
+{
+    QString raw = m_domainEdit->text();
+    raw.replace(QRegularExpression("[，、;；]"), ",");
+    QStringList domains;
+    for (const QString &part : raw.split(',', Qt::SkipEmptyParts)) {
+        const QString d = part.trimmed();
+        if (!d.isEmpty())
+            domains << d;
+    }
+    return domains;
+}
+
+// 术语输入 → 翻译对：每行 "原文=译文"，按第一个 = 切分（译文可含 =）；
+// 无 = 或任一侧为空的行跳过
+QList<QPair<QString, QString>> SettingsDialog::parseTerms() const
+{
+    QList<QPair<QString, QString>> terms;
+    const QStringList lines = m_termsEdit->toPlainText().split('\n');
+    for (const QString &line : lines) {
+        const QString t = line.trimmed();
+        if (t.isEmpty())
+            continue;
+        const int eq = t.indexOf('=');
+        if (eq <= 0 || eq == t.size() - 1)
+            continue;
+        terms.append({t.left(eq).trimmed(), t.mid(eq + 1).trimmed()});
+    }
+    return terms;
 }
 
 // 按当前注册表状态刷新按钮文本：已加入 → 显示"取消开机启动"，未加入 → 显示"加入到开机启动"

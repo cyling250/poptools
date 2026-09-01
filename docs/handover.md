@@ -1,0 +1,191 @@
+# 项目交接文档
+
+> 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
+> 最后更新：2026-09-01
+
+## 项目快照
+
+- **项目名称**：Snipaste（前身为 MySnipaste，2026-08-24 更名）
+- **一句话描述**：Windows 全场景截图工具——区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 API）+ 贴图，Snipaste 免费替代方案
+- **当前版本**：0.1.3。版本号在两处需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)` 与 `packaging/Snipaste.iss` 的 `#define MyAppVersion`
+- **技术栈**：
+  - C++17，代码统一在 `snipaste` 命名空间
+  - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
+  - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
+  - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张）
+  - 翻译：OpenAI 兼容 `/chat/completions` API（默认 DeepSeek，可换 Ollama 等），`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
+  - 窗口识别：OpenCV 4.10（opencv_world vc16 动态库）+ eSearch「框选.自动框选.图像识别」算法移植
+  - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
+  - 设置持久化：QSettings 写 exe 同目录 `Snipaste.ini`，单例 `core/settings/Settings`
+- **架构概览**（三层分层，core 与 ui 各为静态库，依赖方向 ui → core）：
+  - `app/MainWindow`（QObject，非窗体）＝应用控制器：系统托盘 + 三个全局热键（F1 截图 / F3 贴图 / Ctrl+Alt+Shift+X 划词翻译）+ 服务编排
+  - 截图主流程：`CaptureWindow`（全屏画布式编辑，内部按控制器拆分：SelectionController / AnnotationEditor / ToolDrawingController / TextEditingController / OcrController / OutputController）→ OutputController 产出到剪贴板 → ResultDialog 查看或 PinWindow 贴图
+  - OCR 流程：OcrController → `PaddleOcrService`（子进程）→ 识别文本以文本框覆盖画布，或打开 `OcrPanel` 文字栏
+  - 翻译流程：`Translator`（大模型 API，提示词=基础指令+领域/术语表）→ OcrPanel（截图翻译）或 `TranslateCard`（划词翻译卡片，全局仅一张）；`SelectionTranslator` 负责模拟 Ctrl+C 抓取选中文本；目标语言在两处入口共享并持久化（`translate/targetLang`），切换即记忆；源语言不记忆，每次新任务重置为自动检测；语言显示名↔代码映射统一在 `core/translation/Languages.h`
+  - 标注数据模型与渲染在 `core/annotation`（AnnotationCanvas / AnnotationItem / AnnotationPainter），UI 工具在 `ui/capture/tools`（ToolBase + ToolFactory + 各工具类）
+- **目录含义**：
+  - `src/main.cpp` — 程序入口
+  - `src/app/` — 应用控制器（托盘 + 热键 + 服务编排）
+  - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
+  - `src/ui/` — 界面层静态库 `snipaste_ui`（capture 截图画布+工具栏+OCR 面板、pin 贴图窗口、result 结果面板、settings 设置对话框、translate 划词翻译卡片）
+  - `src/resources/` — qrc 资源与应用/工具图标（svg）
+  - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py / install_opencv.py），走本机代理 `127.0.0.1:7897`
+  - `tools/` — 第三方绿色套件（qt / paddleocr / opencv），不入库，由脚本生成
+  - `packaging/` — Inno Setup 6 安装包脚本 `Snipaste.iss`，打包源为 `build/Release` 整目录
+  - `dist/` — 安装包输出（已忽略；现存 0.1.2 / 0.1.3 两版 Setup exe）
+  - `temp_scripts/` — 一次性脚本与中间产物（不入库）
+  - `build/` — CMake 构建输出（已忽略；当前 `build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎、opencv_world4100.dll）
+- **常用命令**：
+  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`、`python scripts/install_opencv.py`
+  - 配置：`cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
+  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝 OpenCV DLL 与整个 paddleocr/ 目录）
+  - 运行：`build/Release/Snipaste.exe`
+  - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
+  - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
+- **当前状态**：git 工作区干净，master 与 origin/master 同步；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+
+## 历史任务
+
+> 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
+> 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-012 认证报错诊断与「测试连接」功能
+- **完成日期**：2026-09-01
+- **结果**：
+  1. **诊断 "Host requires authentication"**：该文案是 Qt 对 HTTP 401 的统一映射，不透出服务端原因。真机排查（curl -i + 读 exe 旁 Snipaste.ini）定位根因：配置中保存的 Key 与用户以为的不同（API Key 输入框为密码模式，粘贴成了旧 Key，服务端确认 `****7ede` invalid）；Base URL 与 Model 实际保存值均正确。模型名拼错时服务端返回的是 400 而非 401（错误信息含支持的模型名列表）。
+  2. **设置对话框新增「测试连接」按钮**：core 新增 `ApiTester`，用表单当前值（未保存也能测）发一次与 Translator 同形态的最小请求（含 `thinking: disabled`），10 秒超时；结果就地显示——成功 / 401 认证失败 / 400/422 透出服务端 `error.message`（如"模型不存在"）/ 连接超时。
+  3. **API Key 输入框增加「显示/隐藏」切换**（QToolButton），防密码框粘贴错无法察觉。
+  4. **Translator 报错中文化**：401/403 → "API 认证失败（401）：API Key 无效或未授权…"；400/422 → "请求被拒绝：+服务端 message"；其余带状态码透出。新增 `normalizeApiBaseUrl` 容错 Base URL 尾部斜杠。
+- **关键改动**：`src/core/translation/ApiTester.*`（新增）、`src/core/translation/Translator.*`、`src/ui/settings/SettingsDialog.*`、`src/core/CMakeLists.txt`、`README.md`
+- **遗留问题**：强制结束 Snipaste.exe 后 PaddleOCR-json.exe 子进程会残留（占锁导致重新构建时 copy_directory 失败，开发时需先 taskkill 该进程）；Anthropic 格式支持仍待定（见「当前任务」）
+- **相关坑**：[P-007](#p-007-qt-把-http-401-一律报为-host-requires-authentication)
+
+### T-011 翻译体验三项改进（语言记忆 / 关闭思考 / 领域术语）
+- **完成日期**：2026-09-01
+- **结果**：
+  1. **目标语言记忆**：在划词翻译卡片或 OCR 文字栏切换目标语言后立即持久化（`translate/targetLang`），下次弹出/自动翻译直接使用记忆值，不再回到默认中文。两处入口共用同一设置；源语言不做记忆，每次新任务（新卡片弹出 / OcrPanel 打开）都重置为"自动检测"，交由模型自动识别（用户确认：AI 自动检测足够鲁棒）。
+  2. **关闭模型思考**：翻译请求体显式携带 `thinking: {"type": "disabled"}`。注意：DeepSeek V4 实测 `thinking.type` 合法值为 `adaptive`/`enabled`/`disabled`（早期网传的 `none` 会被 400 拒绝，见 [P-006](#p-006-deepseek-thinkingtype-合法值不含-none)）；端点不认识该字段返回 400/422 时自动去掉字段降级重发一次。响应中混入正文的 `<think>…</think>` 思维链兜底清洗。提示词同时禁止输出推理过程。翻译文本从 system 消息挪到 user 消息。**2026-09-01 真机实测**：`deepseek-v4-flash` 默认开思考（返回带 `reasoning_content`），带 `disabled` 字段后无 reasoning、3 token 直出。
+  3. **领域与术语表**：设置对话框新增「翻译领域与术语」区——领域（逗号/顿号分隔）与术语对（每行 `原文=译文`），存为 `translate/domains` 与 `translate/termSources`+`translate/termTargets`（平行列表避免分隔符冲突），翻译时注入系统提示词（领域指令 + 术语映射表）。
+  - 构建通过（Release），实际运行验证待用户进行。
+- **关键改动**：`src/core/translation/Languages.h`（新增：语言显示名↔代码共享映射，替代卡片/面板中三处重复实现）、`src/core/settings/Settings.*`（目标语言/领域/术语持久化）、`src/core/translation/Translator.*`（禁思考+降级重试+think 清洗+领域术语提示词）、`src/ui/translate/TranslateCard.*` 与 `src/ui/capture/OcrPanel.*`（目标语言记忆、共享映射）、`src/ui/settings/SettingsDialog.*`（领域与术语编辑区）、`src/app/MainWindow.cpp`（旧结果面板路径改用记忆语言）、`README.md`
+- **遗留问题**：划词卡片 ⇄ 交换按钮在源语言为"自动"时行为退化（源=自动、目标=中文 时交换得到 中文→中文），系历史实现（目标下拉无"自动"项），本次未改动
+- **相关坑**：[P-005](#p-005-openai-兼容端点对请求体未知字段校验不一)
+
+### T-010 划词翻译重构与 v0.1.3 发布
+- **完成日期**：2026-08-24
+- **结果**：重构划词翻译逻辑并优化体验（全局仅保留一张翻译卡片，结果异步回填）；版本升至 0.1.3，产出 `dist/Snipaste-Setup-0.1.3.exe`
+- **关键改动**：`src/core/translation/SelectionTranslator.*`、`src/ui/translate/TranslateCard.*`、`src/app/MainWindow.*`、`CMakeLists.txt`、`packaging/Snipaste.iss`
+- **相关坑**：[P-004](#p-004-划词翻译读到剪贴板旧内容)
+
+### T-009 项目重命名为 Snipaste 并补齐全套标注工具
+- **完成日期**：2026-08-24
+- **结果**：项目由 MySnipaste 更名 Snipaste；标注工具补齐（矩形/椭圆/直线/箭头/铅笔/涂鸦/马赛克/橡皮/文字 + 线宽/填充/16 色板）
+- **关键改动**：`README.md`、`CMakeLists.txt`、`packaging/Snipaste.iss`、`src/ui/capture/tools/*`、`src/resources/icons/*`
+- **相关坑**：无
+
+### T-008 OCR 引擎替换为 PaddleOCR
+- **完成日期**：2026-08-23
+- **结果**：移除 Tesseract 依赖，改用 PaddleOCR-json v1.4.1 子进程管道模式（常驻进程）；新增 `scripts/install_paddleocr.py` 一键下载（附简中/繁中/英/日/韩/俄模型）
+- **关键改动**：`src/core/ocr/PaddleOcrService.*`、`scripts/install_paddleocr.py`、`CMakeLists.txt`（引擎部署与 DLL 硬链接）、`tools/paddleocr/`
+- **相关坑**：[P-003](#p-003-paddleocr-子进程找不到-opencv_world-dll)
+
+### T-007 划词翻译功能上线
+- **完成日期**：2026-08-23
+- **结果**：新增全局热键 Ctrl+Alt+Shift+X 触发划词翻译：模拟 Ctrl+C 抓取选中文本 → 大模型翻译 → 浮动翻译卡片，支持语言切换
+- **关键改动**：`src/core/translation/SelectionTranslator.*`（新增）、`src/ui/translate/TranslateCard.*`（新增）、`src/app/MainWindow.*`、`core/settings`（划词热键配置）
+- **相关坑**：无
+
+### T-006 智能框选图像识别与 OpenCV 接入
+- **完成日期**：2026-08-23
+- **结果**：移植 eSearch「框选.自动框选.图像识别」算法，截图时除系统窗口检测外支持图像边缘检测辅助框选（设置可开关，默认关以避免文字笔画噪声）；新增 `scripts/install_opencv.py`
+- **关键改动**：`src/core/capture/WindowDetector.*`、`scripts/install_opencv.py`、`CMakeLists.txt`（OpenCV 接入）、`core/settings`（smartImageRecognition）
+- **相关坑**：[P-001](#p-001-opencv-官方预编译包不识别新版-msvc)
+
+### T-005 依赖纳管脚本与 OCR 进程内化
+- **完成日期**：2026-08-13
+- **结果**：确立「第三方套件脚本下载到 tools/、不依赖全局安装」模式，新增 Qt 离线安装脚本；OCR 从外部程序改为进程内 DLL 调用（该形态后被 T-008 的子进程模式取代）
+- **关键改动**：`scripts/install_qt.py`、`CMakeLists.txt`（QT_ROOT 本地套件优先级机制：环境变量 > CMake 参数 > tools/qt）
+- **相关坑**：[P-002](#p-002-windeployqt-报-developer-build-警告)
+
+### T-004 贴图 OCR 面板与安装包打包
+- **完成日期**：2026-08-11
+- **结果**：F3 贴图完整可用（拖动/滚轮缩放 0.2x~5x/右键菜单/双击关闭/自动落盘 exe 目录 tempSnipaste/）；OCR 文字栏面板；窗口智能框选（系统窗口枚举）；开机自启（HKCU Run 注册表项）；Inno Setup 打包支持
+- **关键改动**：`src/ui/pin/PinWindow.*`、`src/ui/capture/OcrPanel.*` 与各控制器拆分、`src/ui/settings/SettingsDialog.*`、`core/settings`（pinSaveDir/autoStart）、`packaging/Snipaste.iss`
+- **相关坑**：无
+
+### T-003 分层架构重构
+- **完成日期**：2026-08-07
+- **结果**：重构为 core / ui 两个静态库 + app 可执行的分层结构，引入 `snipaste` 命名空间，core 与 UI 解耦
+- **关键改动**：`src/core/CMakeLists.txt`、`src/ui/CMakeLists.txt`（新增）
+- **相关坑**：无
+
+### T-002 截图画布式编辑与标注工具体系
+- **完成日期**：2026-08-07
+- **结果**：截图交互从「框选即完成」改为画布式编辑（松开鼠标进入编辑态、显式操作才退出）；标注工具体系落地；文字工具改为画布内嵌输入框（PPT 风格）；标注支持选中/拖动/缩放
+- **关键改动**：`src/core/annotation/*`、`src/ui/capture/AnnotationEditor.*`、`ToolBar.*`
+- **相关坑**：无
+
+### T-001 项目初始化与截图 MVP
+- **完成日期**：2026-08-06
+- **结果**：可运行 MVP——F1 区域截图（多屏拼接 + DPI 映射）、Tesseract OCR（中英文）、OpenAI 兼容 API 翻译（可配置）、系统托盘 + 设置面板；Qt 6.8.3 + CMake + MSVC 构建
+- **关键改动**：初始提交全量
+- **相关坑**：无
+
+## 当前任务
+
+<!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
+
+### 待办（用户指定，2026-09-01）
+
+1. **翻译界面支持拖拽调整大小**：划词翻译卡片（`TranslateCard`）目前固定宽 380px，原文/译文区各有最大高度（120/200px），翻译一长串时内容被截断看不到全貌；需要支持拖拽调整窗口与文本区大小。
+2. **翻译结果一键复制**：在翻译结果下方提供一键复制按钮，点击即把译文复制到剪贴板（`TranslateCard`；`OcrPanel` 文字栏顺手可一并支持）。
+
+### 待定
+
+- 是否为 Translator 增加 Anthropic 格式支持——2026-09-01 实测 DeepSeek 同一 Key 同时支持 OpenAI 格式（`/v1/chat/completions` + Bearer）与 Anthropic 格式（`/anthropic/v1/messages` + `x-api-key` + `anthropic-version` 头），当前代码仅实现 OpenAI 格式；若确认需要再加协议切换/双格式解析。
+
+## 踩坑记录
+
+> 每条坑必须链接到产生它的历史任务条目。
+
+### P-007 Qt 把 HTTP 401 一律报为 Host requires authentication
+- **关联任务**：[T-012](#t-012-认证报错诊断与测试连接功能)
+- **现象**：应用报 "Host requires authentication"，但用同一 Key/URL 走 curl 却是 200；且配置了三种 Base URL 全部报同一错误
+- **原因**：两层叠加——(1) Qt 网络层把 HTTP 401 一律映射为 `AuthenticationRequiredError`（文案 "Host requires authentication"），服务端的具体原因（如"Key 无效 ****7ede"）被吞掉；(2) 真实根因是 Snipaste.ini 里保存的 Key 与用户以为的不同——API Key 输入框是密码模式，粘贴了剪贴板里的旧 Key 不可见
+- **解决**：Translator 报错中文化（401 直接提示 Key 无效）、设置加「测试连接」按钮（表单当前值实测）、Key 框加显示切换。诊断手法：直接读 exe 旁 Snipaste.ini 核对实际保存值 + `curl -i` 看真实状态码
+
+### P-006 DeepSeek thinking.type 合法值不含 none
+- **关联任务**：[T-011](#t-011-翻译体验三项改进语言记忆--关闭思考--领域术语)
+- **现象**：请求体带 `thinking: {"type": "none"}` 时 DeepSeek 返回 400：`unknown variant 'none', expected one of 'adaptive', 'enabled', 'disabled'`，导致「关思考」静默失效（靠降级重试兜底，但思考仍开着、输出慢）
+- **原因**：初版按网络旧资料写了 `none`；DeepSeek V4 的 `thinking.type` 实际合法值为 `adaptive`/`enabled`/`disabled`
+- **解决**：改为 `{"type": "disabled"}`，2026-09-01 真机验证通过（无 reasoning_content、completion 仅 3 token）。教训：第三方 API 字段取值必须真机验证，不能只信搜索摘要
+
+### P-005 OpenAI 兼容端点对请求体未知字段校验不一
+- **关联任务**：[T-011](#t-011-翻译体验三项改进语言记忆--关闭思考--领域术语)
+- **现象**：为关闭思考模式在 `/chat/completions` 请求体加 `thinking` 字段后，严格校验的端点（如 OpenAI 官方）会返回 400 拒绝整个请求，翻译完全不可用
+- **原因**：`thinking` 是 DeepSeek/智谱等国内端点的约定字段，并非 OpenAI 规范；不同服务商对未知/不支持的参数处理不一（忽略或 400）
+- **解决**：`Translator` 首次请求携带 `thinking: {"type": "none"}`，收到 400/422 时去掉该字段降级重发一次（仅损失"关思考"优化）；另加 `<think>` 标签兜底清洗，即使关不掉思考也不污染译文
+
+### P-001 OpenCV 官方预编译包不识别新版 MSVC
+- **关联任务**：[T-006](#t-006-智能框选图像识别与-opencv-接入)
+- **现象**：用 VS 2026（MSVC 19.51）配置时 `find_package(OpenCV)` 失败
+- **原因**：官方 Windows 预编译包仅提供 x64/vc16 运行时，`OpenCVConfig.cmake` 按编译器版本匹配，不认识更新的编译器
+- **解决**：`CMakeLists.txt` 显式 `set(OpenCV_ARCH "x64")`、`set(OpenCV_RUNTIME "vc16")` 强制按 vc16 查找（`CMakeLists.txt:45-48`）；另注意 CMP0144 策略要求 `OpenCV_ROOT` 大小写与包名一致
+
+### P-002 windeployqt 报 developer build 警告
+- **关联任务**：[T-005](#t-005-依赖纳管脚本与-ocr-进程内化)
+- **现象**：构建后 windeployqt 部署运行库时输出 "(developer build?)" 警告
+- **原因**：本地 Qt 套件未下载 translations/ 目录，且应用不加载 QTranslator/.qm，windeployqt 部署翻译文件时告警
+- **解决**：windeployqt 加 `-no-translations` 参数（`CMakeLists.txt:74-79`）
+
+### P-003 PaddleOCR 子进程找不到 opencv_world DLL
+- **关联任务**：[T-008](#t-008-ocr-引擎替换为-paddleocr)
+- **现象**：部署后 PaddleOCR-json.exe 启动失败；若直接复制两份 DLL 则占双倍空间
+- **原因**：子进程以 `paddleocr/` 为工作目录启动，Windows 加载器按「exe 所在目录 → CWD」顺序找 DLL，根目录有 DLL 但 paddleocr/ 里没有时找不到
+- **解决**：根目录与 `paddleocr/` 用硬链接共用同一物理文件；CMake 中先 remove 再 create_hardlink，且硬链接依赖 OpenCV 部署步骤先生成根目录 DLL（`CMakeLists.txt:93-111`）
+
+### P-004 划词翻译读到剪贴板旧内容
+- **关联任务**：[T-010](#t-010-划词翻译重构与-v013-发布)
+- **现象**：划词翻译偶尔翻译出上一次复制的内容
+- **原因**：模拟 Ctrl+C 后立即依赖 Qt 剪贴板缓存读取，信号/缓存时序不可靠，可能读到旧内容
+- **解决**：模拟 Ctrl+C 后轮询 Win32 `GetClipboardSequenceNumber`，序列号变化才用 Win32 API 直读文本；约 600ms 未生效重发一次 Ctrl+C，总超时报错（`src/core/translation/SelectionTranslator.h:10-20`）

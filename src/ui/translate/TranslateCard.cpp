@@ -1,5 +1,8 @@
 #include "TranslateCard.h"
 
+#include "core/settings/Settings.h"
+#include "core/translation/Languages.h"
+
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
@@ -71,12 +74,7 @@ TranslateCard::TranslateCard(QWidget *parent)
     langRow->setSpacing(4);
 
     m_fromCombo = new QComboBox(this);
-    const QStringList langs = {
-        QStringLiteral("自动"), QStringLiteral("中文"), QStringLiteral("英文"),
-        QStringLiteral("日文"), QStringLiteral("韩文"), QStringLiteral("法文"),
-        QStringLiteral("德文"), QStringLiteral("西文"), QStringLiteral("俄文")
-    };
-    m_fromCombo->addItems(langs);
+    m_fromCombo->addItems(languageDisplays());
     m_fromCombo->setCurrentIndex(0); // 默认自动
     langRow->addWidget(m_fromCombo);
 
@@ -87,8 +85,14 @@ TranslateCard::TranslateCard(QWidget *parent)
     langRow->addWidget(m_swapBtn);
 
     m_toCombo = new QComboBox(this);
-    m_toCombo->addItems(langs.mid(1)); // 不含"自动"
-    m_toCombo->setCurrentText(QStringLiteral("中文"));
+    m_toCombo->addItems(languageDisplays().mid(1)); // 不含"自动"
+    // 恢复记忆的目标语言（用户上次切换的语言），而不是每次都回到默认中文；
+    // 恢复值不在列表中（非可编辑下拉 setCurrentText 未命中）时保持默认中文
+    m_toCombo->setCurrentText(langCodeToDisplay(Settings::instance().translateTargetLang()));
+    // 用户切换目标语言 → 立即记忆（划词卡片与 OCR 文字栏共用该设置）
+    connect(m_toCombo, &QComboBox::currentTextChanged, this, [](const QString &display) {
+        Settings::instance().setTranslateTargetLang(displayToLangCode(display));
+    });
     langRow->addWidget(m_toCombo, 1);
 
     m_translateBtn = new QPushButton(QStringLiteral("翻译"), this);
@@ -212,34 +216,13 @@ void TranslateCard::translateNow()
     m_translateBtn->setEnabled(false);
     m_translateBtn->setText(QStringLiteral("翻译中…"));
     m_translateText->setText(QString());
-    emit translateRequested(m_originalText, langCode(m_fromCombo->currentText()),
-                            langCode(m_toCombo->currentText()));
+    emit translateRequested(m_originalText, displayToLangCode(m_fromCombo->currentText()),
+                            displayToLangCode(m_toCombo->currentText()));
 }
 
 void TranslateCard::onTranslateClicked()
 {
     translateNow();
-}
-
-QString TranslateCard::langCode(const QString &display) const
-{
-    if (display.contains(QStringLiteral("中")))
-        return QStringLiteral("zh");
-    if (display.contains(QStringLiteral("英")))
-        return QStringLiteral("en");
-    if (display.contains(QStringLiteral("日")))
-        return QStringLiteral("ja");
-    if (display.contains(QStringLiteral("韩")))
-        return QStringLiteral("ko");
-    if (display.contains(QStringLiteral("法")))
-        return QStringLiteral("fr");
-    if (display.contains(QStringLiteral("德")))
-        return QStringLiteral("de");
-    if (display.contains(QStringLiteral("西")))
-        return QStringLiteral("es");
-    if (display.contains(QStringLiteral("俄")))
-        return QStringLiteral("ru");
-    return QStringLiteral("auto");
 }
 
 void TranslateCard::mousePressEvent(QMouseEvent *event)
