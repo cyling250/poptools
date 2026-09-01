@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
+#include <QTextEdit>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFrame>
@@ -14,8 +15,53 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QClipboard>
+#include <QTimer>
+#include <QtMath>
 
 namespace snipaste {
+
+namespace {
+
+// 距窗口边缘该距离内按下即进入调整大小（px），需小于布局边距以免盖住子控件
+constexpr int kResizeMargin = 6;
+// 文本区按内容测高的附加高度：上下内边距(8*2) + 边框(1*2) + 余量
+constexpr int kTextEditChrome = 24;
+// 文本区高度下限与自动模式上限（超出上限走滚动条）
+constexpr int kTextEditMinHeight = 26;
+constexpr int kSourceMaxHeight = 200;
+constexpr int kTranslateMaxHeight = 340;
+// 自动模式下的默认宽度（原固定宽 380）
+constexpr int kDefaultWidth = 380;
+
+// 命中窗口边缘（用于拖拽调整大小）
+Qt::Edges edgesAt(const QPoint &p, const QSize &size)
+{
+    Qt::Edges e;
+    if (p.x() <= kResizeMargin)
+        e |= Qt::LeftEdge;
+    if (p.x() >= size.width() - kResizeMargin)
+        e |= Qt::RightEdge;
+    if (p.y() <= kResizeMargin)
+        e |= Qt::TopEdge;
+    if (p.y() >= size.height() - kResizeMargin)
+        e |= Qt::BottomEdge;
+    return e;
+}
+
+Qt::CursorShape cursorForEdges(Qt::Edges e)
+{
+    if (e == (Qt::LeftEdge | Qt::TopEdge) || e == (Qt::RightEdge | Qt::BottomEdge))
+        return Qt::SizeFDiagCursor;
+    if (e == (Qt::TopEdge | Qt::RightEdge) || e == (Qt::BottomEdge | Qt::LeftEdge))
+        return Qt::SizeBDiagCursor;
+    if (e & (Qt::LeftEdge | Qt::RightEdge))
+        return Qt::SizeHorCursor;
+    if (e & (Qt::TopEdge | Qt::BottomEdge))
+        return Qt::SizeVerCursor;
+    return Qt::ArrowCursor;
+}
+
+} // namespace
 
 TranslateCard::TranslateCard(QWidget *parent)
     : QWidget(parent)
@@ -25,14 +71,17 @@ TranslateCard::TranslateCard(QWidget *parent)
     setAttribute(Qt::WA_ShowWithoutActivating);
     setAttribute(Qt::WA_DeleteOnClose);
     setCursor(Qt::ArrowCursor);
-    setFixedWidth(380);
+    setMinimumSize(320, 180);
+    resize(kDefaultWidth, 200);
+    // 未按下时也接收 mouseMove，用于边缘缩放的光标反馈
+    setMouseTracking(true);
 
     // === 暗色主题 ===
     setStyleSheet(
         "TranslateCard { background: #1E1E1E; border: 1px solid #3C3C3C;"
         "  border-radius: 8px; }"
         "QLabel.section-title { color: #8E8E93; font-size: 11px; }"
-        "QLabel.content-text { color: #CCCCCC; font-size: 13px;"
+        "QTextEdit { color: #CCCCCC; font-size: 13px;"
         "  background: #0D0D0D; border: 1px solid #2A2A2A; border-radius: 4px;"
         "  padding: 8px; }"
         "QComboBox { background: #2A2A2A; color: #CCCCCC; border: 1px solid #3C3C3C;"
@@ -108,18 +157,20 @@ TranslateCard::TranslateCard(QWidget *parent)
     sep1->setStyleSheet("QFrame { color: #2A2A2A; }");
     layout->addWidget(sep1);
 
-    // === 原文区域 ===
+    // === 原文区域（只读文本框：内容过长时内部滚动，可随窗口拖拽扩大） ===
     auto *srcTitle = new QLabel(QStringLiteral("原文"), this);
     srcTitle->setProperty("class", "section-title");
     layout->addWidget(srcTitle);
 
-    m_sourceText = new QLabel(this);
-    m_sourceText->setWordWrap(true);
-    m_sourceText->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_sourceText->setMinimumHeight(24);
-    m_sourceText->setMaximumHeight(120);
-    m_sourceText->setProperty("class", "content-text");
-    layout->addWidget(m_sourceText);
+    auto makeTextEdit = [this] {
+        auto *edit = new QTextEdit(this);
+        edit->setReadOnly(true);
+        edit->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        return edit;
+    };
+    m_sourceText = makeTextEdit();
+    layout->addWidget(m_sourceText, 2);
 
     // === 分隔线 ===
     auto *sep2 = new QFrame(this);
@@ -132,13 +183,18 @@ TranslateCard::TranslateCard(QWidget *parent)
     trTitle->setProperty("class", "section-title");
     layout->addWidget(trTitle);
 
-    m_translateText = new QLabel(this);
-    m_translateText->setWordWrap(true);
-    m_translateText->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_translateText->setMinimumHeight(24);
-    m_translateText->setMaximumHeight(200);
-    m_translateText->setProperty("class", "content-text");
-    layout->addWidget(m_translateText);
+    m_translateText = makeTextEdit();
+    layout->addWidget(m_translateText, 3);
+
+    // === 复制行：翻译结果右下方一键复制 ===
+    auto *copyRow = new QHBoxLayout;
+    copyRow->addStretch(1);
+    m_copyBtn = new QPushButton(QStringLiteral("复制译文"), this);
+    m_copyBtn->setProperty("class", "ctrl-btn");
+    m_copyBtn->setToolTip(QStringLiteral("复制翻译结果到剪贴板"));
+    m_copyBtn->setEnabled(false);
+    copyRow->addWidget(m_copyBtn);
+    layout->addLayout(copyRow);
 
     // === 信号连接 ===
     connect(m_closeBtn, &QPushButton::clicked, this, [this] {
@@ -147,13 +203,23 @@ TranslateCard::TranslateCard(QWidget *parent)
     });
     connect(m_swapBtn, &QPushButton::clicked, this, &TranslateCard::onSwapLanguages);
     connect(m_translateBtn, &QPushButton::clicked, this, &TranslateCard::onTranslateClicked);
+    connect(m_copyBtn, &QPushButton::clicked, this, [this] {
+        const QString text = m_translateText->toPlainText();
+        if (text.isEmpty())
+            return;
+        QGuiApplication::clipboard()->setText(text);
+        m_copyBtn->setText(QStringLiteral("已复制"));
+        QTimer::singleShot(1200, this, [this] {
+            m_copyBtn->setText(QStringLiteral("复制译文"));
+        });
+    });
 }
 
 void TranslateCard::setSourceText(const QString &text)
 {
     m_originalText = text;
-    m_sourceText->setText(text);
-    adjustSize();
+    m_sourceText->setPlainText(text);
+    refit();
     // 定位到鼠标位置
     moveNearCursor();
 }
@@ -171,26 +237,69 @@ void TranslateCard::moveNearCursor()
 
 void TranslateCard::setTranslateResult(const QString &text)
 {
-    m_translateText->setText(text);
-    m_translateText->setStyleSheet(
-        "QLabel { color: #CCCCCC; font-size: 13px;"
-        "  background: #0D0D0D; border: 1px solid #2A2A2A; border-radius: 4px;"
-        "  padding: 8px; }");
+    m_translateText->setPlainText(text);
+    m_translateText->setStyleSheet(QString()); // 清除错误态配色，恢复默认
     m_translateBtn->setEnabled(true);
     m_translateBtn->setText(QStringLiteral("翻译"));
-    adjustSize();
+    m_copyBtn->setEnabled(!text.isEmpty());
+    refit();
 }
 
 void TranslateCard::showError(const QString &errorMsg)
 {
-    m_translateText->setText(errorMsg);
+    m_translateText->setPlainText(errorMsg);
     m_translateText->setStyleSheet(
-        "QLabel { color: #FF6B6B; font-size: 13px;"
+        "QTextEdit { color: #FF6B6B; font-size: 13px;"
         "  background: #2A0000; border: 1px solid #5C0000; border-radius: 4px;"
         "  padding: 8px; }");
     m_translateBtn->setEnabled(true);
     m_translateBtn->setText(QStringLiteral("翻译"));
-    adjustSize();
+    m_copyBtn->setEnabled(false);
+    refit();
+}
+
+void TranslateCard::refit()
+{
+    if (m_userResized)
+        return;
+
+    // 先按目标宽度激活布局，文本区拿到实际宽度后按内容测高才准确
+    resize(qMax(kDefaultWidth, layout()->totalMinimumSize().width()), 200);
+    layout()->activate();
+
+    fitTextEdit(m_sourceText, kSourceMaxHeight);
+    fitTextEdit(m_translateText, kTranslateMaxHeight);
+
+    resize(width(), layout()->totalSizeHint().height());
+    // 兜底：整体高度不超过当前屏幕可用高度的 85%
+    if (const QScreen *screen = QGuiApplication::screenAt(QCursor::pos())) {
+        const int maxCardH = qRound(screen->availableGeometry().height() * 0.85);
+        if (height() > maxCardH)
+            resize(width(), maxCardH);
+    }
+}
+
+void TranslateCard::fitTextEdit(QTextEdit *edit, int maxH)
+{
+    const int docH = qCeil(edit->document()->size().height());
+    const bool overflow = docH + kTextEditChrome > maxH;
+    edit->setFixedHeight(overflow ? maxH : docH + kTextEditChrome);
+    // 恰好容纳时关掉滚动条避免闪现；超出上限时启用滚动查看全文
+    edit->setVerticalScrollBarPolicy(overflow ? Qt::ScrollBarAsNeeded
+                                              : Qt::ScrollBarAlwaysOff);
+}
+
+void TranslateCard::beginUserResize()
+{
+    if (m_userResized)
+        return;
+    m_userResized = true;
+    // 解除固定高度，交由布局按拉伸系数（原文 2 : 译文 3）分配窗口空间
+    for (QTextEdit *edit : {m_sourceText, m_translateText}) {
+        edit->setMinimumHeight(kTextEditMinHeight);
+        edit->setMaximumHeight(QWIDGETSIZE_MAX);
+        edit->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    }
 }
 
 void TranslateCard::onSwapLanguages()
@@ -215,7 +324,9 @@ void TranslateCard::translateNow()
         return;
     m_translateBtn->setEnabled(false);
     m_translateBtn->setText(QStringLiteral("翻译中…"));
-    m_translateText->setText(QString());
+    m_translateText->setStyleSheet(QString());
+    m_translateText->clear();
+    m_copyBtn->setEnabled(false);
     emit translateRequested(m_originalText, displayToLangCode(m_fromCombo->currentText()),
                             displayToLangCode(m_toCombo->currentText()));
 }
@@ -228,24 +339,55 @@ void TranslateCard::onTranslateClicked()
 void TranslateCard::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        m_dragOffset = event->pos();
-        m_dragging = true;
+        m_resizeEdges = edgesAt(event->pos(), size());
+        if (m_resizeEdges) {
+            beginUserResize();
+            m_pressGlobalPos = event->globalPos();
+            m_pressGeometry = geometry();
+        } else {
+            m_dragOffset = event->pos();
+            m_dragging = true;
+        }
     }
     QWidget::mousePressEvent(event);
 }
 
 void TranslateCard::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_dragging) {
+    if (m_resizeEdges) {
+        // 按边缘拖拽调整大小：右/下改尺寸，左/上同时改位置，尺寸不小于最小值
+        const QPoint delta = event->globalPos() - m_pressGlobalPos;
+        QRect g = m_pressGeometry;
+        if (m_resizeEdges & Qt::RightEdge)
+            g.setWidth(qMax(minimumWidth(), m_pressGeometry.width() + delta.x()));
+        if (m_resizeEdges & Qt::BottomEdge)
+            g.setHeight(qMax(minimumHeight(), m_pressGeometry.height() + delta.y()));
+        if (m_resizeEdges & Qt::LeftEdge) {
+            const int w = qMax(minimumWidth(), m_pressGeometry.width() - delta.x());
+            g.setX(m_pressGeometry.right() - w + 1);
+            g.setWidth(w);
+        }
+        if (m_resizeEdges & Qt::TopEdge) {
+            const int h = qMax(minimumHeight(), m_pressGeometry.height() - delta.y());
+            g.setY(m_pressGeometry.bottom() - h + 1);
+            g.setHeight(h);
+        }
+        setGeometry(g);
+    } else if (m_dragging) {
         move(event->globalPos() - m_dragOffset);
+    } else {
+        // 悬停在边缘时给出缩放光标提示
+        setCursor(cursorForEdges(edgesAt(event->pos(), size())));
     }
     QWidget::mouseMoveEvent(event);
 }
 
 void TranslateCard::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && m_dragging) {
+    if (event->button() == Qt::LeftButton) {
         m_dragging = false;
+        m_resizeEdges = Qt::Edges();
+        setCursor(Qt::ArrowCursor);
     }
     QWidget::mouseReleaseEvent(event);
 }

@@ -51,6 +51,7 @@ private:
     QComboBox *m_fromCombo = nullptr; // 源语言（A）
     QComboBox *m_toCombo = nullptr;   // 目标语言（B）
     QPushButton *m_translateBtn = nullptr;
+    QPushButton *m_copyBtn = nullptr; // 复制翻译结果到剪贴板
     QPushButton *m_closeBtn = nullptr;
     QString m_ocrText;
 };

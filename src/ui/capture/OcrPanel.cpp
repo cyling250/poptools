@@ -10,6 +10,9 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <QFrame>
+#include <QGuiApplication>
+#include <QClipboard>
+#include <QTimer>
 
 namespace snipaste {
 
@@ -102,6 +105,15 @@ OcrPanel::OcrPanel(QWidget *parent)
     m_translateEdit->setMinimumHeight(60);
     layout->addWidget(m_translateEdit, 1);
 
+    // 翻译结果下方：一键复制
+    auto *copyRow = new QHBoxLayout;
+    copyRow->addStretch(1);
+    m_copyBtn = new QPushButton(QStringLiteral("复制译文"), this);
+    m_copyBtn->setToolTip(QStringLiteral("复制翻译结果到剪贴板"));
+    m_copyBtn->setEnabled(false);
+    copyRow->addWidget(m_copyBtn);
+    layout->addLayout(copyRow);
+
     // 翻译按钮：手动触发
     connect(m_translateBtn, &QPushButton::clicked, this, [this] {
         const QString text = m_ocrText.trimmed();
@@ -109,11 +121,24 @@ OcrPanel::OcrPanel(QWidget *parent)
             emit translateRequested(text, sourceLang(), targetLang());
     });
 
+    // 复制按钮：把翻译结果写入剪贴板并短暂反馈
+    connect(m_copyBtn, &QPushButton::clicked, this, [this] {
+        const QString text = m_translateEdit->toPlainText();
+        if (text.isEmpty())
+            return;
+        QGuiApplication::clipboard()->setText(text);
+        m_copyBtn->setText(QStringLiteral("已复制"));
+        QTimer::singleShot(1200, this, [this] {
+            m_copyBtn->setText(QStringLiteral("复制译文"));
+        });
+    });
+
     // 关闭按钮：隐藏面板 + 清除内容 + 通知外部清理翻译缓存
     connect(m_closeBtn, &QPushButton::clicked, this, [this] {
         m_ocrText.clear();
         m_ocrEdit->clear();
         m_translateEdit->clear();
+        m_copyBtn->setEnabled(false);
         hide();
         emit closed();
     });
@@ -128,6 +153,7 @@ void OcrPanel::setOcrText(const QString &text)
 void OcrPanel::setTranslateText(const QString &text)
 {
     m_translateEdit->setPlainText(text);
+    m_copyBtn->setEnabled(!text.isEmpty());
 }
 
 QString OcrPanel::sourceLang() const
@@ -144,6 +170,8 @@ void OcrPanel::setBusy(bool busy)
 {
     m_translateBtn->setDisabled(busy);
     m_translateBtn->setText(busy ? QStringLiteral("翻译中…") : QStringLiteral("翻译"));
+    // 翻译进行中不允许复制（避免复制到"翻译中…"占位文本）
+    m_copyBtn->setEnabled(!busy && !m_translateEdit->toPlainText().isEmpty());
 }
 
 // 面板每次显示（新截图翻译任务）源语言回到"自动检测"：只有目标语言做记忆，

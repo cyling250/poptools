@@ -3,7 +3,7 @@
 #include <QWidget>
 #include <QString>
 
-class QLabel;
+class QTextEdit;
 class QPushButton;
 class QComboBox;
 
@@ -13,6 +13,9 @@ namespace snipaste {
 // 划词翻译结果卡片
 //
 // 暗色主题，显示原文 + 语言选择 + 翻译按钮 + 翻译结果。
+// 无边框窗口：按住卡片空白处拖动移动；四边边缘拖拽调整大小
+// （调整后不再随内容自适应）；文本区为只读 QTextEdit，
+// 内容超出可视区时内部滚动，翻译结果下方可一键复制。
 // ============================================================
 class TranslateCard : public QWidget
 {
@@ -48,15 +51,28 @@ private slots:
     void onTranslateClicked();
 
 private:
-    QLabel *m_sourceText = nullptr;
-    QLabel *m_translateText = nullptr;
+    // 内容更新后按内容自适应整体高度（用户手动调整过大小后不再干预）
+    void refit();
+    // 单个文本区按文档实际高度自适应，限制在 [kTextEditMinHeight, maxH]，超出时走滚动条
+    void fitTextEdit(QTextEdit *edit, int maxH);
+    // 解除文本区固定高度，交给布局按拉伸系数分配（用户开始拖拽调大小时调用）
+    void beginUserResize();
+
+    QTextEdit *m_sourceText = nullptr;
+    QTextEdit *m_translateText = nullptr;
     QComboBox *m_fromCombo = nullptr;
     QComboBox *m_toCombo = nullptr;
     QPushButton *m_swapBtn = nullptr;
     QPushButton *m_translateBtn = nullptr;
+    QPushButton *m_copyBtn = nullptr;
     QPushButton *m_closeBtn = nullptr;
     QPoint m_dragOffset;
     bool m_dragging = false;
+    // 边缘拖拽调整大小状态
+    Qt::Edges m_resizeEdges;
+    QPoint m_pressGlobalPos;
+    QRect m_pressGeometry;
+    bool m_userResized = false; // 用户手动调整过大小后，内容更新不再自动改尺寸
     QString m_originalText;
 };
 

@@ -326,8 +326,8 @@ namespace snipaste
             return;
         if (m_textEditCtrl->isEditing())
             m_textEditCtrl->commit();
-        m_ocrPanel->setBusy(true);
         m_ocrPanel->setTranslateText(QStringLiteral("翻译中…"));
+        m_ocrPanel->setBusy(true); // 后置：禁用复制，避免复制到"翻译中…"占位文本
         m_ocrCtrl->requestTranslate(this);
     }
 
