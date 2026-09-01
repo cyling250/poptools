@@ -38,8 +38,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; OpenCV 运行库（窗口识别用），直接从 tools 源路径引用，确保安装包始终包含
-Source: "{#SourcePath}\..\tools\opencv\opencv\build\x64\vc16\bin\opencv_world4100.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Snipaste.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

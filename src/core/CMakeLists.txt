@@ -6,7 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg)
 
 add_library(snipaste_core STATIC
     annotation/AnnotationCanvas.cpp
@@ -17,8 +17,8 @@ add_library(snipaste_core STATIC
     annotation/AnnotationTypes.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
-    capture/WindowDetector.cpp
-    capture/WindowDetector.h
+    capture/SmartRectDetector.cpp
+    capture/SmartRectDetector.h
     hotkey/GlobalHotKey.cpp
     hotkey/GlobalHotKey.h
     hotkey/GlobalMouseHook.cpp
@@ -40,16 +40,11 @@ target_link_libraries(snipaste_core PUBLIC
     Qt6::Core
     Qt6::Gui
     Qt6::Network
-    Qt6::Concurrent
 )
 
-# eSearch 窗口识别算法移植：图像边缘检测使用 OpenCV（imgproc 内置于 opencv_world）
-target_link_libraries(snipaste_core PRIVATE ${OpenCV_LIBS})
-target_include_directories(snipaste_core PRIVATE ${OpenCV_INCLUDE_DIRS})
-
-# Windows 全局热键与窗口识别枚举需要 user32
+# Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）
 if(WIN32)
-    target_link_libraries(snipaste_core PRIVATE user32)
+    target_link_libraries(snipaste_core PRIVATE user32 dwmapi)
 endif()
 
 # 导出头文件目录（core/* 以相对路径包含）

@@ -182,17 +182,4 @@ void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
     m_s.sync();
 }
 
-// 镜像 eSearch「框选.自动框选.图像识别」默认 false：图片边缘识别默认不启用，
-// 仅当用户手动开启时，智能框选才叠加图像边缘候选（eSearch 中还需按 S 触发）
-bool Settings::smartImageRecognitionEnabled() const
-{
-    return m_s.value("smart/imageRecognition", false).toBool();
-}
-
-void Settings::setSmartImageRecognitionEnabled(bool on)
-{
-    m_s.setValue("smart/imageRecognition", on);
-    m_s.sync();
-}
-
 } // namespace snipaste

@@ -12,9 +12,9 @@
   - C++17，代码统一在 `snipaste` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
   - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
-  - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张）
+  - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张；其自带 opencv_world4100.dll 随 paddleocr/ 目录部署）
   - 翻译：大模型 API 双协议（设置 `translate/apiFormat`）——OpenAI 兼容 `/chat/completions` + Bearer（默认 DeepSeek，可换 Ollama 等）与 Anthropic `/v1/messages` + `x-api-key`（DeepSeek 兼容端点 / 官方 Claude）；`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
-  - 窗口识别：OpenCV 4.10（opencv_world vc16 动态库）+ eSearch「框选.自动框选.图像识别」算法移植
+  - 窗口/控件识别：Win32 窗口枚举（user32 + dwmapi）+ Windows UI Automation（UIA 控件树，系统组件无第三方依赖），实现见 `core/capture/SmartRectDetector`
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
   - 设置持久化：QSettings 写 exe 同目录 `Snipaste.ini`，单例 `core/settings/Settings`
 - **架构概览**（三层分层，core 与 ui 各为静态库，依赖方向 ui → core）：
@@ -29,25 +29,41 @@
   - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
   - `src/ui/` — 界面层静态库 `snipaste_ui`（capture 截图画布+工具栏+OCR 面板、pin 贴图窗口、result 结果面板、settings 设置对话框、translate 划词翻译卡片）
   - `src/resources/` — qrc 资源与应用/工具图标（svg）
-  - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py / install_opencv.py），走本机代理 `127.0.0.1:7897`
-  - `tools/` — 第三方绿色套件（qt / paddleocr / opencv），不入库，由脚本生成
+  - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
+  - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
   - `packaging/` — Inno Setup 6 安装包脚本 `Snipaste.iss`，打包源为 `build/Release` 整目录
   - `dist/` — 安装包输出（已忽略；现存 0.1.2 / 0.1.3 两版 Setup exe）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
-  - `build/` — CMake 构建输出（已忽略；当前 `build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎、opencv_world4100.dll）
+  - `build/` — CMake 构建输出（已忽略；当前 `build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **常用命令**：
-  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`、`python scripts/install_opencv.py`
+  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
-  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝 OpenCV DLL 与整个 paddleocr/ 目录）
+  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝整个 paddleocr/ 目录）
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：T-014（Anthropic 双协议）与 T-015（划词卡片单例化与点击外部关闭）已完成，Release 构建通过、T-014 已真机验证；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：T-016（智能框选重写为窗口枚举 + UIA 控件树，含 Chromium 系三轮适配与稳定性修复）已完成，Release 构建通过、真机验证基本成功；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-016 智能框选重写：窗口枚举 + UIA 控件树（移除 OpenCV 图像识别）
+- **完成日期**：2026-09-02
+- **背景**：原实现（顶层窗口枚举 + eSearch 图像边缘识别移植）只能识别应用级矩形；图像识别产生的"连通域外接矩形"恰会选中文字笔画闭合区域（字母环），只能默认关闭，页面级预选能力为零。经审核后整体废弃重写。
+- **结果**：
+  1. **点查询模型**：废弃"一次构建候选区 + 最小面积包含"模型，改为随鼠标移动按点查询"该点下的元素矩形"（`core/capture/SmartRectDetector`，常驻工作线程 COM STA + IUIAutomation，latest-wins 队列）。
+  2. **三层来源取最小包含矩形**：① 顶层窗口（EnumWindows 按 Z 序几何命中 + DWM 扩展边界 `DWMWA_EXTENDED_FRAME_BOUNDS`，过滤 cloaked/点击穿透/系统窗口）；② 原生子控件（EnumChildWindows 最小可见包含窗口）；③ UIA 控件树（从顶层窗口元素沿 ControlViewWalker 下行，仅走包含点的分支，CacheRequest 批量取子元素矩形，32 层/300ms 预算）——第③层覆盖浏览器/Electron/WPF/Qt 等无子 HWND 的现代界面元素（输入框/按钮/卡片）。
+  3. **关键约束**：截图全屏覆盖层会挡住一切命中测试 API（WindowFromPoint / UIA ElementFromPoint 只会命中覆盖层自身），因此全程只用"枚举 + 几何包含"判定，UIA 从目标窗口句柄走树而非按桌面点查；UIA 元素最小粒度为控件/文本行，结构上不会选中文字笔画闭合区域。
+  4. **顺带修复的确定性缺陷**：不再高亮挂起 UWP/其它虚拟桌面的不可见窗口（cloaked 过滤）；高亮框不再比可见窗口大一圈（扩展边界）；混合 DPI 多屏跨屏窗口矩形错位（按查询点所在屏 dpr 换算，与 ScreenCapturer 物理映射一致）；挂起窗口跳过 UIA（`IsHungAppWindow`）防工作线程被阻塞。
+  5. **移除 OpenCV**：主程序不再依赖 OpenCV（删除 `WindowDetector.*`、`scripts/install_opencv.py`、`tools/opencv/`）；paddleocr 子进程自带 opencv_world4100.dll 随目录整体拷贝（不再与根目录硬链接）；设置项 `smart/imageRecognition` 与设置界面「框选图像识别」勾选框删除。
+  6. 交互不变：悬停预高亮（橙色虚线）、按下点选、按住拖动超阈值转手动框选。
+  7. **Chromium 系适配（真机反馈后三轮修复）**：① 批量取子元素（FindAllBuildCache）在 Chromium/Qt Provider 上返回空 → 回退 TreeWalker 兄弟链遍历；② Chromium 顶层窗口下同尺寸的 `Intermediate D3D Window`（无子节点渲染表面）会截胡下行 → 改带回溯的 DFS（死胡同分支回退试兄弟，见坑 P-011）；③ 按窗口缓存发一次 `WM_GETOBJECT(OBJID_CLIENT)` 激活渲染无障碍树（见坑 P-011）；④ 兄弟链遍历遇首个包含点的孩子立即下行（扫全兄弟会耗尽预算）+ 暖启动缓存（鼠标仍在上次命中元素内则从该元素继续下行，深页面二次查询近 0ms）+ 批量不可用标记按窗口持久化 + 高亮裁剪到窗口可见范围。修复后 Edge / Electron / WebView2 应用的按钮、输入框、卡片均可控件级预选，ZCode 深页面实测命中 37×10px 的小元素。
+  8. **稳定性修复（第一批真机验证暴露的崩溃，见坑 P-011）**：兄弟链回退空 vector 取 `back()` 越界、无效哨兵矩形"负×负面积为正"覆盖合法结果、暖启动引用计数转移契约错误（use-after-free 闪退）、工作线程 detect 加异常兜底。
+  - Release 构建通过；真机验证基本成功（记事本/资源管理器优秀，Edge/ZCode 控件级预选生效）。
+- **关键改动**：`src/core/capture/SmartRectDetector.*`（新增）、`src/core/capture/WindowDetector.*`（删除）、`src/ui/capture/CaptureWindow.*`（智能框选接入重写）、`src/core/CMakeLists.txt`、`CMakeLists.txt`（OpenCV 剥离 + Concurrent 移除）、`src/core/settings/Settings.*`、`src/ui/settings/SettingsDialog.*`、`packaging/Snipaste.iss`、`README.md`
+- **相关坑**：无
 
 ### T-015 划词卡片单例化与点击外部关闭
 - **完成日期**：2026-09-02
@@ -171,6 +187,17 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-011 Chromium 系窗口的 UIA 树下行的两个坑（D3D 死胡同分支与渲染树未激活）
+- **关联任务**：[T-016](#t-016-智能框选重写窗口枚举--uia-控件树移除-opencv-图像识别)
+- **现象**：智能框选对记事本/资源管理器能到控件级，对 Edge / Electron / WebView2 应用永远只有整窗矩形
+- **原因**：两个问题叠加。① Chromium 顶层窗口（Chrome_WidgetWin_1）下有两个**同尺寸**子元素：`Intermediate D3D Window`（GPU 渲染表面，无任何子节点）与 RootView（真正的 UI 树）；按"包含点的最小面积子元素"下行时面积并列取第一个，一头扎进 D3D 死胡同即停止，RootView 分支从未被探索。② Chromium 渲染进程的网页无障碍树**默认不构建**，需以读屏客户端身份发 `WM_GETOBJECT(OBJID_CLIENT)` 激活（不过实测 ElementFromHandle 的 UIA 客户端连接通常也会异步触发激活，且进程内激活一次后常驻）。
+- **解决**：① 下行改为**带回溯的 DFS**——子元素按面积升序逐分支尝试，死胡同（子分支未命中更深元素）回退试下一个兄弟；全部分支皆死胡同才取面积最小的叶子。② 首次查询某窗口前先 `SendMessageTimeoutW(WM_GETOBJECT, 0, OBJID_CLIENT)` 敲一次门（每窗口一次，缓存于 `m_poked`）。
+- **附带教训**：`IUIAutomationElement::FindAllBuildCache(TreeScope_Children)` 在 XAML/UWP/WPF 上是高效批量路径，但 Chromium/Qt Provider 不支持（返回空）；必须同时保留 `TreeWalker` 的 `GetFirstChildElementBuildCache`/`GetNextSiblingElementBuildCache` 兄弟链遍历（最基础的 Navigate 原语，所有 Provider 都实现）。调试 UIA 树结构时可用 Current* 属性逐节点 dump（`temp_scripts/uia_dump.cpp`）。另有四个实现级坑（均已修复，三个曾导致真机崩溃/失效）：
+  ① **兄弟链回退空 vector 取 `back()`**：首个兄弟不包含查询点时候选列表为空，`out.back()` 直接越界崩进程。第一批真机验证只测了走批量路径的记事本/资源管理器，未暴露——**UIA 代码必须用走兄弟链的应用（Chromium 系）做冒烟**，可用 `temp_scripts/detector_test.exe <进程名>`（链接真实检测器源码，免 GUI）。
+  ② **无效哨兵矩形 `{0,0,-1,-1}` 的面积是"负×负=正"**：`areaOf>0` 不能当有效性判断，必须用宽高均为正的 `validRect`，否则 UIA 未命中时哨兵会覆盖合法的整窗矩形，导致永远返回空。
+  ③ **滚动容器的虚拟布局矩形**（含滚出屏幕的内容）可能比窗口还大：UIA 命中直接采信 + 最后裁剪到顶层窗口范围即可，不能按面积与整窗比较。
+  ④ **暖启动缓存的引用计数转移契约**：缓存元素引用转移给下行函数后，若下行原样返回该元素（死胡同/无更深命中），再用 AddRef/Release 配平就会双重释放（use-after-free 闪退，且崩溃前矩形已正确显示、极具迷惑性）。契约应为：转移进、转移出，`node != hit` 时才额外释放 node。另有三个实现级坑：① 兄弟链回退里对空 vector 取 `back()` 会直接崩进程（第一批真机验证只测了走批量路径的记事本/资源管理器，未暴露）；② 无效哨兵矩形 `{0,0,-1,-1}` 的面积是"负×负=正"，`areaOf>0` 不能当有效性判断，必须用宽高均为正的 `validRect`，否则 UIA 未命中时哨兵会覆盖合法的整窗矩形导致永远返回空；③ 滚动容器的虚拟布局矩形（含滚出屏幕的内容）可能比窗口还大，UIA 命中直接采信 + 最后裁剪到窗口范围即可，不能按面积与整窗比较。
 
 ### P-010 不抢焦点的浮窗收不到本应用外的鼠标事件
 - **关联任务**：[T-015](#t-015-划词卡片单例化与点击外部关闭)

@@ -9,14 +9,8 @@
 #include <QScreen>
 #include <QClipboard>
 
-#include <QtConcurrent/QtConcurrent>
-#include <QFutureWatcher>
-
-#include <climits>
-
 #include "core/annotation/AnnotationPainter.h"
-#include "core/capture/WindowDetector.h"
-#include "core/settings/Settings.h"
+#include "core/capture/SmartRectDetector.h"
 
 #include "ToolBar.h"
 #include "CaptureContext.h"
@@ -182,9 +176,12 @@ namespace snipaste
                     update();
                 });
 
-        // 智能框选检测定时器（40ms）：与鼠标事件解耦，MSAA 检测不阻塞取色卡片跟随
+        // 智能框选检测定时器（40ms）：与鼠标事件解耦，检测不阻塞取色卡片跟随。
+        // 探测器持常驻工作线程（COM/UIA），构造即启动，随窗口销毁
         m_smartDetectTimer.setInterval(40);
         connect(&m_smartDetectTimer, &QTimer::timeout, this, &CaptureWindow::onSmartDetect);
+        m_smartDetector = new SmartRectDetector(this);
+        connect(m_smartDetector, &SmartRectDetector::found, this, &CaptureWindow::onSmartFound);
     }
 
     // ==================== 截图生命周期 ====================
@@ -203,11 +200,7 @@ namespace snipaste
         m_screenImage = QImage(); // 取色缓存失效（screen 画面已更新）
         m_smartMousePos = QCursor::pos(); // 检测起点为当前鼠标位置
         m_smartLastPos = m_smartMousePos;
-        // 候选区失效（新一轮截图画面已更新，下一次检测时异步重建）；启用智能区域检测
-        m_smartCandidates.clear();
-        m_smartCandidatesReady = false;
-        m_smartCandidatesBusy.store(false);
-        ++m_smartGen; // 新捕获代次，丢弃仍在进行的旧候选区异步结果
+        ++m_smartGen; // 新捕获代次，丢弃仍在途的旧检测结果
         m_smartDetectTimer.start();
         m_canvas.clear();
         m_canvas.tool = Tool::None; // 默认选择模式
@@ -671,96 +664,34 @@ namespace snipaste
         }
     }
 
-    // 智能框选检测定时器回调：鼠标位置变化时，在当前候选区下选择"最合适"的区域高亮。
-    // 候选区（图像边缘 + 系统窗口）在一次捕获内懒加载构建一次，静止时零开销
+    // 智能框选检测定时器回调：鼠标位置变化时，向探测器提交"鼠标下元素矩形"查询。
+    // 探测器在工作线程执行（Win32 枚举 + UIA 控件树），latest-wins，静止时零提交
     void CaptureWindow::onSmartDetect()
     {
         if (m_state != State::Selecting || m_smartPressPending)
             return;
-        if (!m_smartCandidatesReady)
-            rebuildSmartCandidates();
         if (m_smartMousePos == m_smartLastPos)
-            return; // 位置未变，跳过检测（静止时零开销）
+            return; // 位置未变，跳过提交（静止时零开销）
         m_smartLastPos = m_smartMousePos;
 
-        // 取包含鼠标点的最小面积候选（同原"最小面积窗口"回退语义）
-        QRect smart;
-        int bestArea = INT_MAX;
-        for (const QRect &r : m_smartCandidates)
-        {
-            if (r.contains(m_smartMousePos))
-            {
-                const int area = r.width() * r.height();
-                if (area < bestArea)
-                {
-                    bestArea = area;
-                    smart = r;
-                }
-            }
-        }
-        if (smart != m_smartRect)
-        {
-            m_smartRect = smart;
-            update();
-        }
+        const QScreen *scr = QGuiApplication::screenAt(m_smartMousePos);
+        const qreal dpr = scr ? scr->devicePixelRatio() : 1.0;
+        m_smartDetector->submit(ScreenCapturer::toPhysical(m_smartMousePos), dpr,
+                                quint64(m_smartGen), reinterpret_cast<void *>(winId()));
     }
 
-    // 异步构建智能框选候选区。照搬 eSearch 默认行为：
-    //   系统窗口（识别窗口=true）始终作为候选；图像边缘识别（eSearch「图像识别」）
-    //   默认关，仅当用户在设置中开启时才叠加，避免文字笔画产生的内外圈噪声框。
-    // 窗口枚举（EnumWindows）与整屏图像识别都不能在 GUI 线程同步执行（EnumWindows 在
-    // GUI 线程有死锁风险），故放到 QtConcurrent 工作线程，完成后回到主线程生效。
-    void CaptureWindow::rebuildSmartCandidates()
+    // 检测结果回包：代次过期或鼠标已移走的结果丢弃，其余生效为预选高亮
+    void CaptureWindow::onSmartFound(quint64 gen, const QRect &rect)
     {
-        if (m_smartCandidatesBusy.exchange(true))
-            return; // 已有构建进行中，避免重复
-
-        // 在工作线程内所需的快照（不访问本对象成员，避免跨线程共享）
-        const QScreen *scr = QGuiApplication::screenAt(m_smartMousePos);
-        if (!scr)
-            scr = QGuiApplication::primaryScreen();
-        const qreal dpr = scr ? scr->devicePixelRatio() : 1.0;
-        void *exclude = reinterpret_cast<void *>(winId());
-        const QImage phys = m_cap.screen.toImage();
-        const QPoint localOrigin = m_cap.desktop.topLeft();
-        const bool useImage = Settings::instance().smartImageRecognitionEnabled();
-        const int gen = m_smartGen;
-
-        m_smartCandidatesReady = false;
-
-        auto worker = QtConcurrent::run(
-            [dpr, exclude, phys, localOrigin, useImage]() -> std::vector<QRect> {
-                std::vector<QRect> out;
-
-                // 1) 系统窗口候选（已为逻辑全局坐标）——始终启用（识别窗口=true）
-                std::vector<QRect> wins = detectRealWindows(exclude, dpr);
-                out.insert(out.end(), wins.begin(), wins.end());
-
-                // 2) 图像边缘候选（镜像 eSearch「图像识别」，默认关）：
-                //    检测结果（物理像素/图像坐标）→ 全局逻辑坐标；图像 (0,0)=逻辑桌面左上角
-                if (useImage)
-                {
-                    const std::vector<QRect> boxes = detectImageBorders(phys);
-                    out.reserve(out.size() + boxes.size());
-                    for (const QRect &b : boxes)
-                        out.push_back(
-                            QRect(b.x() / dpr, b.y() / dpr, b.width() / dpr, b.height() / dpr)
-                                .translated(localOrigin));
-                }
-                return out;
-            });
-
-        auto *watcher = new QFutureWatcher<std::vector<QRect>>(this);
-        connect(watcher, &QFutureWatcher<std::vector<QRect>>::finished, this,
-                [this, watcher, gen]() {
-                    watcher->deleteLater();
-                    if (gen != m_smartGen)
-                        return; // 已经进入新一轮截屏，丢弃过期结果
-                    m_smartCandidates = watcher->result();
-                    m_smartCandidatesReady = true;
-                    m_smartCandidatesBusy.store(false);
-                });
-        watcher->setFuture(worker);
+        if (gen != quint64(m_smartGen))
+            return;
+        if (!rect.isEmpty() && !rect.contains(m_smartMousePos))
+            return;
+        if (rect != m_smartRect)
+        {
+            m_smartRect = rect;
+            update();
+        }
     }
 
     void CaptureWindow::mouseDoubleClickEvent(QMouseEvent *event)

@@ -204,10 +204,6 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     });
     captureForm->addRow("贴图保存:", dirRow);
 
-    m_smartImageCheck = new QCheckBox(
-        "开启后，智能框选叠加图像边缘识别（可能含文字笔画噪声）", this);
-    m_smartImageCheck->setChecked(Settings::instance().smartImageRecognitionEnabled());
-    captureForm->addRow("框选图像识别:", m_smartImageCheck);
     mainLayout->addLayout(captureForm);
 
     mainLayout->addStretch();
@@ -241,7 +237,6 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         s.setTranslateDomains(parseDomains());
         s.setTranslateTerms(parseTerms());
         s.setPinSaveDir(m_dirEdit->text().trimmed());
-        s.setSmartImageRecognitionEnabled(m_smartImageCheck->isChecked());
     });
 }
 

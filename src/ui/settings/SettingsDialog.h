@@ -40,7 +40,6 @@ private:
     QPlainTextEdit *m_termsEdit;   // 专有名词翻译对（每行 "原文=译文"）
     QLineEdit *m_dirEdit;     // 贴图默认保存文件夹
     QPushButton *m_autoStart; // 开机启动开关（加入/取消）
-    QCheckBox *m_smartImageCheck; // 智能框选·图像识别（默认关，镜像 eSearch 图像识别）
 };
 
 } // namespace snipaste

@@ -23,7 +23,7 @@
 | **大模型翻译** | 支持 OpenAI 兼容（DeepSeek / Ollama 等）与 Anthropic（Claude）两种接口格式；截图翻译 + 划词翻译；自动关闭模型思考模式保证响应速度 | - |
 | **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换（自动记忆上次目标语言）、拖拽调整卡片大小、一键复制译文 | `Ctrl+Alt+Shift+X` |
 | **领域与术语表** | 设置中自定义翻译领域与专有名词翻译对，自动注入翻译提示词 | - |
-| **窗口智能识别** | 自动检测窗口边缘 + 图像边缘识别，辅助精确框选 | 截图时自动 |
+| **窗口智能识别** | 自动识别鼠标下的窗口/控件级矩形（输入框、按钮、局部面板），辅助精确框选 | 截图时自动 |
 | **系统托盘常驻** | 后台运行，托盘菜单快捷操作，开机自启可选 | - |
 
 ## 快速开始
@@ -46,7 +46,7 @@ build/Release/Snipaste.exe
 | 构建 | CMake + MSVC（Visual Studio 2022/2026） |
 | OCR | PaddleOCR（PaddleOCR-json.exe 子进程管道模式，本地离线） |
 | 翻译 | 大模型 API：OpenAI 兼容 `/chat/completions`（默认）与 Anthropic `/v1/messages` 双协议（DeepSeek / Ollama / Claude 等） |
-| 窗口识别 | OpenCV 4.10（图像边缘检测，eSearch 算法移植，`tools/opencv`） |
+| 窗口/控件识别 | Win32 窗口枚举 + Windows UI Automation（系统组件，无第三方依赖） |
 | 热键 | Windows `RegisterHotKey`（user32） |
 
 ## 目录结构
@@ -70,12 +70,11 @@ build/Release/Snipaste.exe
 │   │   ├── settings/           #   设置对话框
 │   │   └── translate/          #   划词翻译卡片
 │   └── resources/              # 资源（qrc / 图标）
-├── scripts/                    # 辅助脚本（纳管）：Qt / OCR / OpenCV 获取
+├── scripts/                    # 辅助脚本（纳管）：Qt / OCR 获取
 ├── temp_scripts/               # 临时脚本与中间产物（不推送）
 ├── tools/                      # 第三方二进制（不推送，由脚本生成）
 │   ├── qt/6.8.3/msvc2022_64/   #   Qt 套件
-│   ├── paddleocr/              #   OCR 引擎（PaddleOCR-json.exe + models）
-│   └── opencv/                 #   OpenCV 4.10（opencv_world 动态库）
+│   └── paddleocr/              #   OCR 引擎（PaddleOCR-json.exe + models）
 ├── packaging/                  # 安装脚本
 │   └── Snipaste.iss
 └── build/                      # 构建输出（CMake 生成，忽略）
@@ -83,7 +82,7 @@ build/Release/Snipaste.exe
 
 ## 外部依赖获取
 
-项目不依赖全局安装的 SDK，Qt / OCR / OpenCV 均为**免安装绿色套件**，由脚本一键下载到项目内。
+项目不依赖全局安装的 SDK，Qt / OCR 均为**免安装绿色套件**，由脚本一键下载到项目内。
 
 ### 1. Qt 6.8.3 → `tools/qt`
 
@@ -101,21 +100,12 @@ python scripts/install_paddleocr.py
 
 免安装，下载 PaddleOCR-json v1.4.1 发布包 + 7-Zip 解压，附带简中/繁中/英/日/韩/俄模型。运行时由 PaddleOcrService 通过 QProcess 子进程管道模式调用。
 
-### 3. OpenCV 4.10 → `tools/opencv`
-
-```powershell
-python scripts/install_opencv.py
-```
-
-下载官方 Windows 预编译包（vc16），供窗口图像边缘识别使用。
-
 ## 构建
 
 ```powershell
 # 前置：安装依赖
 python scripts/install_qt.py
 python scripts/install_paddleocr.py
-python scripts/install_opencv.py
 
 # 配置（VS 2022）
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -172,7 +162,7 @@ build/Release/Snipaste.exe
 
 ### 窗口智能识别
 
-截图时自动检测窗口边缘，鼠标悬停时高亮提示可框选的窗口。同时支持图像边缘识别（需在设置中开启「框选图像识别」）。
+截图时自动识别鼠标下方的矩形区域并预高亮，从窗口级细化到**控件级**：输入框、按钮、卡片、列表项等页面内元素均可直接点选。识别基于系统窗口枚举 + Windows UI Automation，不依赖图像分析，不会误选文字笔画闭合区域（如字母 o/e 的内圈）；对不支持 UIA 的程序自动退回窗口级矩形。按住拖动可随时改为手动框选。
 
 ## 设置
 
@@ -189,7 +179,6 @@ build/Release/Snipaste.exe
 | Model | 模型名 | `deepseek-v4-flash` |
 | 翻译领域与术语 | 自定义领域（逗号分隔）与专有名词翻译对（`原文=译文` 每行一条） | 空 |
 | 划词翻译热键 | 虚拟键码 + 修饰符 | `Ctrl+Alt+Shift+X` |
-| 框选图像识别 | 启用图像边缘检测辅助框选 | 关闭 |
 | 贴图保存目录 | 贴图自动保存路径 | `exe目录/tempSnipaste/` |
 
 > 设置持久化到 `exe目录/Snipaste.ini`，便于查看与备份。
