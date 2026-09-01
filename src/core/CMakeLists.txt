@@ -21,6 +21,8 @@ add_library(snipaste_core STATIC
     capture/WindowDetector.h
     hotkey/GlobalHotKey.cpp
     hotkey/GlobalHotKey.h
+    hotkey/GlobalMouseHook.cpp
+    hotkey/GlobalMouseHook.h
     ocr/PaddleOcrService.cpp
     ocr/PaddleOcrService.h
     settings/Settings.cpp

@@ -6,8 +6,8 @@
 #include <QPixmap>
 #include <QRect>
 
-#include <QPointer>
 #include "core/hotkey/GlobalHotKey.h"
+#include "core/hotkey/GlobalMouseHook.h"
 #include "core/translation/SelectionTranslator.h"
 #include "ui/capture/CaptureWindow.h"
 #include "ui/result/ResultDialog.h"
@@ -39,6 +39,10 @@ public:
     static constexpr int kPinHotKeyId = 2;     // F3 贴图
     static constexpr int kSelectionTranslateHotKeyId = 3; // Ctrl+Alt+Shift+X 划词翻译
 
+protected:
+    // 应用级事件过滤器：划词卡片显示时点击卡片外部 → 隐藏卡片
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private slots:
     void onCaptured(const QPixmap &pixmap, const QRect &selectionLogical);
     void onPinHotKey(); // F3：贴剪贴板最新图片（截图模式先复制+关闭；多张并存）
@@ -52,7 +56,8 @@ private slots:
     void onShowSettings();
 
 private:
-    void closeSelectionCard(); // 关闭当前划词翻译卡片并清理状态（全局仅保留一张）
+    TranslateCard *ensureSelectionCard(); // 取全局唯一划词卡片（首次调用时创建）
+    void hideSelectionCard(); // 隐藏划词卡片并清理在途翻译状态（内容清空由 hideEvent 完成）
 
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
@@ -62,10 +67,11 @@ private:
     SelectionTranslator *m_selTranslator;   // 划词翻译：获取选中文本
     ResultDialog *m_result;
     GlobalHotKey m_hotKey;       // 全局热键（nativeEventFilter 由该类安装）
+    GlobalMouseHook *m_mouseHook = nullptr; // 全局鼠标钩子：感知点击其他应用窗口（卡片外部）
     QPixmap m_lastPixmap;        // 最近一次截图（带批注）
     QRect m_lastRect;            // 最近一次截图的选区位置（全局逻辑坐标）
-    QString m_selSourceText;     // 划词翻译的原文（区分翻译结果回调时使用）
-    QPointer<TranslateCard> m_selTranslateCard; // 当前划词翻译卡片（创建后等待结果更新）
+    TranslateCard *m_selTranslateCard = nullptr; // 全局唯一划词卡片（复用，随 QApplication 退出清理）
+    bool m_selTranslateActive = false; // 划词卡片的翻译在途（结果回填卡片，避免误入结果面板路径）
 };
 
 } // namespace snipaste

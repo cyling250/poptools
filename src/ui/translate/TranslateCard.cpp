@@ -12,6 +12,7 @@
 #include <QFrame>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QClipboard>
@@ -66,10 +67,9 @@ Qt::CursorShape cursorForEdges(Qt::Edges e)
 TranslateCard::TranslateCard(QWidget *parent)
     : QWidget(parent)
 {
-    // 无边框顶层窗口，不抢占焦点，自动关闭
+    // 无边框顶层窗口，不抢占焦点；全局单例复用，关闭即隐藏（hideEvent 清空内容）
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_ShowWithoutActivating);
-    setAttribute(Qt::WA_DeleteOnClose);
     setCursor(Qt::ArrowCursor);
     setMinimumSize(320, 180);
     resize(kDefaultWidth, 200);
@@ -399,6 +399,21 @@ void TranslateCard::keyPressEvent(QKeyEvent *event)
         close();
     }
     QWidget::keyPressEvent(event);
+}
+
+void TranslateCard::hideEvent(QHideEvent *event)
+{
+    // 单例复用：隐藏即清空，覆盖所有退出路径（点击卡片外部 / 关闭按钮 / Esc），
+    // 下次显示时是一张干净的卡片。语言选择与用户调整过的尺寸不重置（属记忆项）。
+    m_originalText.clear();
+    m_sourceText->clear();
+    m_translateText->clear();
+    m_translateText->setStyleSheet(QString()); // 清除错误态配色
+    m_translateBtn->setEnabled(true);
+    m_translateBtn->setText(QStringLiteral("翻译"));
+    m_copyBtn->setEnabled(false);
+    m_copyBtn->setText(QStringLiteral("复制译文"));
+    QWidget::hideEvent(event);
 }
 
 } // namespace snipaste

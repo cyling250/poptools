@@ -5,11 +5,17 @@
 #include "core/translation/Translator.h"
 #include "ui/settings/SettingsDialog.h"
 
+#ifdef Q_OS_WIN
+#include <windows.h> // 全局鼠标钩子回调中的 WindowFromPoint / GetWindowThreadProcessId
+#endif
+
 #include <QApplication>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QCursor>
+#include <QEvent>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QTimer>
 
 namespace snipaste {
@@ -89,6 +95,26 @@ MainWindow::MainWindow(QObject *parent)
             QTimer::singleShot(0, this, [this] { onSelectionTranslateHotKey(); });
         }
     });
+
+    // 应用级事件过滤器：划词卡片显示时点击本应用内卡片外部 → 隐藏卡片
+    qApp->installEventFilter(this);
+
+    // 全局鼠标钩子：划词卡片不抢焦点，点击"其他应用"的窗口时 Qt 收不到任何事件，
+    // 需系统级钩子感知（本应用内的点击仍由上面的应用级事件过滤器处理）
+    m_mouseHook = new GlobalMouseHook(this);
+    connect(m_mouseHook, &GlobalMouseHook::mousePressed, this, [this](const QPoint &nativePos) {
+        if (!m_selTranslateCard || !m_selTranslateCard->isVisible())
+            return;
+        // 落点窗口属于其他进程 → 用户点击了卡片外部（本应用外的窗口），隐藏卡片。
+        // nativePos 为物理像素，直接与 Win32 窗口归属比较，不涉及 Qt 逻辑坐标换算
+        const POINT pt{nativePos.x(), nativePos.y()};
+        if (HWND hwnd = WindowFromPoint(pt)) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != GetCurrentProcessId())
+                hideSelectionCard();
+        }
+    });
 }
 
 void MainWindow::onCaptured(const QPixmap &pixmap, const QRect &selectionLogical)
@@ -159,66 +185,73 @@ void MainWindow::onSelectionTranslateHotKey()
 
 void MainWindow::onSelectionTranslateText(const QString &text)
 {
-    if (m_translator->busy()) {
-        // 翻译器正忙（例如上一张卡片翻译中），放弃本次划词翻译
-        m_selSourceText.clear();
+    // 翻译器正忙（上一次翻译尚未返回）时放弃本次划词翻译
+    if (m_translator->busy())
         return;
-    }
 
-    // 全局仅保留一张划词翻译卡片：先关闭上一张
-    closeSelectionCard();
-
-    m_selSourceText = text;
-
-    // 弹出卡片，显示原文 + 语言控件
-    auto *card = new TranslateCard();
-    card->setSourceText(text);
+    // 全局唯一卡片：显示中则先隐藏（hideEvent 同步清空旧内容），
+    // 再载入新原文显示在鼠标位置
+    TranslateCard *card = ensureSelectionCard();
+    card->hide();
+    card->setSourceText(text); // 填原文 + 内容自适应 + 定位到鼠标附近
     card->show();
-    m_selTranslateCard = card;
-
-    // 连接翻译请求：用户点击卡片内的翻译按钮时触发
-    connect(card, &TranslateCard::translateRequested, this,
-            [this, card](const QString &text, const QString &fromLang, const QString &toLang) {
-                m_selSourceText = text;
-                m_selTranslateCard = card;
-                m_translator->translate(text, fromLang, toLang, false);
-            });
-
-    // 卡片关闭时清理状态
-    connect(card, &TranslateCard::closed, this, [this]() {
-        m_selSourceText.clear();
-        m_selTranslateCard.clear();
-    });
-
-    // 立即执行一次翻译（目标语言为用户记忆值，默认 自动→中文）
-    card->translateNow();
+    m_mouseHook->start();      // 显示期间感知点击其他应用窗口（卡片外部）
+    card->translateNow();      // 立即执行翻译（经 translateRequested 登记在途状态）
 }
 
 void MainWindow::onSelectionTranslateError(const QString &error)
 {
-    // 全局仅保留一张划词翻译卡片：先关闭上一张
-    closeSelectionCard();
-
-    // 弹出仅含错误信息的卡片，提示获取选中文本失败
-    auto *card = new TranslateCard();
+    // 全局唯一卡片：显示获取选中文本失败的错误信息
+    TranslateCard *card = ensureSelectionCard();
+    card->hide();
     card->showError(error);
-    card->show();
     card->moveNearCursor();
-    connect(card, &TranslateCard::closed, this, [this]() {
-        m_selSourceText.clear();
-        m_selTranslateCard.clear();
-    });
+    card->show();
+    m_mouseHook->start();
 }
 
-void MainWindow::closeSelectionCard()
+TranslateCard *MainWindow::ensureSelectionCard()
 {
-    if (m_selTranslateCard) {
-        // 断开旧卡片的信号回调，避免其清理逻辑误清新卡片状态
-        disconnect(m_selTranslateCard, nullptr, this, nullptr);
-        m_selTranslateCard->close(); // WA_DeleteOnClose → 自动销毁
-        m_selTranslateCard.clear();
+    if (!m_selTranslateCard) {
+        // 全局唯一实例，随 QApplication 退出清理
+        m_selTranslateCard = new TranslateCard();
+        // 翻译请求：用户点击卡片内翻译按钮或新划词触发
+        connect(m_selTranslateCard, &TranslateCard::translateRequested, this,
+                [this](const QString &text, const QString &fromLang, const QString &toLang) {
+                    m_selTranslateActive = true;
+                    m_translator->translate(text, fromLang, toLang, false);
+                });
+        // 用户主动关闭（关闭按钮 / Esc）：走统一隐藏路径清理状态
+        connect(m_selTranslateCard, &TranslateCard::closed, this, [this] {
+            hideSelectionCard();
+        });
     }
-    m_selSourceText.clear();
+    return m_selTranslateCard;
+}
+
+void MainWindow::hideSelectionCard()
+{
+    if (m_selTranslateCard)
+        m_selTranslateCard->hide(); // 内容清空在 hideEvent 中统一处理
+    m_selTranslateActive = false;
+    m_mouseHook->stop(); // 卡片隐藏后不再需要感知全局点击
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    // 划词卡片显示时点击卡片外部 → 隐藏卡片（内容清空由 hideEvent 统一处理）。
+    // 卡片内部的顶层弹层（如下拉语言列表的容器窗口）不算"外部"。
+    if (event->type() == QEvent::MouseButtonPress && m_selTranslateCard
+        && m_selTranslateCard->isVisible()) {
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (widget && !m_selTranslateCard->isAncestorOf(widget)) {
+            const QPoint globalPos =
+                static_cast<QMouseEvent *>(event)->globalPosition().toPoint();
+            if (!m_selTranslateCard->frameGeometry().contains(globalPos))
+                hideSelectionCard();
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &error)
@@ -231,16 +264,16 @@ void MainWindow::onOcrFinished(bool ok, const QString &text, const QString &erro
 
 void MainWindow::onTranslateFinished(bool ok, const QString &result, const QString &error)
 {
-    // 划词翻译：用 TranslateCard 展示，不影响现有 ResultDialog 流程
-    if (!m_selSourceText.isEmpty()) {
-        if (m_selTranslateCard) {
+    // 划词翻译卡片流程：结果回填唯一卡片。卡片已被用户隐藏/关闭时丢弃结果，
+    // 避免误入结果面板路径（弹出失败提示框等）
+    if (m_selTranslateActive) {
+        m_selTranslateActive = false;
+        if (m_selTranslateCard && m_selTranslateCard->isVisible()) {
             if (ok)
                 m_selTranslateCard->setTranslateResult(result);
             else
                 m_selTranslateCard->showError(error);
         }
-        m_selSourceText.clear();
-        m_selTranslateCard.clear();
         return;
     }
 

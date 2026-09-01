@@ -16,6 +16,8 @@ namespace snipaste {
 // 无边框窗口：按住卡片空白处拖动移动；四边边缘拖拽调整大小
 // （调整后不再随内容自适应）；文本区为只读 QTextEdit，
 // 内容超出可视区时内部滚动，翻译结果下方可一键复制。
+// 全局单例复用（不随关闭销毁）：隐藏时统一清空原文与译文，
+// 下次划词直接复用并显示在鼠标位置。
 // ============================================================
 class TranslateCard : public QWidget
 {
@@ -45,6 +47,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private slots:
     void onSwapLanguages();

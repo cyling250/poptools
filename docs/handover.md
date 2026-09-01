@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-09-01
+> 最后更新：2026-09-02
 
 ## 项目快照
 
@@ -26,7 +26,7 @@
 - **目录含义**：
   - `src/main.cpp` — 程序入口
   - `src/app/` — 应用控制器（托盘 + 热键 + 服务编排）
-  - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
+  - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
   - `src/ui/` — 界面层静态库 `snipaste_ui`（capture 截图画布+工具栏+OCR 面板、pin 贴图窗口、result 结果面板、settings 设置对话框、translate 划词翻译卡片）
   - `src/resources/` — qrc 资源与应用/工具图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py / install_opencv.py），走本机代理 `127.0.0.1:7897`
@@ -42,12 +42,24 @@
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：T-013（拖拽调整大小/一键复制）与 T-014（Anthropic 双协议）已完成，Release 构建通过、T-014 已真机验证；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：T-014（Anthropic 双协议）与 T-015（划词卡片单例化与点击外部关闭）已完成，Release 构建通过、T-014 已真机验证；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-015 划词卡片单例化与点击外部关闭
+- **完成日期**：2026-09-02
+- **结果**：
+  1. **卡片全局唯一（单例复用）**：去掉 `WA_DeleteOnClose`，`MainWindow::ensureSelectionCard()` 首次创建后一直复用，信号只连接一次。顺带修复旧缺陷：`onTranslateFinished` 只清 QPointer 未销毁卡片，旧卡片永久残留且失去跟踪，新划词再 new 一张导致多卡并存、点关闭前永不消失。
+  2. **点击卡片外部即隐藏**：分两条互补链路——(a) 本应用内点击：应用级事件过滤器（`qApp->installEventFilter`）监听 `MouseButtonPress`，落点在卡片几何外即隐藏；用 `isAncestorOf` 豁免卡片自身的下拉弹层（语言下拉弹出窗是卡片控件的子级顶层窗口，不算"外部"）。(b) 其他应用的窗口：Qt 收不到这类事件（见坑 P-010），新增 `GlobalMouseHook`（WH_MOUSE_LL 低级鼠标钩子）感知，`WindowFromPoint` 查落点窗口、`GetWindowThreadProcessId` 判归属，属于其他进程即隐藏。钩子不吞事件，用户点击仍正常作用于目标程序；仅在卡片显示期间安装，隐藏即卸载。
+  3. **隐藏即清空**：`TranslateCard::hideEvent` 统一清空原文/译文/错误样式并复位按钮文案与可用态，覆盖点外部/关闭按钮/Esc 全部退出路径；语言选择与用户拖拽过的尺寸作为记忆项保留（单例化后跨次使用仍记忆）。
+  4. **再次划词流程**：卡片显示中则先 `hide()`（同步触发清空）→ 填新原文 → 显示在鼠标位置 → 立即翻译。
+  5. **连带修复结果误投**：翻译在途时用户关掉卡片，返回结果不再误入旧结果面板路径（失败会弹模态报错框）；改用 `m_selTranslateActive` 在途标记路由，卡片已隐藏则静默丢弃结果。原 `m_selSourceText` 成员删除。
+  - Release 构建通过，应用启动冒烟测试通过；点击外部的交互体验待用户日常使用验证。
+- **关键改动**：`src/core/hotkey/GlobalMouseHook.*`（新增）、`src/core/CMakeLists.txt`、`src/ui/translate/TranslateCard.*`（单例化 + hideEvent 清空）、`src/app/MainWindow.*`（单例管理 + 事件过滤器 + 鼠标钩子接入 + 在途标记路由）
+- **相关坑**：[P-010](#p-010-不抢焦点的浮窗收不到本应用外的鼠标事件)
 
 ### T-014 Translator 支持 Anthropic 接口格式（含配置项）
 - **完成日期**：2026-09-01
@@ -159,6 +171,12 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-010 不抢焦点的浮窗收不到本应用外的鼠标事件
+- **关联任务**：[T-015](#t-015-划词卡片单例化与点击外部关闭)
+- **现象**：给划词卡片（`Qt::Tool` + `WA_ShowWithoutActivating`）装应用级事件过滤器（`qApp->installEventFilter`）监听 `MouseButtonPress`，点击**其他应用程序**的窗口时过滤器从不触发，"点击外部关闭"失效；点击本应用内的窗口则正常
+- **原因**：`QApplication` 事件过滤器只能看到派发给**本进程对象**的事件；点击其他应用的窗口由对方进程的窗口过程接收，Qt 全程无感知。浮窗不抢焦点，也就没有焦点丢失（focusOut / WindowDeactivate）可用
+- **解决**：`WH_MOUSE_LL` 低级鼠标钩子（`SetWindowsHookEx`）系统级感知鼠标按下，按落点窗口归属（`WindowFromPoint` → `GetWindowThreadProcessId`）判断是否点击了外部。注意：钩子回调在安装线程（Qt 主线程）执行且低级钩子有超时限制，槽内须轻量；钩子坐标是**物理像素**，与 Qt 逻辑坐标换算（多屏/DPI）易错，直接用 Win32 API 在物理坐标系内判断最稳；本应用内的点击仍走 Qt 事件过滤器（那里能用控件父子关系识别卡片自己的下拉弹层），两条链路按进程归属天然互补
 
 ### P-009 DeepSeek Anthropic 兼容端点默认开思考且挂在 /anthropic 路径前缀下
 - **关联任务**：[T-014](#t-014-translator-支持-anthropic-接口格式含配置项)
