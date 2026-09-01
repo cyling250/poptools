@@ -70,6 +70,18 @@ void Settings::setApiModel(const QString &model)
     m_s.sync();
 }
 
+// API 接口格式，默认 OpenAI 兼容（存量配置无此键时行为不变）
+QString Settings::apiFormat() const
+{
+    return m_s.value("translate/apiFormat", "openai").toString();
+}
+
+void Settings::setApiFormat(const QString &format)
+{
+    m_s.setValue("translate/apiFormat", format);
+    m_s.sync();
+}
+
 // 记忆的目标语言，默认中文（zh）
 QString Settings::translateTargetLang() const
 {

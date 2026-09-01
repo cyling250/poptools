@@ -16,7 +16,8 @@ ApiTester::ApiTester(QObject *parent)
 {
 }
 
-void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QString &model)
+void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QString &model,
+                     ApiFormat format)
 {
     if (m_busy)
         return;
@@ -26,21 +27,34 @@ void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QStrin
         return;
     }
 
-    QUrl url(normalizeApiBaseUrl(baseUrl) + "/chat/completions");
-    QNetworkRequest req(url);
+    const QString base = normalizeApiBaseUrl(baseUrl);
+    QNetworkRequest req(QUrl(base + apiEndpointPath(format, base)));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    req.setRawHeader("Authorization", ("Bearer " + apiKey.trimmed()).toUtf8());
+    applyApiAuthHeaders(req, format, apiKey.trimmed());
 
-    // 与 Translator 相同形态的最小请求（含 thinking 禁用字段，确保测的就是真实请求）
-    const QJsonObject body{
-        {"model", model.trimmed()},
-        {"messages", QJsonArray{QJsonObject{{"role", "user"}, {"content", "ping"}}}},
-        {"temperature", 0.2},
-        {"thinking", QJsonObject{{"type", "disabled"}}},
-    };
+    // 与 Translator 相同形态的最小请求，确保测的就是真实请求：
+    //   OpenAI    → 含 thinking 禁用字段
+    //   Anthropic → messages + 必填 max_tokens。不带 thinking 字段：部分端点
+    //     （如官方 Anthropic）可能不识别 disabled 而拒收，而真实翻译请求被拒时
+    //     会自动去掉字段降级重发，最终可用——测试只验证连通性/鉴权/模型名
+    QByteArray payload;
+    if (format == ApiFormat::Anthropic) {
+        payload = QJsonDocument(QJsonObject{
+            {"model", model.trimmed()},
+            {"max_tokens", 16},
+            {"messages", QJsonArray{QJsonObject{{"role", "user"}, {"content", "ping"}}}},
+        }).toJson();
+    } else {
+        payload = QJsonDocument(QJsonObject{
+            {"model", model.trimmed()},
+            {"messages", QJsonArray{QJsonObject{{"role", "user"}, {"content", "ping"}}}},
+            {"temperature", 0.2},
+            {"thinking", QJsonObject{{"type", "disabled"}}},
+        }).toJson();
+    }
 
     m_busy = true;
-    m_reply = m_nam.post(req, QJsonDocument(body).toJson());
+    m_reply = m_nam.post(req, payload);
 
     // 10 秒超时：中止请求（finished 随后触发，按 OperationCanceledError 报告）
     QTimer::singleShot(10000, this, [this] {

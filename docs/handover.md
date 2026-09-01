@@ -13,7 +13,7 @@
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
   - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
   - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张）
-  - 翻译：OpenAI 兼容 `/chat/completions` API（默认 DeepSeek，可换 Ollama 等），`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
+  - 翻译：大模型 API 双协议（设置 `translate/apiFormat`）——OpenAI 兼容 `/chat/completions` + Bearer（默认 DeepSeek，可换 Ollama 等）与 Anthropic `/v1/messages` + `x-api-key`（DeepSeek 兼容端点 / 官方 Claude）；`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
   - 窗口识别：OpenCV 4.10（opencv_world vc16 动态库）+ eSearch「框选.自动框选.图像识别」算法移植
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
   - 设置持久化：QSettings 写 exe 同目录 `Snipaste.ini`，单例 `core/settings/Settings`
@@ -42,12 +42,31 @@
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：git 工作区干净，master 与 origin/master 同步；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：T-013（拖拽调整大小/一键复制）与 T-014（Anthropic 双协议）已完成，Release 构建通过、T-014 已真机验证；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-014 Translator 支持 Anthropic 接口格式（含配置项）
+- **完成日期**：2026-09-01
+- **结果**：
+  1. **双协议支持**：Translator 与「测试连接」（ApiTester）均支持两种接口格式，设置对话框「翻译 API」区新增「接口格式」下拉（OpenAI 兼容 / Anthropic，存 `translate/apiFormat`，默认 openai）。格式相关端点/鉴权收敛为 Translator.h 内联辅助（`apiEndpointPath` / `applyApiAuthHeaders`），两处共用。
+  2. **Anthropic 分支**：端点 `{base}/v1/messages`（base 已以 `/v1` 结尾则不再重复追加）；鉴权 `x-api-key` + `anthropic-version: 2023-06-01`；请求体 system 独立于 messages、`max_tokens: 8192` 必填；响应解析 `content[]` 块数组，仅拼接 `type=="text"` 块（thinking 块自动忽略）。错误响应 `error.message` 结构与 OpenAI 一致，报错中文化逻辑直接复用。
+  3. **关思考字段两种格式通用**：DeepSeek 的 Anthropic 兼容端点实测默认开思考（content 首块为 thinking 块，白耗 token），带 `thinking: {"type":"disabled"}` 实测生效直出；该字段两种格式均随请求携带，端点不识别时 400/422 自动去字段降级重发（原 OpenAI 专属逻辑放宽为通用，覆盖官方 Claude 可能严格校验的情况）。「测试连接」的 Anthropic 探测不带该字段（只验证连通/鉴权/模型名）。
+  4. **真机验证**（DeepSeek `deepseek-v4-flash`，同 Key）：`/anthropic/v1/messages` 无字段 → 200 但 16 token 全为 thinking 块；带 `disabled` → 200 纯 text 块 4 token 直出。OpenAI 路径行为不变。
+- **关键改动**：`src/core/translation/Translator.*`（ApiFormat 枚举 + 双协议请求/解析）、`src/core/translation/ApiTester.*`（按格式构造探测请求）、`src/core/settings/Settings.*`（apiFormat 配置）、`src/ui/settings/SettingsDialog.*`（接口格式下拉 + Base URL 占位联动）、`README.md`
+- **相关坑**：[P-009](#p-009-deepseek-anthropic-兼容端点默认开思考且挂在-anthropic-路径前缀下)
+
+### T-013 翻译界面拖拽调整大小与一键复制
+- **完成日期**：2026-09-01
+- **结果**：
+  1. **划词卡片支持拖拽调整大小**：文本区由 QLabel 改为只读 QTextEdit（长文内部滚动，保证任意长度内容都可见）；卡片四边 6px 内按住拖拽即可调整大小（带方向光标反馈），窗口最小 320×180。内容更新时仍按内容自适应高度（原文上限 200px、译文上限 340px，整体不超过屏幕可用高度 85%）；用户手动调整过后则尊重用户尺寸，不再自动变化（拖空白处移动卡片的行为保留）。
+  2. **翻译结果一键复制**：划词卡片译文右下方与 OCR 文字栏翻译结果下方各加「复制译文」按钮，点击写入剪贴板并反馈"已复制"（1.2s 后恢复）；仅在有可复制内容时可用（翻译中/出错/清空后禁用，避免复制到"翻译中…"占位文本）。
+  - Release 构建通过，应用启动冒烟测试通过；拖拽与复制的交互体验待用户实际验证。
+- **关键改动**：`src/ui/translate/TranslateCard.*`（QTextEdit 化 + 边缘缩放 + 复制按钮）、`src/ui/capture/OcrPanel.*`（复制按钮）、`src/ui/capture/CaptureWindow.cpp`（setTranslateText/setBusy 调用顺序对调，见上）、`README.md`
+- **相关坑**：[P-008](#p-008-运行中的实例会锁住-buildrelease-产物导致构建失败)
 
 ### T-012 认证报错诊断与「测试连接」功能
 - **完成日期**：2026-09-01
@@ -135,18 +154,23 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-### 待办（用户指定，2026-09-01）
-
-1. **翻译界面支持拖拽调整大小**：划词翻译卡片（`TranslateCard`）目前固定宽 380px，原文/译文区各有最大高度（120/200px），翻译一长串时内容被截断看不到全貌；需要支持拖拽调整窗口与文本区大小。
-2. **翻译结果一键复制**：在翻译结果下方提供一键复制按钮，点击即把译文复制到剪贴板（`TranslateCard`；`OcrPanel` 文字栏顺手可一并支持）。
-
-### 待定
-
-- 是否为 Translator 增加 Anthropic 格式支持——2026-09-01 实测 DeepSeek 同一 Key 同时支持 OpenAI 格式（`/v1/chat/completions` + Bearer）与 Anthropic 格式（`/anthropic/v1/messages` + `x-api-key` + `anthropic-version` 头），当前代码仅实现 OpenAI 格式；若确认需要再加协议切换/双格式解析。
+（暂无）
 
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-009 DeepSeek Anthropic 兼容端点默认开思考且挂在 /anthropic 路径前缀下
+- **关联任务**：[T-014](#t-014-translator-支持-anthropic-接口格式含配置项)
+- **现象**：同一 Key 走 Anthropic 格式时，不带任何思考参数的请求返回的 `content[]` 首块是 `type:"thinking"`，小 `max_tokens` 时 token 全被思考吃掉、拿不到 text；且端点不在 `api.deepseek.com/v1` 下，而在 `/anthropic` 前缀（`/anthropic/v1/messages`）
+- **原因**：DeepSeek 的 Anthropic 兼容层默认开启思考模式（官方 Anthropic 恰好相反——思考默认关、需显式开启）；兼容端点路径与 OpenAI 端点不同源
+- **解决**：请求显式带 `thinking: {"type":"disabled"}`（实测 200 直出纯 text 块），配合 400/422 去字段降级重发兜底；Base URL 文档与占位符明确提示填 `https://api.deepseek.com/anthropic`。教训同 P-006：同一服务商两种协议的行为差异也必须真机验证
+
+### P-008 运行中的实例会锁住 build/Release 产物导致构建失败
+- **关联任务**：[T-013](#t-013-翻译界面拖拽调整大小与一键复制)
+- **现象**：重新构建时报错失败——不只是交接中已知的 PaddleOCR-json.exe 残留占锁，Snipaste.exe 本体（如上次调试/冒烟测试后未退出）也会锁住 `build/Release/Snipaste.exe` 及其加载的 Qt/OpenCV DLL，导致链接与 POST_BUILD 部署步骤失败
+- **原因**：Windows 文件锁：运行中的进程以独占方式映射其 exe 与已加载 DLL
+- **解决**：构建前 `tasklist | grep -i "Snipaste\|PaddleOCR"` 检查，有则 `taskkill /F` 全部结束再构建（本任务实操验证：结束 PID 后构建一次通过）
 
 ### P-007 Qt 把 HTTP 401 一律报为 Host requires authentication
 - **关联任务**：[T-012](#t-012-认证报错诊断与测试连接功能)

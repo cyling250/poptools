@@ -18,7 +18,7 @@ public:
     quint32 captureHotKeyVk() const;
     void setCaptureHotKeyVk(quint32 vk);
 
-    // 大模型 API 配置（OpenAI 兼容接口，默认 DeepSeek）
+    // 大模型 API 配置（支持 OpenAI 兼容与 Anthropic 两种接口格式，默认 DeepSeek）
     QString apiBaseUrl() const;
     void setApiBaseUrl(const QString &url);
 
@@ -27,6 +27,11 @@ public:
 
     QString apiModel() const;
     void setApiModel(const QString &model);
+
+    // API 接口格式："openai"（OpenAI 兼容 /chat/completions，默认）或
+    // "anthropic"（Anthropic /v1/messages）
+    QString apiFormat() const;
+    void setApiFormat(const QString &format);
 
     // 记忆的目标语言（划词翻译卡片与 OCR 文字栏共用）：用户切换目标语言时立即保存，
     // 下次弹出/自动翻译直接使用记忆值，而不是每次都回到默认中文

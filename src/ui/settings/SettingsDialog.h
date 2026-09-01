@@ -29,6 +29,7 @@ private:
     QList<QPair<QString, QString>> parseTerms() const; // "原文=译文" 逐行 → 翻译对
 
     QLineEdit *m_urlEdit;
+    QComboBox *m_formatCombo;      // API 接口格式（OpenAI 兼容 / Anthropic）
     QLineEdit *m_keyEdit;
     QToolButton *m_keyToggle;      // 显示/隐藏 API Key（密码框看不见内容，防粘贴错）
     QLineEdit *m_modelEdit;

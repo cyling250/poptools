@@ -82,6 +82,20 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     apiForm->setSpacing(6);
     apiForm->setLabelAlignment(Qt::AlignRight);
 
+    m_formatCombo = new QComboBox(this);
+    m_formatCombo->addItem(QStringLiteral("OpenAI 兼容（DeepSeek / Ollama 等）"),
+                           QStringLiteral("openai"));
+    m_formatCombo->addItem(QStringLiteral("Anthropic（Claude / DeepSeek 兼容端点）"),
+                           QStringLiteral("anthropic"));
+    // 切换格式时同步 Base URL 占位提示（Anthropic 端点挂在 …/anthropic 前缀下）
+    connect(m_formatCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+        m_urlEdit->setPlaceholderText(index == 1
+            ? QStringLiteral("https://api.deepseek.com/anthropic")
+            : QStringLiteral("https://api.deepseek.com/v1"));
+    });
+    m_formatCombo->setCurrentIndex(qMax(0, m_formatCombo->findData(Settings::instance().apiFormat())));
+    apiForm->addRow("接口格式:", m_formatCombo);
+
     m_urlEdit = new QLineEdit(Settings::instance().apiBaseUrl(), this);
     m_urlEdit->setPlaceholderText("https://api.deepseek.com/v1");
     apiForm->addRow("Base URL:", m_urlEdit);
@@ -108,9 +122,9 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     apiForm->addRow("Model:", m_modelEdit);
     mainLayout->addLayout(apiForm);
 
-    // 测试连接：用表单当前值（未保存前也能测）发一次真实请求，结果就地显示
+    // 测试连接：用表单当前值（未保存前也能测）按所选接口格式发一次真实请求，结果就地显示
     m_testBtn = new QPushButton(QStringLiteral("测试连接"), this);
-    m_testBtn->setToolTip(QStringLiteral("用上方填写的 Base URL / API Key / Model 发起一次真实翻译请求"));
+    m_testBtn->setToolTip(QStringLiteral("用上方填写的接口格式 / Base URL / API Key / Model 发起一次真实翻译请求"));
     m_testStatus = new QLabel(this);
     m_tester = new ApiTester(this);
     connect(m_tester, &ApiTester::finished, this, [this](bool ok, const QString &message) {
@@ -127,7 +141,8 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         m_testBtn->setEnabled(false);
         m_testBtn->setText(QStringLiteral("测试中…"));
         m_testStatus->setText(QString());
-        m_tester->test(m_urlEdit->text(), m_keyEdit->text(), m_modelEdit->text());
+        m_tester->test(m_urlEdit->text(), m_keyEdit->text(), m_modelEdit->text(),
+                       apiFormatFromSetting(m_formatCombo->currentData().toString()));
     });
     auto *testRow = new QHBoxLayout;
     testRow->setContentsMargins(0, 4, 0, 0);
@@ -219,6 +234,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     // 点击 OK 时保存设置
     connect(this, &QDialog::accepted, this, [this] {
         Settings &s = Settings::instance();
+        s.setApiFormat(m_formatCombo->currentData().toString());
         s.setApiBaseUrl(m_urlEdit->text().trimmed());
         s.setApiKey(m_keyEdit->text().trimmed());
         s.setApiModel(m_modelEdit->text().trimmed());

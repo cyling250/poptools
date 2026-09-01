@@ -101,9 +101,11 @@ void Translator::translate(const QString &text, const QString &fromLang, const Q
 void Translator::translateByApi(const QString &text, const QString &fromLang, const QString &toLang,
                                 bool isOcr, bool disableThinking)
 {
-    const QString baseUrl = Settings::instance().apiBaseUrl();
-    const QString apiKey  = Settings::instance().apiKey();
-    const QString model   = Settings::instance().apiModel();
+    const Settings &s = Settings::instance();
+    const QString baseUrl = s.apiBaseUrl();
+    const QString apiKey  = s.apiKey();
+    const QString model   = s.apiModel();
+    const ApiFormat format = apiFormatFromSetting(s.apiFormat());
 
     if (baseUrl.isEmpty() || apiKey.isEmpty()) {
         m_busy = false;
@@ -111,34 +113,50 @@ void Translator::translateByApi(const QString &text, const QString &fromLang, co
         return;
     }
 
-    QUrl url(normalizeApiBaseUrl(baseUrl) + "/chat/completions");
-    QNetworkRequest req(url);
+    const QString base = normalizeApiBaseUrl(baseUrl);
+    QNetworkRequest req(QUrl(base + apiEndpointPath(format, base)));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    req.setRawHeader("Authorization", ("Bearer " + apiKey).toUtf8());
+    applyApiAuthHeaders(req, format, apiKey);
 
-    // 单问答形式（messages 只有 system + user 两条，无历史上下文）
-    QJsonObject msg1{
-        {"role", "system"},
-        {"content", buildBasePrompt(fromLang, toLang, isOcr) + buildDomainAndTermsPrompt()},
-    };
-    QJsonObject msg2{
-        {"role", "user"},
-        {"content", text},
-    };
-    QJsonObject body{
-        {"model", model},
-        {"messages", QJsonArray{msg1, msg2}},
-        {"temperature", 0.2},
-    };
-    if (disableThinking) {
-        // 显式关闭思考模式（DeepSeek V4 实测：thinking.type 合法值为
-        // adaptive/enabled/disabled，翻译是短平快任务，思维链只会拖慢出字。
-        // 端点不识别该字段时按 400/422 降级重发）
-        body.insert("thinking", QJsonObject{{"type", "disabled"}});
+    const QString systemPrompt =
+        buildBasePrompt(fromLang, toLang, isOcr) + buildDomainAndTermsPrompt();
+
+    QByteArray payload;
+    if (format == ApiFormat::Anthropic) {
+        // Anthropic /v1/messages：system 独立于 messages，max_tokens 必填。
+        // DeepSeek 兼容端点实测默认开思考（content 首块为 thinking），显式关闭；
+        // 官方 Anthropic 思考默认关闭，不识别 disabled 时按 400/422 降级重发
+        QJsonObject body{
+            {"model", model},
+            {"max_tokens", 8192},
+            {"temperature", 0.2},
+            {"system", systemPrompt},
+            {"messages", QJsonArray{QJsonObject{{"role", "user"}, {"content", text}}}},
+        };
+        if (disableThinking)
+            body.insert("thinking", QJsonObject{{"type", "disabled"}});
+        payload = QJsonDocument(body).toJson();
+    } else {
+        // 单问答形式（messages 只有 system + user 两条，无历史上下文）
+        QJsonObject body{
+            {"model", model},
+            {"messages", QJsonArray{
+                QJsonObject{{"role", "system"}, {"content", systemPrompt}},
+                QJsonObject{{"role", "user"}, {"content", text}},
+            }},
+            {"temperature", 0.2},
+        };
+        if (disableThinking) {
+            // 显式关闭思考模式（DeepSeek V4 实测：thinking.type 合法值为
+            // adaptive/enabled/disabled，翻译是短平快任务，思维链只会拖慢出字。
+            // 端点不识别该字段时按 400/422 降级重发）
+            body.insert("thinking", QJsonObject{{"type", "disabled"}});
+        }
+        payload = QJsonDocument(body).toJson();
     }
 
     m_busy = true;
-    m_reply = m_nam.post(req, QJsonDocument(body).toJson());
+    m_reply = m_nam.post(req, payload);
     connect(m_reply, &QNetworkReply::finished, this, &Translator::onReplyFinished);
 }
 
@@ -151,7 +169,7 @@ void Translator::onReplyFinished()
     reply->deleteLater();
     m_reply = nullptr;
 
-    // 端点不认识 thinking 禁用字段（严格校验的 OpenAI 兼容服务返回 400/422）：
+    // 端点不认识 thinking 禁用字段（严格校验的服务返回 400/422，两种格式均可能）：
     // 去掉该字段降级重发一次，仅损失"关思考"优化，不影响翻译可用性
     const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (reply->error() != QNetworkReply::NoError && m_tryDisableThinking
@@ -198,11 +216,25 @@ void Translator::onReplyFinished()
         return;
     }
 
-    QString result = doc.object()
-                         .value("choices").toArray()
-                         .at(0).toObject()
-                         .value("message").toObject()
-                         .value("content").toString();
+    // 按格式提取译文：
+    //   OpenAI    → choices[0].message.content
+    //   Anthropic → content[] 块数组，仅拼接 type=="text" 的块
+    //   （thinking 等其他块类型忽略）
+    QString result;
+    if (apiFormatFromSetting(Settings::instance().apiFormat()) == ApiFormat::Anthropic) {
+        const QJsonArray blocks = doc.object().value("content").toArray();
+        for (const QJsonValue &block : blocks) {
+            const QJsonObject obj = block.toObject();
+            if (obj.value("type").toString() == QLatin1String("text"))
+                result += obj.value("text").toString();
+        }
+    } else {
+        result = doc.object()
+                     .value("choices").toArray()
+                     .at(0).toObject()
+                     .value("message").toObject()
+                     .value("content").toString();
+    }
 
     // 兜底清洗：部分模型（如 Qwen3 经第三方中转）会把思维链以 <think>…</think>
     // 混在 content 里输出，取闭合标签之后的正文；只有未闭合思维链则视为空结果

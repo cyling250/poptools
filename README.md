@@ -20,8 +20,8 @@
 | **区域截图** | 多屏拼接捕捉，支持标注工具栏（矩形/椭圆/箭头/文字/马赛克等） | `F1` |
 | **贴图** | 将截图钉到屏幕上，支持拖动/滚轮缩放/右键清除 | `F3` |
 | **OCR 文字识别** | 本地离线 PaddleOCR，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏【文】【译】 |
-| **大模型翻译** | OpenAI 兼容 API（DeepSeek / Ollama 等），支持截图翻译与划词翻译；自动关闭模型思考模式保证响应速度 | - |
-| **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换（自动记忆上次目标语言） | `Ctrl+Alt+Shift+X` |
+| **大模型翻译** | 支持 OpenAI 兼容（DeepSeek / Ollama 等）与 Anthropic（Claude）两种接口格式；截图翻译 + 划词翻译；自动关闭模型思考模式保证响应速度 | - |
+| **划词翻译** | 选中任意文字后弹出翻译卡片，支持语言切换（自动记忆上次目标语言）、拖拽调整卡片大小、一键复制译文 | `Ctrl+Alt+Shift+X` |
 | **领域与术语表** | 设置中自定义翻译领域与专有名词翻译对，自动注入翻译提示词 | - |
 | **窗口智能识别** | 自动检测窗口边缘 + 图像边缘识别，辅助精确框选 | 截图时自动 |
 | **系统托盘常驻** | 后台运行，托盘菜单快捷操作，开机自启可选 | - |
@@ -45,7 +45,7 @@ build/Release/Snipaste.exe
 | GUI | Qt 6.8.3 LTS（LGPL v3 动态链接，本地套件 `tools/qt`） |
 | 构建 | CMake + MSVC（Visual Studio 2022/2026） |
 | OCR | PaddleOCR（PaddleOCR-json.exe 子进程管道模式，本地离线） |
-| 翻译 | OpenAI 兼容 `/chat/completions` API（DeepSeek / Ollama 等） |
+| 翻译 | 大模型 API：OpenAI 兼容 `/chat/completions`（默认）与 Anthropic `/v1/messages` 双协议（DeepSeek / Ollama / Claude 等） |
 | 窗口识别 | OpenCV 4.10（图像边缘检测，eSearch 算法移植，`tools/opencv`） |
 | 热键 | Windows `RegisterHotKey`（user32） |
 
@@ -153,11 +153,12 @@ build/Release/Snipaste.exe
 
 ### 翻译
 
-- **截图翻译**：文字栏面板中选择源/目标语言，点击「翻译」按钮
-- **划词翻译**（`Ctrl+Alt+Shift+X`）：选中任意文字后，弹出翻译卡片，选择语言后点击「翻译」
+- **截图翻译**：文字栏面板中选择源/目标语言，点击「翻译」按钮；结果下方可一键复制
+- **划词翻译**（`Ctrl+Alt+Shift+X`）：选中任意文字后，弹出翻译卡片，选择语言后点击「翻译」；卡片支持拖拽调整大小（拖边缘，调整后不再随内容变化），译文过长可在文本区内滚动查看，结果右下方可一键复制
 - **目标语言记忆**：在划词卡片或文字栏切换目标语言后自动记住，下次翻译直接使用，不再回到默认中文；源语言不做记忆，每次均由模型自动检测
 - **领域与术语表**：设置 →「翻译领域与术语」中可填写翻译领域（逗号分隔）与专有名词翻译对（每行 `原文=译文`），翻译时注入系统提示词，让模型按领域惯例与指定译名输出
-- 翻译请求会显式关闭模型思考模式（DeepSeek 等端点的 `thinking` 参数；端点不支持时自动降级重发），并对混入正文的 `<think>` 思维链做兜底清洗，保证结果直出
+- **接口格式**：支持 OpenAI 兼容（`/chat/completions` + Bearer，默认）与 Anthropic（`/v1/messages` + `x-api-key`）两种协议，在设置 →「接口格式」切换；Anthropic 格式 Base URL 需填对应端点（DeepSeek：`https://api.deepseek.com/anthropic`，官方 Claude：`https://api.anthropic.com`）
+- 翻译请求会显式关闭模型思考模式（`thinking` 参数，DeepSeek 两种格式均已实测生效；端点不支持时自动降级重发），并对混入正文的 `<think>` 思维链做兜底清洗，保证结果直出
 - 翻译使用 OpenAI 兼容 API，在设置中配置 Base URL / API Key / Model
 
 ### 贴图（F3）
@@ -182,7 +183,8 @@ build/Release/Snipaste.exe
 | 配置项 | 说明 | 默认值 |
 |---|---|---|
 | 开机启动 | 登录时自动运行 | 关闭 |
-| API Base URL | OpenAI 兼容端点 | `https://api.deepseek.com/v1` |
+| 接口格式 | 翻译 API 协议：OpenAI 兼容 / Anthropic | OpenAI 兼容 |
+| API Base URL | OpenAI 兼容端点；选 Anthropic 格式时填其端点（如 DeepSeek `https://api.deepseek.com/anthropic`、官方 `https://api.anthropic.com`） | `https://api.deepseek.com/v1` |
 | API Key | 密钥（自行填入） | 空 |
 | Model | 模型名 | `deepseek-v4-flash` |
 | 翻译领域与术语 | 自定义领域（逗号分隔）与专有名词翻译对（`原文=译文` 每行一条） | 空 |
