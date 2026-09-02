@@ -3,7 +3,7 @@
 ; 编译：ISCC.exe packaging\PopTools.iss
 
 #define MyAppName "PopTools"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "PopTools"
 #define MyAppExeName "PopTools.exe"
 #define MyAppAssocName "PopTools 截图"
