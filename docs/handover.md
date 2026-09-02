@@ -5,18 +5,19 @@
 
 ## 项目快照
 
-- **项目名称**：Snipaste（前身为 MySnipaste，2026-08-24 更名）
-- **一句话描述**：Windows 全场景截图工具——区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 API）+ 贴图，Snipaste 免费替代方案
-- **当前版本**：0.2.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/Snipaste.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
+- **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
+- **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图，持续新增小工具
+- **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
+- **当前版本**：0.2.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
-  - C++17，代码统一在 `snipaste` 命名空间
+  - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
   - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
   - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张；其自带 opencv_world4100.dll 随 paddleocr/ 目录部署）
   - 翻译：大模型 API 双协议（设置 `translate/apiFormat`）——OpenAI 兼容 `/chat/completions` + Bearer（默认 DeepSeek，可换 Ollama 等）与 Anthropic `/v1/messages` + `x-api-key`（DeepSeek 兼容端点 / 官方 Claude）；`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
   - 窗口/控件识别：Win32 窗口枚举（user32 + dwmapi）+ Windows UI Automation（UIA 控件树，系统组件无第三方依赖），实现见 `core/capture/SmartRectDetector`
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
-  - 设置持久化：QSettings 写 exe 同目录 `Snipaste.ini`，单例 `core/settings/Settings`
+  - 设置持久化：QSettings 写 exe 同目录 `PopTools.ini`，单例 `core/settings/Settings`
 - **架构概览**（分层 + 功能模块化：core 与 ui 各为静态库（ui 内按功能分库），依赖方向 ui → core；app 可执行承载组合根与功能模块）：
   - **功能模块**（`app/IFeatureModule` + `FeatureRegistry` + `AppServices`）：截图 CaptureModule / 贴图 PinModule / 划词翻译 SelectionTranslateModule 三个自包含模块（`app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口/钩子/事件过滤器；MainWindow 是组合根（托盘 + 服务装配 + 模块注册 + 设置/关于/退出）。模块间互不 include，跨模块交互经 AppServices 能力槽（`captureActive`/`captureIntercept`/`lastCaptureRect`）。**拔插功能 = 组合根删一处 add() + CMake 删一个目标**
   - `app/MainWindow`（QObject，非窗体）＝应用控制器：系统托盘 + 模块装配
@@ -34,8 +35,8 @@
   - `src/resources/` — qrc 资源与应用/工具图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
   - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
-  - `packaging/` — Inno Setup 6 安装包脚本 `Snipaste.iss`，打包源为 `build/Release` 整目录
-  - `dist/` — 安装包输出（已忽略；现存 0.1.3 Setup exe）
+  - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录
+  - `dist/` — 安装包输出（已忽略；现存旧名 Snipaste 的 0.1.3 Setup exe）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
   - `build/` — CMake 构建输出（已忽略；`build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **常用命令**：
@@ -43,15 +44,29 @@
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝整个 paddleocr/ 目录）
   - 测试：`cd build && ctest -C Release --output-on-failure`
-  - 运行：`build/Release/Snipaste.exe`
-  - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
+  - 运行：`build/Release/PopTools.exe`
+  - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：v0.2.0 已发布（T-023：安装包产出并推送，tag v0.2.0）；T-021/T-022 真机反馈修复随本版发布；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），**更名后尚未产出/发布新安装包**；远程仓库改名待用户在 Gitee 网页操作；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-024 项目更名 PopTools、协议换 GPL-3.0、清理 OpenCV 遗留
+- **完成日期**：2026-09-02
+- **背景**：① 项目名 Snipaste 与同名商业截图产品（snipaste.com）撞名，且完全不体现「Windows 全局实用小工具箱」定位（后续会持续加入其他小工具）；② Apache-2.0 过于宽松允许商用，用户要求换强传染协议，选定 GPL-3.0；③ T-016 移除 OpenCV 后 `tools/opencv/` 本地遗留 1.1GB。
+- **结果**：
+  1. **全局更名（78 个跟踪文件 + 2 个改名）**：三档大小写机械替换（`SNIPASTE_*`→`POPTOOLS_*` / `Snipaste`→`PopTools` / `snipaste`→`poptools`），覆盖命名空间、CMake 目标（`poptools_core`/`poptools_ui_*`）、exe（`PopTools.exe`）、ini（`PopTools.ini`）、默认贴图目录（`tempPopTools`）、注册表自启键、默认保存文件名、托盘/关于文案、`SNIPASTE_SMART_BUDGET` 环境变量。批量脚本 `temp_scripts/script_20260902_rename.py`（BOM/CRLF/编码保留，git ls-files 圈定范围）。
+  2. **安装包**：`packaging/Snipaste.iss`/`.ico` 经 `git mv` 更名 `PopTools.iss`/`PopTools.ico`，**AppId 更换为全新 GUID**（安装器视作新产品，不覆盖旧 Snipaste 安装）；输出名 `PopTools-Setup-<版本>.exe`。
+  3. **README 重写**：PopTools 工具箱定位（去除 Snipaste 替代品话术），GPLv3 徽章，修正过期描述（ui/result 已删、OCR 扫描图标、模块化架构、VS 2026 生成器名）。
+  4. **协议**：LICENSE 换为 GNU 官方 GPL-3.0 文本；README License 章节同步（衍生须同协议开源，闭源商用不允许）。
+  5. **清理**：删除 `tools/opencv/`（1.1GB，零引用，不入库）。
+  6. **验证**：清空 build 重新配置（VS 18 2026）→ Release 构建通过 → ctest 通过 → PopTools.exe 启动冒烟通过。
+  - **遗留**：Gitee 远程仓库名由用户网页操作（名称 PopTools、路径 poptools），改完后需 `git remote set-url origin https://gitee.com/richardogu/poptools.git`；本地文件夹 `F:\snipaste`→`F:\poptools` 待用户关闭会话后手动改（会话占用工作目录无法代改）。
+- **关键改动**：全仓 78 文件、`packaging/PopTools.iss` + `PopTools.ico`（git mv + 新 AppId）、`LICENSE`、`README.md`、`docs/handover.md`；更名后设置文件更名为 PopTools.ini、贴图目录更名为 tempPopTools（旧用户设置与贴图目录不迁移，v0.2.0 用户量可忽略）
+- **相关坑**：无
 
 ### T-023 v0.2.0 版本发布
 - **完成日期**：2026-09-02
@@ -266,7 +281,13 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-（暂无）
+### 收尾：远程仓库改名与本地文件夹改名（等待用户操作）
+- **目标**：完成 T-024 遗留的远程仓库更名收尾
+- **待办**：
+  1. 用户在 Gitee 网页操作：仓库 `richardogu/snipaste` → 管理 → 基本信息，把**名称**改为 `PopTools`、**路径**改为 `poptools`
+  2. 用户确认后执行：`git remote set-url origin https://gitee.com/richardogu/poptools.git`，再 `git ls-remote origin` 验证连通
+  3. 本地项目文件夹 `F:\snipaste` → `F:\poptools`：需用户关闭编辑器/AI 会话后手动改名（会话终端占用工作目录，Windows 不允许改）
+- **关键上下文**：本地三个提交（协议 / 更名 / 交接文档）已推送 origin master（推的是旧 URL，改名后 Gitee 会重定向，set-url 后即对齐）
 
 ## 踩坑记录
 
