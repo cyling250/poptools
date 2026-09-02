@@ -28,10 +28,27 @@ qt_standard_project_setup()
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
 
+# ---- 单元测试（可选，默认开启；ctest 运行） ----
+option(SNIPASTE_BUILD_TESTS "Build unit tests" ON)
+if(SNIPASTE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 qt_add_executable(Snipaste WIN32
     src/main.cpp
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/AppServices.cpp
+    src/app/AppServices.h
+    src/app/FeatureRegistry.h
+    src/app/IFeatureModule.h
+    src/app/modules/CaptureModule.cpp
+    src/app/modules/CaptureModule.h
+    src/app/modules/PinModule.cpp
+    src/app/modules/PinModule.h
+    src/app/modules/SelectionTranslateModule.cpp
+    src/app/modules/SelectionTranslateModule.h
     src/resources/resources.qrc
 )
 

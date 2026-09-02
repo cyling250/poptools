@@ -27,6 +27,7 @@ class OutputController;
 class OcrPanel;
 class Translator;
 class SmartRectDetector;
+class PaddleOcrService;
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）—— 门面 + 事件路由
@@ -48,7 +49,9 @@ class CaptureWindow : public QWidget
 {
     Q_OBJECT
 public:
-    explicit CaptureWindow(QWidget *parent = nullptr);
+    // ocrService：共享 OCR 引擎（应用级唯一，子进程昂贵）；为空时内部自建兜底实例
+    explicit CaptureWindow(PaddleOcrService *ocrService = nullptr,
+                           QWidget *parent = nullptr);
 
     // 启动截图（捕获虚拟桌面画面并全屏显示）
     void startCapture();
@@ -81,10 +84,6 @@ private:
     ToolBar *m_toolbar = nullptr;
     int m_selectedItem = -1;             // 当前选中的标注索引
 
-    // 选择模式 ESC 二次退出（防误触）：第一次 ESC 显示 2 秒提示，二次内连按才退出
-    bool m_escArmed = false;
-    QTimer m_escTimer;
-
     // 智能框选：鼠标下方预先高亮的"元素级"矩形（全局逻辑坐标，Selecting 态检测）。
     // 检测在 SmartRectDetector 的常驻工作线程异步执行（窗口/UIA 枚举不能在 GUI
     // 线程同步跑），结果经 found 信号回主线程；只保留最新查询（latest-wins）
@@ -111,6 +110,8 @@ private:
 
     // ---- 功能控制器（组合模式：构造时装配并注册） ----
     CaptureContext m_ctx;                                // 共享上下文（依赖注入）
+    PaddleOcrService *m_ocrService = nullptr;            // 共享 OCR 引擎（非拥有）
+    std::unique_ptr<PaddleOcrService> m_ownedOcr;        // 未注入时的兜底实例
     std::unique_ptr<SelectionController> m_selectionCtrl;
     std::unique_ptr<AnnotationEditor> m_annotationEditor;
     std::unique_ptr<ToolDrawingController> m_toolDrawing;

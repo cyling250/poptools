@@ -45,14 +45,9 @@ struct CaptureContext
     std::function<bool()> hasDraft;
     std::function<void(QPainter &)> paintDraft;
 
-    // 面板模式：OCR 识别文字显示到文字栏（由 CaptureWindow 提供 OcrPanel）
-    std::function<void(const QString &)> showOcrPanel;
-    // 【译】模式：自动翻译（由 CaptureWindow 提供 Translator）
-    std::function<void(const QString &)> translateRequested;
-    // 面板翻译忙状态（OCR/翻译进行中禁用翻译按钮；由 CaptureWindow 提供 OcrPanel）
-    std::function<void(bool)> setPanelBusy;
-    // OCR 扫描状态（true=开始，false=结束；由 CaptureWindow 控制扫描动效）
-    std::function<void(bool)> ocrBusy;
+    // 注：OCR 面板/翻译/扫描动效等功能回调不在本上下文中——
+    // 它们由 CaptureWindow 以 OcrHostCallbacks 窄接口注入 OcrController，
+    // 本结构只承载画布/选区共享态，避免功能回调污染通用上下文。
 
     QRect selectionRect() const { return selection ? *selection : QRect(); }
     int selectedIndex() const { return selectedItem ? *selectedItem : -1; }

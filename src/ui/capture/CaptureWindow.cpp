@@ -27,13 +27,20 @@
 namespace snipaste
 {
 
-    CaptureWindow::CaptureWindow(QWidget *parent)
+    CaptureWindow::CaptureWindow(PaddleOcrService *ocrService, QWidget *parent)
         : QWidget(parent)
     {
         // 全屏无边框置顶窗口
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool | Qt::BypassWindowManagerHint);
         setCursor(Qt::CrossCursor);
         setMouseTracking(true); // 编辑态下实时反馈控制点光标
+
+        // OCR 引擎：优先使用应用级共享实例（子进程昂贵，全局唯一）；未注入则自建兜底
+        m_ocrService = ocrService;
+        if (!m_ocrService) {
+            m_ownedOcr = std::make_unique<PaddleOcrService>();
+            m_ocrService = m_ownedOcr.get();
+        }
 
         // 工具栏（单例，编辑态显示）
         m_toolbar = ToolBar::create(this);
@@ -51,13 +58,27 @@ namespace snipaste
         m_ocrPanel = std::make_unique<OcrPanel>(this);
         m_ocrPanel->hide();
         m_translator = std::make_unique<Translator>(this);
-        m_ctx.showOcrPanel = [this](const QString &text)
+        // OCR 功能对宿主的窄接口（文字栏面板/扫描动效），独立于 CaptureContext
+        OcrHostCallbacks ocrHost;
+        ocrHost.showPanel = [this](const QString &text)
         { showOcrPanel(text); };
         // 【译】按钮：OCR 原文自动翻译（目标语言取面板当前选择）
-        m_ctx.translateRequested = [this](const QString &text)
+        ocrHost.translateRequested = [this](const QString &text)
         { m_translator->translate(text, m_ocrPanel->sourceLang(), m_ocrPanel->targetLang()); };
-        m_ctx.setPanelBusy = [this](bool busy)
+        ocrHost.setPanelBusy = [this](bool busy)
         { m_ocrPanel->setBusy(busy); };
+        // OCR 扫描动效：点击【文】时选区内的扫描线，提示用户"没卡死"
+        ocrHost.ocrBusy = [this](bool busy) {
+            if (busy) {
+                m_ocrScanning = true;
+                m_ocrScanPos = 0.0;
+                m_ocrScanTimer.start();
+            } else {
+                m_ocrScanning = false;
+                m_ocrScanTimer.stop();
+                update();
+            }
+        };
         // 面板内"翻译"按钮：手动重新翻译（源/目标语言取自面板下拉）
         QObject::connect(m_ocrPanel.get(), &OcrPanel::translateRequested, this,
                          [this](const QString &text, const QString &fromLang, const QString &toLang)
@@ -96,7 +117,7 @@ namespace snipaste
         m_annotationEditor = std::make_unique<AnnotationEditor>(&m_ctx);
         m_toolDrawing = std::make_unique<ToolDrawingController>(&m_ctx);
         m_textEditCtrl = std::make_unique<TextEditingController>(&m_ctx);
-        m_ocrCtrl = std::make_unique<OcrController>(&m_ctx);
+        m_ocrCtrl = std::make_unique<OcrController>(&m_ctx, m_ocrService, std::move(ocrHost));
         m_outputCtrl = std::make_unique<OutputController>(&m_ctx);
         m_textEditCtrl->init(this); // 创建文字内嵌输入框
         QObject::connect(m_translator.get(), &Translator::translateFinished, this,
@@ -107,18 +128,7 @@ namespace snipaste
                                                              : QStringLiteral("翻译失败：%1").arg(error));
                          });
 
-        // ---- OCR 扫描动效：点击【文】时选区内的扫描线，提示用户"没卡死" ----
-        m_ctx.ocrBusy = [this](bool busy) {
-            if (busy) {
-                m_ocrScanning = true;
-                m_ocrScanPos = 0.0;
-                m_ocrScanTimer.start();
-            } else {
-                m_ocrScanning = false;
-                m_ocrScanTimer.stop();
-                update();
-            }
-        };
+        // ---- OCR 扫描动效定时器（动效开关见 ocrHost.ocrBusy） ----
         m_ocrScanTimer.setInterval(30);
         connect(&m_ocrScanTimer, &QTimer::timeout, this, [this] {
             m_ocrScanPos += 0.018; // 一次完整扫描约 1.7 秒
@@ -168,14 +178,6 @@ namespace snipaste
         connect(m_toolbar, &ToolBar::ocrRequested, this, &CaptureWindow::onOcrRequested);
         connect(m_toolbar, &ToolBar::translateRequested, this, &CaptureWindow::onTranslateRequested);
 
-        // ESC 二次退出提示：2 秒后消退（重新按两次才会退出）
-        m_escTimer.setSingleShot(true);
-        connect(&m_escTimer, &QTimer::timeout, this, [this]
-                {
-                    m_escArmed = false;
-                    update();
-                });
-
         // 智能框选检测定时器（40ms）：与鼠标事件解耦，检测不阻塞取色卡片跟随。
         // 探测器持常驻工作线程（COM/UIA），构造即启动，随窗口销毁
         m_smartDetectTimer.setInterval(40);
@@ -207,8 +209,6 @@ namespace snipaste
         m_toolDrawing->setTool(Tool::None); // 清空上一轮工具实例
         m_selectionCtrl->cancelActive();
         m_annotationEditor->clearSelection();
-        m_escArmed = false; // 重置 ESC 二次退出提示
-        m_escTimer.stop();
         m_ocrScanning = false; // 重置 OCR 扫描动效
         m_ocrScanTimer.stop();
         m_toolbar->hide();
@@ -285,8 +285,6 @@ namespace snipaste
         m_canvas.width = m_toolbar->currentWidth();
         m_toolDrawing->setTool(t); // 工厂创建工具实例（None=选择模式）
         m_annotationEditor->clearSelection(); // 切换工具取消标注选中 + 字号栏刷新
-        m_escArmed = false; // 切换工具清除 ESC 二次退出提示
-        m_escTimer.stop();
         setCursor(m_toolDrawing->cursor());
     }
 
@@ -424,24 +422,7 @@ namespace snipaste
             m_selectionCtrl->paintSelectionFrame(p, sel);
         }
 
-        // ESC 二次退出提示：半透明圆角框 + 蓝字 + 图标（第一次 ESC 时显示，2 秒后消退）
-        if (m_escArmed)
-        {
-            const QRectF box(0, 0, 210, 52);
-            const QPointF c = rect().center();
-            const QRectF boxRect(c.x() - box.width() / 2, c.y() - box.height() / 2,
-                                 box.width(), box.height());
-            p.setPen(Qt::NoPen);
-            p.setBrush(QColor(50, 50, 50, 210));
-            p.drawRoundedRect(boxRect, 10, 10);
-
-            // 提示文字
-            QFont hintFont = p.font();
-            hintFont.setPointSizeF(13);
-            p.setFont(hintFont);
-            p.setPen(QColor(0, 120, 255));
-            p.drawText(boxRect, Qt::AlignCenter, "再按 ESC 退出");
-        }
+        // ESC 二次退出提示已移除：编辑态选择模式下按一次 ESC 即退出截图
 
         // ---- OCR 扫描动效：选区内的扫描线（提示用户 OCR 正在运行） ----
         if (m_ocrScanning && m_state == State::Editing && !m_selection.isEmpty())
@@ -747,26 +728,15 @@ namespace snipaste
                 cancel();
                 return;
             }
-            // 工具模式：ESC 退出到选择模式（放弃当前草稿），不触发退出提示
+            // 工具模式：ESC 退出到选择模式（放弃当前草稿），不退出截图
             if (m_canvas.tool != Tool::None)
             {
-                m_escArmed = false;
                 m_toolbar->setTool(Tool::None);
                 onToolSelected(Tool::None);
                 return;
             }
-            // 选择模式：连按两次 ESC 才退出（防误触）；第一次显示 2 秒提示
-            if (!m_escArmed)
-            {
-                m_escArmed = true;
-                m_escTimer.start(2000); // 2 秒后提示消退，需要重新按两次
-                update();
-            }
-            else
-            {
-                m_escTimer.stop();
-                cancel();
-            }
+            // 编辑态选择模式：按一次 ESC 即退出截图（原为连按两次防误触，已按用户要求改单次）
+            cancel();
         }
         else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
         {
