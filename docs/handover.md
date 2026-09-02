@@ -47,12 +47,23 @@
   - 运行：`build/Release/PopTools.exe`
   - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；同日更换应用图标（T-026，含补上 exe 内嵌图标缺口）与安装包瘦身第一阶段（T-027，剔除 D3D 着色器编译器 + 捆绑 VC 运行库，111.0→105.7MB）；安装包 `dist/PopTools-Setup-0.2.0.exe` 为 T-026/T-027 后版本（**均未发布**——T-026/T-027 未提交、未打新 tag）；本地项目文件夹已改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.3.0 已发布**（2026-09-02，tag v0.3.0 已推送 gitee，安装包 `dist/PopTools-Setup-0.3.0.exe` 105.7MB，是否上传 Release 页由用户操作）；本版含更名 PopTools + GPL-3.0（T-024）、新图标（T-026）、安装包瘦身第一阶段（T-027，111.0→105.7MB）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-028 v0.3.0 版本发布
+- **完成日期**：2026-09-02
+- **版本判定**：MINOR（0.2.0 → 0.3.0，用户确认）。自 v0.2.0 的变更全部为用户可感知——全局更名 PopTools（安装器换新 AppId、PopTools.ini/贴图目录改名且不迁移）、协议换 GPL-3.0、「破框而出」新图标 + exe 内嵌图标（T-026）、安装包瘦身第一阶段（T-027，111.0 → 105.7MB）；无纯缺陷修复，不满足 PATCH；0.x 阶段行为变化随 MINOR。
+- **结果**：
+  1. 版本号三处同步（CMakeLists / PopTools.iss / 关于对话框文案），产物 exe 内文案经二进制 grep 核对已生效。
+  2. 清理重建（删 `build/` 整目录重新配置 VS 18 2026）→ ctest 1/1 → 启动冒烟 → ISCC 打包 `dist/PopTools-Setup-0.3.0.exe`（105.7MB，与瘦身后同量级；dist 同时保留旧名 0.1.3 / 0.2.0 与未发布的 PopTools-Setup-0.2.0.exe）。
+  3. 三逻辑提交：`59fc4d2` perf(build) T-027 瘦身（先以旧版本号提交功能）、`b2e218c` docs(handover) T-027 结算、`6c90a1b` chore(release) 版本翻转；annotated tag `v0.3.0` 打在 6c90a1b；分支与 tag 一起走代理推送 gitee 并核对（master 推进 + new tag）。
+- **关键改动**：`CMakeLists.txt`、`packaging/PopTools.iss`、`src/app/MainWindow.cpp`（版本文案）、`docs/handover.md`
+- **相关坑**：无新增
+- **待用户后续动作**：可在 gitee 仓库基于 tag v0.3.0 创建 Release 并上传 `dist/PopTools-Setup-0.3.0.exe`；T-026 图标真机目检项仍开放
 
 ### T-027 安装包瘦身第一阶段：剔除 D3D 着色器编译器并捆绑 VC 运行库
 - **完成日期**：2026-09-02
