@@ -1,1 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24"><path fill="#2B6FF2" d="M12 17.5q1.875 0 3.188-1.312T16.5 13t-1.312-3.187T12 8.5T8.813 9.813T7.5 13t1.313 3.188T12 17.5m0-2q-1.05 0-1.775-.725T9.5 13t.725-1.775T12 10.5t1.775.725T14.5 13t-.725 1.775T12 15.5M4 21q-.825 0-1.412-.587T2 19V7q0-.825.588-1.412T4 5h3.15L9 3h6l1.85 2H20q.825 0 1.413.588T22 7v12q0 .825-.587 1.413T20 21zm0-2h16V7h-4.05l-1.825-2h-4.25L8.05 7H4zm8-6"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B9BFF"/>
+      <stop offset="0.5" stop-color="#3D74F6"/>
+      <stop offset="1" stop-color="#7B4DF6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 应用方砖 -->
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#tile)"/>
+
+  <!-- 取景框四角（截图/选区语言） -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 200 V156 Q128 128 156 128 H200"/>
+    <path d="M312 128 H356 Q384 128 384 156 V200"/>
+    <path d="M128 312 V356 Q128 384 156 384 H200"/>
+    <path d="M312 384 H356 Q384 384 384 356 V312"/>
+  </g>
+
+  <!-- 弹出面板（pop/贴图）：先画投影色块再画本体 -->
+  <g transform="rotate(-8 272 300)">
+    <rect x="182" y="237" width="196" height="152" rx="28" fill="#17356E" opacity="0.28"/>
+    <rect x="172" y="225" width="196" height="152" rx="28" fill="#FFFFFF"/>
+    <rect x="200" y="270" width="112" height="15" rx="7.5" fill="#3D74F6" opacity="0.45"/>
+    <rect x="200" y="302" width="74" height="15" rx="7.5" fill="#3D74F6" opacity="0.30"/>
+    <circle cx="362" cy="230" r="25" fill="#FFB020" stroke="#FFFFFF" stroke-width="12"/>
+  </g>
+</svg>

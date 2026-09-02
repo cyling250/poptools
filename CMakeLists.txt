@@ -49,6 +49,7 @@ qt_add_executable(PopTools WIN32
     src/app/modules/PinModule.h
     src/app/modules/SelectionTranslateModule.cpp
     src/app/modules/SelectionTranslateModule.h
+    src/app/app.rc
     src/resources/resources.qrc
 )
 
