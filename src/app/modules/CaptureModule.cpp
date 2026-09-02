@@ -4,6 +4,7 @@
 #include <QRect>
 
 #include "../AppServices.h"
+#include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
 #include "ui/capture/CaptureWindow.h"
 
@@ -29,15 +30,22 @@ void CaptureModule::init(AppServices &services)
         return m_window->isVisible() ? m_window->copyToClipboardAndClose() : QRect{};
     };
 
-    // 托盘入口 + F1 全局热键（vk 可在设置中修改）
-    services.addTrayAction(QStringLiteral("截图 (F1)"), [this] {
+    // 先注册截图全局热键（vk 可在设置中修改），注册结果决定托盘文案——
+    // 热键被其他程序占用时（如其他截图工具），让用户在菜单里直接看出来
+    const quint32 captureVk = Settings::instance().captureHotKeyVk();
+    const bool hotkeyOk = services.registerHotKey(captureVk, 0, [this] {
         if (!m_window->isVisible())
             m_window->startCapture();
     });
-    services.registerHotKey(Settings::instance().captureHotKeyVk(), 0, [this] {
-        if (!m_window->isVisible())
-            m_window->startCapture();
-    });
+
+    // 托盘入口
+    services.addTrayAction(hotkeyOk
+        ? QStringLiteral("截图 (%1)").arg(hotKeyDisplayName(captureVk))
+        : QStringLiteral("截图（%1 已被占用）").arg(hotKeyDisplayName(captureVk)),
+        [this] {
+            if (!m_window->isVisible())
+                m_window->startCapture();
+        });
 }
 
 } // namespace poptools

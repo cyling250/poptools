@@ -41,47 +41,41 @@ namespace poptools
     }
 
     // 渲染 SVG 资源为指定颜色的 QIcon（normal=深灰，高亮=白）
-    // 按屏幕 devicePixelRatio 渲染位图，高 DPI 下不再放大发虚
+    // 4x 超采样、不带 DPR 元数据，交给 QIcon 缩放到按钮 iconSize。
+    // 不能给位图 setDevicePixelRatio：Qt 6.8 的 QToolButton 绘制路径会把
+    // 带 DPR 元数据的位图按物理像素绘制（物理尺寸超过按钮即被裁剪，
+    // 高分屏上图标只剩左上角），已由探针实测确认
     static QIcon svgIcon(const QString &name, const QColor &color, int size = 20)
     {
         QSvgRenderer renderer(QString(":/icons/%1.svg").arg(name));
         if (!renderer.isValid())
             return QIcon(); // 资源缺失时返回空图标（调用方应能处理）
-        const qreal dpr = qGuiApp->devicePixelRatio();
-        QPixmap src(size * dpr, size * dpr);
-        src.setDevicePixelRatio(dpr);
-        src.fill(Qt::transparent);
+        constexpr int kSs = 4; // 超采样倍数
+        QPixmap pm(size * kSs, size * kSs);
+        pm.fill(Qt::transparent);
         {
-            QPainter p(&src);
+            QPainter p(&pm);
             renderer.render(&p);
-        }
-        // 重新着色（SourceIn 保留透明度）
-        QPixmap colored(src.size());
-        colored.setDevicePixelRatio(dpr);
-        colored.fill(Qt::transparent);
-        {
-            QPainter p(&colored);
-            p.drawPixmap(0, 0, src);
+            // 重新着色（SourceIn 保留透明度）
             p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-            p.fillRect(QRect(0, 0, size, size), color);
+            p.fillRect(0, 0, pm.width(), pm.height(), color);
         }
-        return QIcon(colored);
+        return QIcon(pm);
     }
 
     // 线宽图标：圆点大小按档位内相对值缩放（半径 2px..7px），档位之间清晰可辨
     static QIcon widthIcon(qreal w, qreal maxW, int size = 20, const QColor &color = Qt::black)
     {
-        const qreal dpr = qGuiApp->devicePixelRatio();
-        QPixmap pm(size * dpr, size * dpr);
-        pm.setDevicePixelRatio(dpr);
+        constexpr int kSs = 4; // 超采样倍数（同 svgIcon，不带 DPR 元数据）
+        QPixmap pm(size * kSs, size * kSs);
         pm.fill(Qt::transparent);
         {
             QPainter p(&pm);
             p.setRenderHint(QPainter::Antialiasing);
-            const qreal r = 2.0 + 5.0 * (w / qMax(1e-6, maxW));
+            const qreal r = (2.0 + 5.0 * (w / qMax(1e-6, maxW))) * kSs;
             p.setPen(Qt::NoPen);
             p.setBrush(color);
-            p.drawEllipse(QPointF(size / 2.0, size / 2.0), r, r);
+            p.drawEllipse(QPointF(pm.width() / 2.0, pm.height() / 2.0), r, r);
         }
         return QIcon(pm);
     }
@@ -89,15 +83,15 @@ namespace poptools
     // 填充/纯线图标
     static QIcon fillIcon(bool filled, int size = 20, const QColor &color = Qt::black)
     {
-        const qreal dpr = qGuiApp->devicePixelRatio();
-        QPixmap pm(size * dpr, size * dpr);
-        pm.setDevicePixelRatio(dpr);
+        constexpr int kSs = 4; // 超采样倍数（同 svgIcon，不带 DPR 元数据）
+        QPixmap pm(size * kSs, size * kSs);
         pm.fill(Qt::transparent);
         {
             QPainter p(&pm);
             p.setRenderHint(QPainter::Antialiasing);
-            QRect r(4, 4, size - 8, size - 8);
-            p.setPen(QPen(color, 2));
+            const int m = 4 * kSs; // 原逻辑边距 4px 的等比放大
+            QRect r(m, m, pm.width() - 2 * m, pm.height() - 2 * m);
+            p.setPen(QPen(color, 2 * kSs));
             p.setBrush(filled ? QBrush(color) : QBrush(Qt::NoBrush));
             p.drawRect(r);
         }

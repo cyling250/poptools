@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QRect>
 #include <QString>
+#include <QStringList>
 #include <functional>
 
 class QAction;
@@ -49,14 +50,20 @@ public:
     QAction *addTrayAction(const QString &text, std::function<void()> triggered);
 
     // 注册全局热键并绑定回调（热键 id 由本类内部分配并自动路由；
-    // 回调在主线程经 activated 信号触发，GUI 操作请自行延迟到事件循环）
-    void registerHotKey(quint32 vk, quint32 modifiers, std::function<void()> triggered);
+    // 回调在主线程经 activated 信号触发，GUI 操作请自行延迟到事件循环）。
+    // 返回注册是否成功；失败（通常是热键已被其他程序占用）时记录键名，
+    // 供组合根在托盘可见后经 takeFailedHotKeyNames() 弹气泡告知用户
+    bool registerHotKey(quint32 vk, quint32 modifiers, std::function<void()> triggered);
+
+    // 注册失败的热键显示名列表（如 "F1"），取走即清空
+    QStringList takeFailedHotKeyNames();
 
 private slots:
     void onHotKeyActivated(int id);
 
 private:
     QHash<int, std::function<void()>> m_hotkeyCallbacks;
+    QStringList m_failedHotKeyNames;
     int m_nextHotKeyId = 1;
     bool m_hotkeyWired = false;
 };

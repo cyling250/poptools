@@ -1,14 +1,14 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-09-02
+> 最后更新：2026-09-03（T-030 修订四）
 
 ## 项目快照
 
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图，持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
-- **当前版本**：0.3.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
+- **当前版本**：0.3.1。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
@@ -45,14 +45,55 @@
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、剔除 D3D 着色器编译器三件、从 VS Redist 部署 VC 运行库、拷贝整个 paddleocr/ 目录，见 T-027）
   - 测试：`cd build && ctest -C Release --output-on-failure`
   - 运行：`build/Release/PopTools.exe`
-  - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
+  - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：**v0.3.0 已发布**（2026-09-02，tag v0.3.0 已推送 gitee，安装包 `dist/PopTools-Setup-0.3.0.exe` 105.7MB，是否上传 Release 页由用户操作）；本版含更名 PopTools + GPL-3.0（T-024）、新图标（T-026）、安装包瘦身第一阶段（T-027，111.0→105.7MB）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.3.1 已发布**（2026-09-03，PATCH：T-029/T-030 纯缺陷修复；安装包文件名带构建时间戳，dist 仅保留最新）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-031 v0.3.1 版本发布
+- **完成日期**：2026-09-03
+- **版本判定**：PATCH（0.3.0 → 0.3.1，纯缺陷修复：T-029 稳定性 + T-030 图标/主题渲染，无新功能）
+- **结果**：
+  1. 版本号三处同步（CMakeLists / PopTools.iss / 关于对话框文案），exe 二进制核验含 "PopTools v0.3.1" 无旧版本残留。
+  2. 清理 `build/` `dist/` 全量重建 → ctest 1/1 → 打包 `dist/PopTools-Setup-0.3.1-20260903_0147.exe`（105,673,726 字节；文件名含构建时间戳，「关于」对话框含构建时间，用于核对安装版本）。
+  3. 本版内容 = [T-029](#t-029-修复两类稳定性缺陷对话框关闭杀进程--热键注册静默失败) + [T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配) 全部修复（对话框关闭杀进程、热键失败气泡提示、单实例、高分屏图标裁剪、翻译浮窗双主题适配）+ 全应用 Fusion 风格。
+- **关键改动**：`CMakeLists.txt`、`packaging/PopTools.iss`、`src/app/MainWindow.cpp`（版本文案）
+- **待用户**：GitHub Release 页基于 tag v0.3.1 创建 Release 并上传安装包（可选）。注：本机 remote 实际为 `github.com/cyling250/poptools`（项目搬迁后的现状），历史条目中的 gitee 为搬迁前旧记录
+
+### T-030 故障机三问题：F1/Fn 热键模式说明、高分屏图标裁剪、翻译浮窗主题适配
+- **完成日期**：2026-09-03
+- **背景**：用户在故障机（Win10 笔记本，屏幕缩放≠100%）回归 T-029 修复后反馈三点：① F1 仍无效——该机 Fn 锁处于反转状态，物理 F1 键直接发出媒体静音扫描码，**VK_F1 从未产生**（RegisterHotKey(VK_F1) 实际是成功的，只是永远等不到按键），属键盘固件"热键模式"配置而非应用缺陷，处理办法是 Fn+Esc 切换 Fn 锁或 BIOS 里改 Hotkey Mode/Function Key Behavior，代码无合理拦截手段（劫持静音键不可取），仅作解释；② 工具栏图标只显示左上角（横竖笔画）；③ 翻译卡片在浅色系统下白边白字黑底错乱。
+- **结果**：
+  1. **图标裁剪（②）**：`temp_scripts/iconprobe/` 探针 + `QT_SCALE_FACTOR` 模拟多缩放比实测定位——Qt 6.8.3 的 QToolButton 绘制路径会把**带 DPR 元数据**的 QIcon 位图按物理像素绘制，物理尺寸超过按钮（26px）即被裁剪：dpr=1.0/1.25 幸免（25px<26），dpr≥1.5 必现；修复采用探针四方案对比中唯一稳妥的**4x 超采样、不带 DPR 元数据、交给 QIcon 缩放**（`svgIcon`/`widthIcon`/`fillIcon` 三函数统一改写）。真机 1.25 缩放 + 模拟 F1 + 拖拽选区截图确认全工具栏图标完整清晰。
+  2. **翻译浮窗主题（③）**：根因双重——a) 样式表类型选择器 `TranslateCard {...}`/`OcrPanel {...}` 对 `poptools::` 命名空间类**永不匹配**（与 [T-017] ToolBar 同坑，见 P-022），底色/边框从未生效、随系统调色板回落，暗色系统碰巧看不出、浅色系统即露馅；b) 卡片整套硬编码暗色、面板整套硬编码浅色。修复：新增 `src/ui/ThemeColors.h` 配色表（浅=白底黑字浅灰线，深=黑底白字浅灰线，含错误态），TranslateCard/OcrPanel 改 objectName ID 选择器 + `applyTheme()` 统一应用 + 监听 `QStyleHints::colorSchemeChanged` 动态切换；`showError` 错误态同步主题化。真机强制切换双主题截图验证（浅色：白卡黑字浅灰框蓝按钮浅红错误区；深色：与原观感一致）。
+  3. `main.cpp` 加 `POPTOOLS_COLOR_SCHEME=light|dark` 环境变量强制主题钩子（验证/演示用）。
+  4. **验证**：构建通过 + ctest 1/1（新增 ThemeColors 配色表用例）+ 上述三张截图。
+  5. **修订（同日，用户反馈）**：浅色主题下"原文/翻译"小节提示等次级文字用了灰值，用户明确约定为**文字一律纯黑（浅）/纯白（深），灰色仅允许出现在线框**（卡片边框/文本区边框/分隔线）。配色表全表修订（sectionTitle/title/body/ctrlText/closeText → #000000/#FFFFFF；closeHover 改强调蓝），测试用例同步锁定该约定（body/sectionTitle/title 的纯黑纯白断言）。双主题重新截图验证 + 重打 `dist/PopTools-Setup-0.3.0.exe`（105.7MB，00:38）。
+  6. **修订二（同日，用户反馈）**：用户进一步要求"只要是文本就不许灰色"（灰色文本暗示输入提示，而本应用无用户输入场景）。清掉最后两处：禁用态按钮文字（"翻译中…"/未翻译时"复制译文"）改为主题纯黑/纯白（ctrlDisabledText 不再用灰），OcrPanel 两处占位提示文字删除。重打 `dist/PopTools-Setup-0.3.0.exe`（105,681,960 字节，00:53）。**辨别包版本**：00:27 旧包=105,796,914 字节（有灰字），00:38 包=105,722,230 字节（小节标题已黑），00:53 包=105,681,960 字节（全无灰字）。
+  7. **修订三（同日，用户反馈）**：故障机第三次报"灰字"，无法排除装的是旧包——同名包连续多轮混淆。根治：安装包文件名加构建时间戳（`OutputBaseFilename=PopTools-Setup-<版本>-<yyyymmdd_hhnn>`），「关于」对话框显示构建时间（`__DATE__ __TIME__`），用户可在故障机上一键核对安装的构建版本。产出 `dist/PopTools-Setup-0.3.0-20260903_0100.exe`（105,670,811 字节，构建时间约 Sep 3 2026 00:59）。若该包安装后仍灰字，则需用户提供故障机截图 + 检查系统颜色滤镜/高对比度设置（届时考虑强制 Fusion 风格）。
+  8. **修订四（同日，用户反馈截图定位）**：用户提供故障机截图——深色主题下源文本正文渲染为灰色（标题/下拉/按钮均白，仅 QTextEdit 正文灰）。两层修复：① `TranslateCard`/`OcrPanel` 的 `applyTheme()` 显式把 Text/HighlightedText/ButtonText 角色的 **Active/Inactive/Disabled 三个调色板组**全部钉到主题文字色（卡片是 `WA_ShowWithoutActivating` 不激活窗口，部分渲染路径走 Inactive 组）；② 应用强制 **Fusion 风格**（`main.cpp` setStyle）——Win10 的 windowsvista 原生风格与深色调色板/QSS 组合存在颜色不生效的确定性渲染问题，Fusion 由 Qt/QSS 完全接管、跨版本一致。期间引入并修复一个启动崩溃（OcrPanel::applyTheme 在子控件创建前调用 → 空指针，移至构造末尾；教训：主题函数涉及子控件时必须在构造末尾调用）。
+  9. **修订五（同日，用户反馈"文本框内部灰色"）**：内部背景同样走调色板兜底——编辑框把 **Base/Window 角色**三个组钉到 editBg 并开 autoFillBackground，下拉钉 Base。重打 `dist/PopTools-Setup-0.3.0-20260903_0127.exe`。
+  10. **修订六（同日，最终修复）**：用户第五次反馈源文本仍灰（附截图：深色下正文灰、错误文字红正常）。决定性线索——**错误文字（控件内联样式）在故障机上始终渲染正确，而正文颜色（卡片级样式表）始终不生效**。最终修复：文本框颜色改为**控件自身内联样式**（`m_editSheet` 成员，`translateNow`/`setTranslateResult`/`hideEvent` 恢复默认时重应用而非清空），不再依赖卡片级样式表继承；调色板钉死与 Fusion 风格保留作双保险。本机带真实源文本截图验证源文本亮白。最终产物 `dist/PopTools-Setup-0.3.0-20260903_0138.exe`（105,775,121 字节）。
+  - **待用户**：故障机 Fn 锁调整后 F1 才可能生效（或经 ini 的 hotkey/captureVk 换一个键）；浅色模式下浮窗整体观感顺手目检（OcrPanel 主题化仅代码评审 + 用例覆盖，未截图验证——打开需完整 OCR 流程自动化，成本高）。
+- **关键改动**：`src/ui/capture/ToolBar.cpp`、`src/ui/ThemeColors.h`（新增）、`src/ui/translate/TranslateCard.*`、`src/ui/capture/OcrPanel.*`、`src/main.cpp`、`tests/domain_tests.cpp`
+- **相关坑**：[P-021](#p-021-qtoolbutton-高分屏图标裁剪dpr-元数据被绘制路径忽略)、[P-022](#p-022-qss-类型选择器对命名空间类静默失效)
+
+### T-029 修复两类稳定性缺陷：对话框关闭杀进程 / 热键注册静默失败
+- **完成日期**：2026-09-02
+- **背景**：用户报告部分电脑上「启动正常、托盘有图标，F1 无响应，过一会进程消失」。代码分析 + Qt 6.8.3 探针实测（`temp_scripts/quitprobe/`，场景矩阵逐项运行）定位两个**相互独立**的缺陷：① `main.cpp` 未调用 `setQuitOnLastWindowClosed(false)`，而「关于」（`QMessageBox::about(nullptr,…)`）与「设置」（`SettingsDialog dlg(nullptr)`）是无主顶层窗口——探针实测：托盘菜单（Qt::Popup）隐藏存活、Qt::Tool 窗口（截图/贴图）hide/close 均存活，唯独无主 QDialog/QMessageBox 关闭瞬间整进程退出。这解释了「一直正常」的错觉：日常截图/贴图全走安全路径，唯点开设置/关于再关闭即死；故障机上时序为 F1 失效 → 用户点托盘菜单排查 → 关掉设置/关于 → 进程消失。② `RegisterHotKey` 失败（F1 无修饰键最易被其他截图工具/本项目旧版自启实例占用）全链路静默——`GlobalHotKey::registerKey` 返回值在 `AppServices`、`CaptureModule` 两处被丢弃，用户零感知。
+- **结果**：
+  1. `main.cpp`：`setQuitOnLastWindowClosed(false)`（托盘常驻应用唯一退出入口 = 托盘菜单「退出」）+ 命名互斥量单实例保护（`PopTools.SingleInstance`，第二实例弹「已在运行」提示框后退出）。
+  2. 新增 `src/core/hotkey/HotKeyNames.h`（VK+修饰键 → "Ctrl+Alt+Shift+X"/"F1" 显示名，头文件内联，不依赖 windows.h；未知键回退十六进制）。
+  3. `AppServices::registerHotKey` 改返回 `bool` 并记录失败键名（`takeFailedHotKeyNames()` 取走即清空）；`CaptureModule` 先注册热键再按结果生成托盘文案（成功「截图 (F1)」/失败「截图（F1 已被占用）」，键名随设置动态）；`MainWindow` 在托盘 `show()` 后对失败热键逐个弹 Warning 气泡（明确提示被占用 + 托盘菜单仍可用）。
+  4. **验证**：构建通过 + ctest 1/1（新增热键显示名用例先抓到实现缺陷：对整个串 `toUpper` 把 `0xAB` 大写成 `0XAB`，已修为仅十六进制位大写）+ 真机冒烟两项目截图确认：`temp_scripts/hotkeyholder/` 占住 F1 后启动 PopTools → 右下角气泡文案与预期一致；双启动第二实例 → 「PopTools 已在运行」提示框。
+  - **待用户顺手目检**：「设置/关于」关闭后托盘仍在（探针已双向证明机制，未自动化点击托盘菜单）；故障机上 F1 是否已可用取决于占用方。
+- **后续（同日）**：打包 `dist/PopTools-Setup-0.3.0.exe`（105.7MB，含本修复）。打包前发现机器搬迁后 Inno Setup 丢失（原 `D:\Inno Setup 6` 不存在、注册表无记录），经代理重装 ISCC 6.7.3 至原路径并更新「常用命令」。**注意：该包版本号仍为 0.3.0 但内容含未发布修复，与 gitee tag v0.3.0 对应代码不一致**——对外分发前建议升版 0.3.1 走发布流程（三处版本号同步 + 提交 + tag，由用户决策）。
+- **关键改动**：`src/main.cpp`、`src/app/AppServices.*`、`src/app/MainWindow.cpp`、`src/app/modules/CaptureModule.cpp`、`src/core/hotkey/HotKeyNames.h`（新增）、`src/core/CMakeLists.txt`、`tests/domain_tests.cpp`
+- **相关坑**：[P-020](#p-020-git-bash-链路里-powershell-_ 与路径反斜杠都会被吞)
 
 ### T-028 v0.3.0 版本发布
 - **完成日期**：2026-09-02
@@ -334,6 +375,37 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-021 QToolButton 高分屏图标裁剪：DPR 元数据被绘制路径忽略
+- **关联任务**：[T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配)
+- **现象**：屏幕缩放≥150% 的机器上工具栏图标只剩左上角（横竖笔画）；100%/125% 正常。探针（`QT_SCALE_FACTOR` + 参数化 dpr 对比）定位：经 `setDevicePixelRatio` 打标的位图加入 QIcon 后，QToolButton 绘制路径按**物理像素**尺寸绘制（元数据被忽略），物理尺寸（size×dpr）超过按钮即裁剪；同一位图在 dpr=1.0/1.25 下因物理尺寸恰小于按钮而"侥幸正常"，极具迷惑性。
+- **解决**：图标位图改 4x 超采样、**不设 DPR 元数据**，交给 QIcon 缩放到 iconSize（探针对比过的显式 iconSize、iconSize=物理尺寸等方案均无效，仅此方案稳妥）。教训：Qt 6.8.3 的 QToolButton 上，带 DPR 元数据的 QIcon 位图不可信；自绘图标一律超采样无元数据。
+
+### P-022 QSS 类型选择器对命名空间类静默失效
+- **关联任务**：[T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配)（第三次踩，首次见 [T-017] ToolBar.cpp 内注释）
+- **现象**：`TranslateCard {...}` / `OcrPanel {...}` 样式从未生效，卡片底色/边框随系统调色板回落——暗色系统碰巧看不出问题，浅色系统才暴露。
+- **原因**：项目所有类在 `poptools` 命名空间，`QMetaObject::className()` 返回 "poptools::TranslateCard"，QSS 类型选择器 `TranslateCard` 按类名匹配失败且**无任何警告**。
+- **解决**：setStyleSheet 前给控件 setObjectName，样式表用 ID 选择器（`#translateCard {...}`）。教训：本项目凡对自定义类写 QSS，一律 ID 选择器；类型选择器只用于 QLabel/QPushButton 等非命名空间 Qt 类。
+
+### P-023 浮窗关键颜色必须内联样式+调色板双通道，父级 QSS 继承不可信
+- **关联任务**：[T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配)
+- **现象**：划词卡片源文本正文颜色由卡片级样式表 `QTextEdit { color: ... }` 定义，开发机（Win11）渲染正确，故障机（Win10）渲染为灰；而同卡片内**控件内联样式**的错误文字（红）始终渲染正确。背景色等部分属性走父级样式表又能生效——失效是选择性的、按机器差异表现，极难凭本机现象推断。
+- **解决**：关键颜色一律双通道——① 直接写在控件自身内联样式（`edit->setStyleSheet(主题规则)`），② 调色板 Text/Base 角色 Active/Inactive/Disabled 三组全钉（卡片是 `WA_ShowWithoutActivating` 不激活窗口，部分渲染路径走 Inactive 组）；③ 应用层强制 Fusion 风格消除 Win10/Win11 原生风格差异。父级 QSS 仅作布局类声明。
+- **教训**：跨机器交付的 Qt 界面，"本机渲染正确"不是充分证据；颜色这类关键视觉属性要在**最贴近控件的层**声明。
+
+### P-024 过程检讨：一个前端灰字 bug 为何修了五轮
+- **关联任务**：[T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配)
+- **检讨**：源文本灰字从首次反馈到最终修复跨了五轮"构建-打包-传包-用户安装-反馈"循环，成本远超必要。四个过程失误，按影响排序：
+  1. **验证盲区（最关键）**：每轮本机验证截图里源文本框都是**空的**（自动化只能触发错误态），而灰字 bug 只在**框内有真实文字**时可见——等于从未验证过用户实际看到的状态就宣布修复。后期用"第二实例消息框文字被 Ctrl+C 抓走"才造出带内容的场景，一轮即见修复效果。**规矩：UI 修复的验证必须覆盖用户真实使用态的数据，空态/报错态不算数。**
+  2. **没有第一时间索要截图**：用户人在故障机，我靠"文字是灰色的"一句描述连猜三轮（改小节标题色→改禁用态色→改纯黑/纯白），全是"合理但盲打"的修改。第一轮就应要求截图——拿到截图当轮即定位"仅正文编辑框灰、其余全白"。**规矩：远程排查显示类缺陷，要截图是第一步，不是兜底手段。**
+  3. **逐层加保险而非一次分层隔离**：最终修复 = 内联样式 + 调色板三组 + Fusion 三层，却分了三轮逐层试，每层之间隔着一次完整交付循环。且线索早已指路：错误文字的内联样式在故障机上一直正确——"把颜色改走这条已验证的通道"应是首选修复，而非最后的尝试。**规矩：显示类缺陷先建立可复现的最小场景本地闭环，候选修复一次验证完，不把用户当测试轮次。**
+  4. **同名包连续交付四轮**：`PopTools-Setup-0.3.0.exe` 文件名不变，新旧包混淆贯穿全程，直到引入构建时间戳文件名 + 「关于」构建时间才根治。**规矩：修复交付阶段就应内嵌可核对的构建标识，先于任何"请重新安装"的请求。**
+- **正面沉淀**：图标裁剪（P-021）一轮定位，正是因为先写探针复现——本条的失败是没把同样方法论用在文字颜色上。
+
+### P-020 Git Bash 链路里 PowerShell `$_` 与路径反斜杠都会被吞
+- **关联任务**：[T-029](#t-029-修复两类稳定性缺陷对话框关闭杀进程--热键注册静默失败)
+- **现象**：真机冒烟中三个连环坑——① `powershell.exe -Command "...$_.Name..."` 里的 PowerShell 变量 `$_` 被 Git Bash 先行展开为空，整条命令解析报错且**一条都没执行**；② Python 脚本收到的 `E:\\poptools\\...` 双反斜杠路径被 shell 逐层吃掉，存出 `poptoolstemp_scriptssmoke_1.png` 这种连体文件名；③ `subprocess.run(["tasklist"], text=True)` 在中文 Windows 上按 UTF-8 解码 GBK 输出直接抛 `UnicodeDecodeError`。
+- **解决**：进程清理等带 `$`/复杂引号的 PowerShell 一律写成 Python 临时脚本、经 `subprocess` 列表参数调用（完全绕开 MSYS 转换）；给 Python 的文件路径用**正斜杠**；`subprocess` 捕获输出用 `bytes` + `.decode("gbk", errors="replace")`。教训：`$` 开头的任何内容在 Git Bash 双引号/裸传场景都不可靠，脚本化优先。
 
 ### P-018 mklml.dll 无静态引用却是 Paddle 硬依赖
 - **关联任务**：[T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)

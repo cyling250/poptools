@@ -2,6 +2,7 @@
 
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
+#include "ui/ThemeColors.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -11,6 +12,9 @@
 #include <QPushButton>
 #include <QFrame>
 #include <QGuiApplication>
+#include <QStyleHints>
+#include <QPalette>
+#include <QLineEdit>
 #include <QClipboard>
 #include <QTimer>
 
@@ -22,21 +26,12 @@ OcrPanel::OcrPanel(QWidget *parent)
     // 面板自身使用箭头光标
     setCursor(Qt::ArrowCursor);
 
-    // 浅色背景，与工具栏面板风格一致
-    setStyleSheet(
-        "OcrPanel { background: #F5F5F5; border: 1px solid #D0D0D0; border-radius: 4px; }"
-        "QTextEdit { background: #fff; border: 1px solid #D0D0D0; border-radius: 3px;"
-        "  color: #1A1A1A; padding: 4px; font-size: 13px; }"
-        "QTextEdit:focus { border-color: #2B6FF2; }"
-        "QComboBox { background: #fff; border: 1px solid #D0D0D0; border-radius: 3px;"
-        "  color: #1A1A1A; padding: 2px 4px; }"
-        "QComboBox:focus { border-color: #2B6FF2; }"
-        "QComboBox QAbstractItemView { background: #fff; color: #1A1A1A; }"
-        "QPushButton { background: #fff; border: 1px solid #2B6FF2; border-radius: 3px;"
-        "  color: #2B6FF2; padding: 2px 10px; font-size: 12px; }"
-        "QPushButton:hover { background: #E8F0FE; }"
-        "QPushButton:disabled { color: #8E8E93; border-color: #D0D0D0; background: #F0F0F0; }"
-        "QLabel { color: #1A1A1A; font-size: 12px; }");
+    // 跟随系统明暗主题（本类在 poptools 命名空间，样式表类型选择器
+    // "OcrPanel {...}" 匹配不到，须用 objectName ID 选择器）。
+    // applyTheme() 在构造末尾调用——内含对子控件的调色板设置
+    setObjectName("ocrPanel");
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, &OcrPanel::applyTheme);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
@@ -48,25 +43,22 @@ OcrPanel::OcrPanel(QWidget *parent)
     headerRow->addWidget(titleLabel);
     headerRow->addStretch(1);
     m_closeBtn = new QPushButton(QStringLiteral("✕"), this);
+    m_closeBtn->setObjectName("ocrCloseBtn");
     m_closeBtn->setFixedSize(20, 20);
     m_closeBtn->setToolTip(QStringLiteral("关闭面板，清除翻译缓存"));
-    m_closeBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: #8E8E93; font-size: 14px; }"
-        "QPushButton:hover { color: #1A1A1A; }");
     headerRow->addWidget(m_closeBtn);
     layout->addLayout(headerRow);
 
     // 上半部分：OCR 识别到的文字（只读，多行）
+    // 不设占位提示文字：本应用没有用户输入场景，灰色提示字与约定不符
     m_ocrEdit = new QTextEdit(this);
     m_ocrEdit->setReadOnly(true);
-    m_ocrEdit->setPlaceholderText(QStringLiteral("OCR 识别文字"));
     m_ocrEdit->setMinimumHeight(90);
     layout->addWidget(m_ocrEdit, 1);
 
     // 区段分隔线
     auto *sectionSep = new QFrame(this);
     sectionSep->setFrameShape(QFrame::HLine);
-    sectionSep->setStyleSheet("QFrame { color: #E0E0E0; }");
     layout->addWidget(sectionSep);
 
     // 中间：翻译选项（从 A 到 B）+ 翻译按钮
@@ -95,13 +87,11 @@ OcrPanel::OcrPanel(QWidget *parent)
     // 区段分隔线
     auto *sectionSep2 = new QFrame(this);
     sectionSep2->setFrameShape(QFrame::HLine);
-    sectionSep2->setStyleSheet("QFrame { color: #E0E0E0; }");
     layout->addWidget(sectionSep2);
 
     // 下半部分：翻译结果（只读）
     m_translateEdit = new QTextEdit(this);
     m_translateEdit->setReadOnly(true);
-    m_translateEdit->setPlaceholderText(QStringLiteral("翻译结果"));
     m_translateEdit->setMinimumHeight(60);
     layout->addWidget(m_translateEdit, 1);
 
@@ -142,6 +132,69 @@ OcrPanel::OcrPanel(QWidget *parent)
         hide();
         emit closed();
     });
+
+    // 全部子控件就绪后应用主题（内含对编辑框/下拉的调色板设置）
+    applyTheme();
+}
+
+void OcrPanel::applyTheme()
+{
+    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    // 文本框颜色直接写在控件自身：父级样式表的 QTextEdit color 在部分
+    // Win10 渲染路径下不生效（见 TranslateCard 同款处理）
+    const QString editSheet = QStringLiteral(
+        "QTextEdit { color: %1; background: %2; border: 1px solid %3;"
+        "  border-radius: 3px; padding: 4px; font-size: 13px; }"
+        "QTextEdit:focus { border-color: #2B6FF2; }").arg(c.body, c.editBg, c.editBorder);
+    m_ocrEdit->setStyleSheet(editSheet);
+    m_translateEdit->setStyleSheet(editSheet);
+
+    setStyleSheet(QString(
+        "#ocrPanel { background: %1; border: 1px solid %2; border-radius: 4px; }"
+        "QComboBox { background: %3; border: 1px solid %4; border-radius: 3px;"
+        "  color: %5; padding: 2px 4px; }"
+        "QComboBox:focus { border-color: #2B6FF2; }"
+        "QComboBox QAbstractItemView { background: %3; color: %5; }"
+        "QPushButton { background: %3; border: 1px solid #2B6FF2; border-radius: 3px;"
+        "  color: #2B6FF2; padding: 2px 10px; font-size: 12px; }"
+        "QPushButton:hover { background: %6; }"
+        "QPushButton:disabled { color: %7; border-color: %4; background: %6; }"
+        "QLabel { color: %5; font-size: 12px; }"
+        "QFrame { color: %8; }"
+        "QPushButton#ocrCloseBtn { background: transparent; border: none;"
+        "  color: %9; font-size: 14px; }"
+        "QPushButton#ocrCloseBtn:hover { color: %5; }")
+        .arg(c.cardBg, c.cardBorder, c.editBg, c.editBorder, c.body,
+             c.ctrlHover, c.ctrlDisabledText, c.line, c.closeText));
+
+    // 与 TranslateCard 同理：把 Text 角色三个组都钉到主题文字色，
+    // 内部背景钉 Base/Window，避免任何系统样式路径下 QSS 不生效
+    const QBrush textBrush{QColor(c.body)};
+    const QBrush editBgBrush{QColor(c.editBg)};
+    for (QTextEdit *edit : {m_ocrEdit, m_translateEdit}) {
+        QPalette pal = edit->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::Text, textBrush);
+            pal.setBrush(group, QPalette::HighlightedText, textBrush);
+            pal.setBrush(group, QPalette::Base, editBgBrush);
+            pal.setBrush(group, QPalette::Window, editBgBrush);
+        }
+        edit->setPalette(pal);
+        edit->setAutoFillBackground(true);
+    }
+    for (QComboBox *combo : {m_fromCombo, m_toCombo}) {
+        QPalette pal = combo->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::Text, textBrush);
+            pal.setBrush(group, QPalette::ButtonText, textBrush);
+            pal.setBrush(group, QPalette::Base, editBgBrush);
+        }
+        combo->setPalette(pal);
+        if (QLineEdit *line = combo->lineEdit()) // 可编辑下拉的内嵌输入框
+            line->setPalette(pal);
+    }
 }
 
 void OcrPanel::setOcrText(const QString &text)

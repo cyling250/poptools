@@ -3,7 +3,9 @@
 ; 编译：ISCC.exe packaging\PopTools.iss
 
 #define MyAppName "PopTools"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
+; 构建时间戳进文件名：修复期间版本号未变，同名包易新旧混淆
+#define BuildStamp GetDateTimeString("yyyymmdd_hhnn", "", "")
 #define MyAppPublisher "PopTools"
 #define MyAppExeName "PopTools.exe"
 #define MyAppAssocName "PopTools 截图"
@@ -19,7 +21,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=PopTools-Setup-{#MyAppVersion}
+OutputBaseFilename=PopTools-Setup-{#MyAppVersion}-{#BuildStamp}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

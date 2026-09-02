@@ -41,18 +41,31 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addAction("设置...", this, &MainWindow::onShowSettings);
     m_menu->addSeparator();
     m_menu->addAction("关于", [] {
+        // 构建时间用于辨别安装的是哪一版包（多轮修复期间包名相同易混淆）
         QMessageBox::about(nullptr, "PopTools",
-            "PopTools v0.3.0\n\n"
-            "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
-            "快捷键：F1 截图\n"
-            "OCR 引擎：PaddleOCR（本地离线）\n"
-            "翻译：OpenAI 兼容大模型 API（可配置）");
+            QStringLiteral("PopTools v0.3.1\n\n"
+                           "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
+                           "快捷键：F1 截图\n"
+                           "OCR 引擎：PaddleOCR（本地离线）\n"
+                           "翻译：OpenAI 兼容大模型 API（可配置）\n\n"
+                           "构建时间：%1 %2")
+                .arg(QLatin1String(__DATE__), QLatin1String(__TIME__)));
     });
     m_menu->addSeparator();
     m_menu->addAction("退出", this, &QApplication::quit);
 
     m_tray->setContextMenu(m_menu);
     m_tray->show();
+
+    // 热键注册失败的统一告知（模块 init 时记录；气泡须在托盘可见后弹出）
+    const QStringList failedHotKeys = m_services->takeFailedHotKeyNames();
+    for (const QString &name : failedHotKeys) {
+        m_tray->showMessage(QStringLiteral("热键注册失败"),
+            QStringLiteral("%1 已被其他程序占用（如其他截图工具），"
+                           "对应快捷键暂不可用，仍可通过托盘菜单使用相应功能。")
+                .arg(name),
+            QSystemTrayIcon::Warning);
+    }
 }
 
 void MainWindow::onShowSettings()

@@ -19,7 +19,7 @@ namespace poptools {
 //   * 下半部分：翻译结果（只读）
 //   * 右上角：关闭按钮，关闭时清除面板内容并发出 closed() 信号
 //
-// 始终使用黑色文字 + 白色背景，不受系统主题影响。
+// 跟随系统明暗主题（浅色=白底黑字，深色=黑底白字）。
 // 宽度至少 10 字符、位置（外部/内部）由 CaptureWindow 定位。
 // ============================================================
 class OcrPanel : public QWidget
@@ -46,6 +46,8 @@ protected:
     void showEvent(QShowEvent *event) override;
 
 private:
+    // 应用当前系统明暗主题的整套样式（构造与 colorSchemeChanged 时调用）
+    void applyTheme();
     QTextEdit *m_ocrEdit = nullptr;
     QTextEdit *m_translateEdit = nullptr;
     QComboBox *m_fromCombo = nullptr; // 源语言（A）

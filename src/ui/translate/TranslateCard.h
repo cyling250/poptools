@@ -12,7 +12,8 @@ namespace poptools {
 // ============================================================
 // 划词翻译结果卡片
 //
-// 暗色主题，显示原文 + 语言选择 + 翻译按钮 + 翻译结果。
+// 跟随系统明暗主题（浅色=白底黑字浅灰线，深色=黑底白字），
+// 显示原文 + 语言选择 + 翻译按钮 + 翻译结果。
 // 无边框窗口：按住卡片空白处拖动移动；四边边缘拖拽调整大小
 // （调整后不再随内容自适应）；文本区为只读 QTextEdit，
 // 内容超出可视区时内部滚动，翻译结果下方可一键复制。
@@ -54,6 +55,8 @@ private slots:
     void onTranslateClicked();
 
 private:
+    // 应用当前系统明暗主题的整套样式（构造与 colorSchemeChanged 时调用）
+    void applyTheme();
     // 内容更新后按内容自适应整体高度（用户手动调整过大小后不再干预）
     void refit();
     // 单个文本区按文档实际高度自适应，限制在 [kTextEditMinHeight, maxH]，超出时走滚动条
@@ -77,6 +80,7 @@ private:
     QRect m_pressGeometry;
     bool m_userResized = false; // 用户手动调整过大小后，内容更新不再自动改尺寸
     QString m_originalText;
+    QString m_editSheet;        // 当前主题的文本框内联样式（applyTheme 生成）
 };
 
 } // namespace poptools

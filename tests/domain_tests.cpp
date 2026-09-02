@@ -9,8 +9,10 @@
 #include "app/FeatureRegistry.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
+#include "core/hotkey/HotKeyNames.h"
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
+#include "ui/ThemeColors.h"
 
 using namespace poptools;
 
@@ -101,6 +103,53 @@ private slots:
         // 无法识别的显示名原样返回（兼容自定义语言代码）
         QCOMPARE(displayToLangCode(QStringLiteral(" pt ")), QStringLiteral("pt"));
         QCOMPARE(langCodeToDisplay(QStringLiteral("pt")), QStringLiteral("pt"));
+    }
+
+    // ---- HotKeyNames ----
+    void hotkey_display_names()
+    {
+        QCOMPARE(hotKeyDisplayName(0x70), QStringLiteral("F1"));
+        QCOMPARE(hotKeyDisplayName(0x87), QStringLiteral("F24"));
+        QCOMPARE(hotKeyDisplayName(0x58), QStringLiteral("X"));
+        QCOMPARE(hotKeyDisplayName(0x31), QStringLiteral("1"));
+        // 修饰键顺序固定 Ctrl+Alt+Shift+Win（与划词热键文案一致）
+        QCOMPARE(hotKeyDisplayName(0x58, 0x2 | 0x1 | 0x4),
+                 QStringLiteral("Ctrl+Alt+Shift+X"));
+        QCOMPARE(hotKeyDisplayName(0x21, 0x4), QStringLiteral("Shift+PageUp"));
+        QCOMPARE(hotKeyDisplayName(0x61), QStringLiteral("Num1"));
+        // 未知键回退十六进制码
+        QCOMPARE(hotKeyDisplayName(0xAB), QStringLiteral("0xAB"));
+    }
+
+    // ---- ThemeColors ----
+    void theme_colors_light_and_dark()
+    {
+        const ThemeColors light = uiThemeColors(false);
+        const ThemeColors dark = uiThemeColors(true);
+        QVERIFY(!light.dark);
+        QVERIFY(dark.dark);
+        // 浅色=纯黑文字白底；深色=纯白文字黑底（用户约定：不允许灰字）
+        QCOMPARE(QByteArray(light.cardBg), QByteArray("#FFFFFF"));
+        QCOMPARE(QByteArray(light.body), QByteArray("#000000"));
+        QCOMPARE(QByteArray(light.sectionTitle), QByteArray("#000000"));
+        QCOMPARE(QByteArray(light.title), QByteArray("#000000"));
+        QCOMPARE(QByteArray(dark.cardBg), QByteArray("#1E1E1E"));
+        QCOMPARE(QByteArray(dark.body), QByteArray("#FFFFFF"));
+        QCOMPARE(QByteArray(dark.sectionTitle), QByteArray("#FFFFFF"));
+        QCOMPARE(QByteArray(dark.title), QByteArray("#FFFFFF"));
+        // 禁用态按钮文字同样不许灰（本应用无输入提示语义）
+        QCOMPARE(QByteArray(light.ctrlDisabledText), QByteArray("#000000"));
+        QCOMPARE(QByteArray(dark.ctrlDisabledText), QByteArray("#FFFFFF"));
+        // 灰色只允许出现在线框：卡片边框 / 文本区边框 / 分隔线
+        QVERIFY(light.line && *light.line);
+        QVERIFY(dark.line && *dark.line);
+        QVERIFY(light.cardBorder && *light.cardBorder);
+        QVERIFY(dark.cardBorder && *dark.cardBorder);
+        QVERIFY(light.editBorder && *light.editBorder);
+        QVERIFY(dark.editBorder && *dark.editBorder);
+        // 错误态三色齐全
+        QVERIFY(light.errText && light.errBg && light.errBorder);
+        QVERIFY(dark.errText && dark.errBg && dark.errBorder);
     }
 
     // ---- Translator 内联辅助 ----

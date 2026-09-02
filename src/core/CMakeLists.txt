@@ -21,6 +21,7 @@ add_library(poptools_core STATIC
     capture/SmartRectDetector.h
     hotkey/GlobalHotKey.cpp
     hotkey/GlobalHotKey.h
+    hotkey/HotKeyNames.h
     hotkey/GlobalMouseHook.cpp
     hotkey/GlobalMouseHook.h
     ocr/PaddleOcrService.cpp

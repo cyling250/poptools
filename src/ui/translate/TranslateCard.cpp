@@ -2,6 +2,7 @@
 
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
+#include "ui/ThemeColors.h"
 
 #include <QLabel>
 #include <QPushButton>
@@ -14,7 +15,9 @@
 #include <QMouseEvent>
 #include <QEvent>
 #include <QGuiApplication>
+#include <QPalette>
 #include <QScreen>
+#include <QStyleHints>
 #include <QClipboard>
 #include <QTimer>
 #include <QtMath>
@@ -76,28 +79,12 @@ TranslateCard::TranslateCard(QWidget *parent)
     // 未按下时也接收 mouseMove，用于边缘缩放的光标反馈
     setMouseTracking(true);
 
-    // === 暗色主题 ===
-    setStyleSheet(
-        "TranslateCard { background: #1E1E1E; border: 1px solid #3C3C3C;"
-        "  border-radius: 8px; }"
-        "QLabel.section-title { color: #8E8E93; font-size: 11px; }"
-        "QTextEdit { color: #CCCCCC; font-size: 13px;"
-        "  background: #0D0D0D; border: 1px solid #2A2A2A; border-radius: 4px;"
-        "  padding: 8px; }"
-        "QComboBox { background: #2A2A2A; color: #CCCCCC; border: 1px solid #3C3C3C;"
-        "  border-radius: 3px; padding: 2px 4px; font-size: 12px; }"
-        "QComboBox:focus { border-color: #2B6FF2; }"
-        "QComboBox::drop-down { border: none; }"
-        "QComboBox QAbstractItemView { background: #2A2A2A; color: #CCCCCC;"
-        "  selection-background-color: #3C3C3C; }"
-        "QPushButton.ctrl-btn { background: #2A2A2A; color: #CCCCCC;"
-        "  border: 1px solid #3C3C3C; border-radius: 3px; padding: 2px 6px;"
-        "  font-size: 12px; }"
-        "QPushButton.ctrl-btn:hover { background: #3C3C3C; }"
-        "QPushButton.translate-btn { background: #2B6FF2; color: #FFFFFF;"
-        "  border: none; border-radius: 3px; padding: 2px 10px; font-size: 12px; }"
-        "QPushButton.translate-btn:hover { background: #1E5FD9; }"
-        "QPushButton.translate-btn:disabled { background: #3C3C3C; color: #666; }");
+    // 跟随系统明暗主题。注意：本类在 poptools 命名空间，样式表类型选择器
+    // "TranslateCard {...}" 永远匹配不到 "poptools::TranslateCard"（会静默
+    // 失效、底色回落到系统调色板），必须用 objectName ID 选择器
+    setObjectName("translateCard");
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, &TranslateCard::applyTheme);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 8, 10, 10);
@@ -106,15 +93,13 @@ TranslateCard::TranslateCard(QWidget *parent)
     // === 标题行：左侧文字 + 右侧关闭按钮 ===
     auto *headerRow = new QHBoxLayout;
     auto *titleLabel = new QLabel(QStringLiteral("划词翻译"), this);
-    titleLabel->setStyleSheet("QLabel { color: #FFFFFF; font-weight: bold; font-size: 13px; }");
+    titleLabel->setProperty("class", "card-title");
     headerRow->addWidget(titleLabel);
     headerRow->addStretch(1);
     m_closeBtn = new QPushButton(QStringLiteral("\303\227"), this);
     m_closeBtn->setFixedSize(22, 22);
     m_closeBtn->setToolTip(QStringLiteral("关闭"));
-    m_closeBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: #8E8E93; font-size: 14px; }"
-        "QPushButton:hover { color: #FFFFFF; }");
+    m_closeBtn->setProperty("class", "close-btn");
     headerRow->addWidget(m_closeBtn);
     layout->addLayout(headerRow);
 
@@ -154,7 +139,6 @@ TranslateCard::TranslateCard(QWidget *parent)
     // === 分隔线 ===
     auto *sep1 = new QFrame(this);
     sep1->setFrameShape(QFrame::HLine);
-    sep1->setStyleSheet("QFrame { color: #2A2A2A; }");
     layout->addWidget(sep1);
 
     // === 原文区域（只读文本框：内容过长时内部滚动，可随窗口拖拽扩大） ===
@@ -175,7 +159,6 @@ TranslateCard::TranslateCard(QWidget *parent)
     // === 分隔线 ===
     auto *sep2 = new QFrame(this);
     sep2->setFrameShape(QFrame::HLine);
-    sep2->setStyleSheet("QFrame { color: #2A2A2A; }");
     layout->addWidget(sep2);
 
     // === 翻译区域 ===
@@ -213,6 +196,79 @@ TranslateCard::TranslateCard(QWidget *parent)
             m_copyBtn->setText(QStringLiteral("复制译文"));
         });
     });
+
+    // 全部控件就绪后应用主题（内含对编辑框/下拉的调色板设置）
+    applyTheme();
+}
+
+void TranslateCard::applyTheme()
+{
+    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    // 注意：文本框（QTextEdit）的颜色不走本样式表——故障机（Win10）实测
+    // 父级样式表的 QTextEdit color 不生效而控件内联样式生效，见下方 m_editSheet
+    setStyleSheet(QString(
+        "#translateCard { background: %1; border: 1px solid %2;"
+        "  border-radius: 8px; }"
+        "QLabel.card-title { color: %3; font-weight: bold; font-size: 13px; }"
+        "QLabel.section-title { color: %4; font-size: 11px; }"
+        "QComboBox { background: %5; color: %6; border: 1px solid %7;"
+        "  border-radius: 3px; padding: 2px 4px; font-size: 12px; }"
+        "QComboBox:focus { border-color: #2B6FF2; }"
+        "QComboBox::drop-down { border: none; }"
+        "QComboBox QAbstractItemView { background: %5; color: %6;"
+        "  selection-background-color: %8; }"
+        "QPushButton.ctrl-btn { background: %5; color: %6;"
+        "  border: 1px solid %7; border-radius: 3px; padding: 2px 6px;"
+        "  font-size: 12px; }"
+        "QPushButton.ctrl-btn:hover { background: %8; }"
+        "QPushButton.translate-btn { background: #2B6FF2; color: #FFFFFF;"
+        "  border: none; border-radius: 3px; padding: 2px 10px; font-size: 12px; }"
+        "QPushButton.translate-btn:hover { background: #1E5FD9; }"
+        "QPushButton.translate-btn:disabled { background: %8; color: %9; }"
+        "QFrame { color: %10; }"
+        "QPushButton.close-btn { background: transparent; border: none;"
+        "  color: %11; font-size: 14px; }"
+        "QPushButton.close-btn:hover { color: %12; }")
+        .arg(c.cardBg, c.cardBorder, c.title, c.sectionTitle, c.ctrlBg,
+             c.body, c.ctrlBorder, c.ctrlHover, c.ctrlDisabledText,
+             c.line, c.closeText, c.closeHover));
+
+    // 文本框颜色直接写在控件自身（内联样式在故障机上被验证有效）；
+    // 恢复默认时须重新应用本样式而非清空
+    m_editSheet = QStringLiteral(
+        "QTextEdit { color: %1; font-size: 13px;"
+        "  background: %2; border: 1px solid %3; border-radius: 4px;"
+        "  padding: 8px; }").arg(c.body, c.editBg, c.editBorder);
+    m_sourceText->setStyleSheet(m_editSheet);
+    m_translateText->setStyleSheet(m_editSheet);
+
+    // 卡片是 WA_ShowWithoutActivating 的不激活窗口，Qt 以 Inactive 调色板组
+    // 绘制其文字，把 Text 角色的三个组都钉到主题文字色兜底；内部背景钉
+    // Base/Window（Win10 原生风格下 QSS 背景可能失效）
+    const QBrush textBrush{QColor(c.body)};
+    const QBrush editBgBrush{QColor(c.editBg)};
+    for (QTextEdit *edit : {m_sourceText, m_translateText}) {
+        QPalette pal = edit->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::Text, textBrush);
+            pal.setBrush(group, QPalette::HighlightedText, textBrush);
+            pal.setBrush(group, QPalette::Base, editBgBrush);
+            pal.setBrush(group, QPalette::Window, editBgBrush);
+        }
+        edit->setPalette(pal);
+        edit->setAutoFillBackground(true);
+    }
+    for (QComboBox *combo : {m_fromCombo, m_toCombo}) {
+        QPalette pal = combo->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::Text, textBrush);
+            pal.setBrush(group, QPalette::ButtonText, textBrush);
+            pal.setBrush(group, QPalette::Base, editBgBrush);
+        }
+        combo->setPalette(pal);
+    }
 }
 
 void TranslateCard::setSourceText(const QString &text)
@@ -238,7 +294,7 @@ void TranslateCard::moveNearCursor()
 void TranslateCard::setTranslateResult(const QString &text)
 {
     m_translateText->setPlainText(text);
-    m_translateText->setStyleSheet(QString()); // 清除错误态配色，恢复默认
+    m_translateText->setStyleSheet(m_editSheet); // 清除错误态配色，恢复主题默认
     m_translateBtn->setEnabled(true);
     m_translateBtn->setText(QStringLiteral("翻译"));
     m_copyBtn->setEnabled(!text.isEmpty());
@@ -248,10 +304,12 @@ void TranslateCard::setTranslateResult(const QString &text)
 void TranslateCard::showError(const QString &errorMsg)
 {
     m_translateText->setPlainText(errorMsg);
-    m_translateText->setStyleSheet(
-        "QTextEdit { color: #FF6B6B; font-size: 13px;"
-        "  background: #2A0000; border: 1px solid #5C0000; border-radius: 4px;"
-        "  padding: 8px; }");
+    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    m_translateText->setStyleSheet(QString(
+        "QTextEdit { color: %1; font-size: 13px;"
+        "  background: %2; border: 1px solid %3; border-radius: 4px;"
+        "  padding: 8px; }")
+        .arg(c.errText, c.errBg, c.errBorder));
     m_translateBtn->setEnabled(true);
     m_translateBtn->setText(QStringLiteral("翻译"));
     m_copyBtn->setEnabled(false);
@@ -324,7 +382,7 @@ void TranslateCard::translateNow()
         return;
     m_translateBtn->setEnabled(false);
     m_translateBtn->setText(QStringLiteral("翻译中…"));
-    m_translateText->setStyleSheet(QString());
+    m_translateText->setStyleSheet(m_editSheet);
     m_translateText->clear();
     m_copyBtn->setEnabled(false);
     emit translateRequested(m_originalText, displayToLangCode(m_fromCombo->currentText()),
@@ -408,7 +466,7 @@ void TranslateCard::hideEvent(QHideEvent *event)
     m_originalText.clear();
     m_sourceText->clear();
     m_translateText->clear();
-    m_translateText->setStyleSheet(QString()); // 清除错误态配色
+    m_translateText->setStyleSheet(m_editSheet); // 清除错误态配色
     m_translateBtn->setEnabled(true);
     m_translateBtn->setText(QStringLiteral("翻译"));
     m_copyBtn->setEnabled(false);

@@ -4,6 +4,7 @@
 #include <QMenu>
 
 #include "core/hotkey/GlobalHotKey.h"
+#include "core/hotkey/HotKeyNames.h"
 
 namespace poptools {
 
@@ -26,7 +27,7 @@ QAction *AppServices::addTrayAction(const QString &text, std::function<void()> t
     return action;
 }
 
-void AppServices::registerHotKey(quint32 vk, quint32 modifiers,
+bool AppServices::registerHotKey(quint32 vk, quint32 modifiers,
                                  std::function<void()> triggered)
 {
     if (hotkey && !m_hotkeyWired) {
@@ -34,9 +35,19 @@ void AppServices::registerHotKey(quint32 vk, quint32 modifiers,
         m_hotkeyWired = true;
     }
     const int id = m_nextHotKeyId++;
-    if (hotkey)
-        hotkey->registerKey(vk, id, modifiers);
+    bool ok = false;
+    if (hotkey) {
+        ok = hotkey->registerKey(vk, id, modifiers);
+        if (!ok)
+            m_failedHotKeyNames.append(hotKeyDisplayName(vk, modifiers));
+    }
     m_hotkeyCallbacks.insert(id, std::move(triggered));
+    return ok;
+}
+
+QStringList AppServices::takeFailedHotKeyNames()
+{
+    return std::move(m_failedHotKeyNames);
 }
 
 void AppServices::onHotKeyActivated(int id)
