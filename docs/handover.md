@@ -35,24 +35,37 @@
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
   - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
-  - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
+  - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录（T-027 起排除 `poptools_domain_tests.exe`）；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
   - `dist/` — 安装包输出（已忽略；现存更名后 `PopTools-Setup-0.2.0.exe` 与旧名 Snipaste 的 0.1.3 / 0.2.0 Setup）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
   - `build/` — CMake 构建输出（已忽略；`build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **常用命令**：
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
-  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝整个 paddleocr/ 目录）
+  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、剔除 D3D 着色器编译器三件、从 VS Redist 部署 VC 运行库、拷贝整个 paddleocr/ 目录，见 T-027）
   - 测试：`cd build && ctest -C Release --output-on-failure`
   - 运行：`build/Release/PopTools.exe`
   - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；同日更换应用图标（T-026，含补上 exe 内嵌图标缺口），安装包已含新图标重打 `dist/PopTools-Setup-0.2.0.exe`（T-025/T-026，**均未发布**——未提交、未打新 tag）；本地项目文件夹已改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；同日更换应用图标（T-026，含补上 exe 内嵌图标缺口）与安装包瘦身第一阶段（T-027，剔除 D3D 着色器编译器 + 捆绑 VC 运行库，111.0→105.7MB）；安装包 `dist/PopTools-Setup-0.2.0.exe` 为 T-026/T-027 后版本（**均未发布**——T-026/T-027 未提交、未打新 tag）；本地项目文件夹已改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-027 安装包瘦身第一阶段：剔除 D3D 着色器编译器并捆绑 VC 运行库
+- **完成日期**：2026-09-02
+- **背景**：安装包 111MB 偏大。全量体积分析（2026-09-02）：打包源 `build/Release` 343MB = `paddleocr/` 297MB（mklml 89 / models 63 / opencv_world4100 62 / paddle_inference 49 / mkldnn 21 / onnxruntime 7.6 / paddle2onnx 3.8 / libiomp5md 1.7）+ Qt 运行库约 46MB（其中 dxcompiler 14.3 / D3Dcompiler_47 4.7 / dxil 1.5）+ 其余小项；安装包已 lzma2/ultra64 固实压缩，压缩参数无优化空间，只能砍文件；实测语言模型权重压缩率仅约 11%（几乎不压），保留 6 语言时模型压缩后约 50MB 即体积地板。**用户约束：OCR 多语言模型包保留不删**。
+- **结果**：
+  1. **剔除 D3D 着色器编译器**：dxcompiler/dxil/D3Dcompiler_47（20.5MB 原始、压缩后约 7MB）非静态依赖——dumpbin 证实 Qt6Gui 与 qwindows.dll 的导入表只有系统自带 d3d11/dxgi/d3d12，纯 Widgets 应用不加载（RHI/Qt Quick 的 D3D 后端专用）。POST_BUILD 在 windeployqt 之后 `cmake -E rm -f` 剔除。
+  2. **捆绑 VC 运行库（顺带修隐性缺陷）**：部署目录根此前完全没有 msvcp140/vcruntime140 等（只在 paddleocr/ 子目录有一份），依赖用户机器碰巧装过 VC++ Redist，干净机器可能无法启动。windeployqt `--compiler-runtime` 实测无效（见 [P-019](#p-019-windeployqt-的-compiler-runtime-选项探测不到-vs-2026)），改为 CMake 从 `CMAKE_CXX_COMPILER` 路径回溯 VS 安装根、定位 `VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT`（过滤 onecore、取排序最后）逐 DLL `copy_if_different` 部署（9 个 DLL，约 2.5MB 原始）。
+  3. **排除测试程序**：`PopTools.iss` 加 `Excludes: "poptools_domain_tests.exe"`（此前整目录打包误把 141KB 单元测试带进安装包）。
+  4. **mklml.dll（89MB）删除不可行**：虽有分析佐证（无静态导入、无延迟导入），但实证隔离测试失败（见 [P-018](#p-018-mklmldll-无静态引用却是-paddle-硬依赖)），已恢复原状。
+  5. **验证**：重建 + ctest 1/1 + 启动冒烟（无 dx* 启动正常）通过；ISCC 重打 `dist/PopTools-Setup-0.2.0.exe`：**111.0MB → 105.7MB**（净省 5.3MB；理论 dx* 收益 7MB 被新增 CRT 约 1.2MB 抵掉一部分）。部署目录 343MB → 325MB。
+- **后续可选项（未做，待用户决策）**：① opencv_world4100 最小化重建（62MB → 约 20-25MB 原始，安装包约再省 10MB 量级；需 dumpbin 核对 exe 导入符号 + 全语言 OCR 回归）；② OCR 引擎换 RapidOCR-json（onnxruntime）：Paddle 运行库栈 235MB 原始换 onnxruntime+opencv 约 70MB，收益最大（安装包估约 55-70MB，已贴近多语言模型地板），需核实多语言 onnx 模型可得性 + 适配 `PaddleOcrService`（同为管道 JSON 协议）+ 全语言回归。
+- **关键改动**：`CMakeLists.txt`（windeployqt 参数注释、dx* 剔除、VC CRT 显式部署）、`packaging/PopTools.iss`（Excludes）
+- **相关坑**：[P-018](#p-018-mklmldll-无静态引用却是-paddle-硬依赖)、[P-019](#p-019-windeployqt-的-compiler-runtime-选项探测不到-vs-2026)
 
 ### T-026 更换应用图标：「破框而出」新形象 + 补上 exe 内嵌图标缺口
 - **完成日期**：2026-09-02
@@ -305,9 +318,23 @@
 
 （暂无）
 
+> 备注：安装包瘦身第一阶段已结算为 [T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)，其中记录了两个未做的后续可选项（opencv 最小化重建 / 换 RapidOCR-json 引擎），若继续瘦身以该条目为起点。
+
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-018 mklml.dll 无静态引用却是 Paddle 硬依赖
+- **关联任务**：[T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)
+- **现象**：`paddleocr/mklml.dll`（89MB，安装包内最大单文件）不被任何模块静态导入、无延迟加载导入表，二进制里也仅有 Linux 路径字符串（`libmklml_intel.so`/`mklml_dir`），看似纯死重
+- **原因**：Paddle 的 `phi/backends/dynload/dynamic_loader.cc` 在 CPU 推理初始化时**无条件 `LoadLibrary("mklml.dll")`**，加载失败即中止（报 `PreconditionNotMetError: The third-party dynamic library (mklml.dll) that Paddle depends on is not configured correctly. (error code is 126)`）
+- **解决**：不能删。实证方法：隔离重命名 mklml.dll + libiomp5md.dll 后直跑 PaddleOCR-json（脚本 `temp_scripts/script_20260902_mklml_test.py`），初始化即报错；测毕恢复。教训：**导入表干净 ≠ 可删**，Paddle 这类运行时大量依赖运行期动态加载，剔除 DLL 前必须跑一次真实推理验证
+
+### P-019 windeployqt 的 compiler-runtime 选项探测不到 VS 2026
+- **关联任务**：[T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)
+- **现象**：windeployqt 加 `--compiler-runtime` 后部署目录根没有任何 VC 运行库 DLL；构建输出有 `Cannot find Visual Studio installation directory, VCINSTALLDIR is not set`（`--compiler-runtime` 静默不生效，只有这条无关警告提供线索）
+- **原因**：Qt 6.8.3 的 windeployqt 依赖 VS 安装探测（VCINSTALLDIR 环境变量 / vswhere），本机 VS 2026 的新版目录结构探测不到，Redist（`VC/Redist/MSVC/14.51.36231/x64/Microsoft.VC145.CRT`）明明存在
+- **解决**：CMake 从 `CMAKE_CXX_COMPILER`（cl.exe）路径向上 7 级回溯 VS 安装根，`file(GLOB)` 定位 `VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT`（过滤 onecore 变体、取排序最后），逐 DLL `copy_if_different` 部署到 `$<TARGET_FILE_DIR:PopTools>`；不再依赖 windeployqt 的探测
 
 ### P-017 Edge headless 按尺寸逐个渲染小尺寸会随机挂起
 - **关联任务**：[T-026](#t-026-更换应用图标破框而出新形象--补上-exe-内嵌图标缺口)
