@@ -47,7 +47,7 @@
   - 运行：`build/Release/PopTools.exe`
   - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），**更名后尚未产出/发布新安装包**；远程仓库改名待用户在 Gitee 网页操作；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；**更名后尚未产出/发布新安装包**；本地项目文件夹仍为 `F:\snipaste`，待用户关闭会话后改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
@@ -64,7 +64,7 @@
   4. **协议**：LICENSE 换为 GNU 官方 GPL-3.0 文本；README License 章节同步（衍生须同协议开源，闭源商用不允许）。
   5. **清理**：删除 `tools/opencv/`（1.1GB，零引用，不入库）。
   6. **验证**：清空 build 重新配置（VS 18 2026）→ Release 构建通过 → ctest 通过 → PopTools.exe 启动冒烟通过。
-  - **遗留**：Gitee 远程仓库名由用户网页操作（名称 PopTools、路径 poptools），改完后需 `git remote set-url origin https://gitee.com/richardogu/poptools.git`；本地文件夹 `F:\snipaste`→`F:\poptools` 待用户关闭会话后手动改（会话占用工作目录无法代改）。
+  - **遗留（已于同日收尾）**：Gitee 仓库已由用户网页改名 `richardogu/poptools`，本地 remote 已 `set-url` 并推送验证通过；本地文件夹 `F:\snipaste`→`F:\poptools` 仍待用户关闭会话后手动改（会话占用工作目录无法代改）。
 - **关键改动**：全仓 78 文件、`packaging/PopTools.iss` + `PopTools.ico`（git mv + 新 AppId）、`LICENSE`、`README.md`、`docs/handover.md`；更名后设置文件更名为 PopTools.ini、贴图目录更名为 tempPopTools（旧用户设置与贴图目录不迁移，v0.2.0 用户量可忽略）
 - **相关坑**：无
 
@@ -281,13 +281,7 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-### 收尾：远程仓库改名与本地文件夹改名（等待用户操作）
-- **目标**：完成 T-024 遗留的远程仓库更名收尾
-- **待办**：
-  1. 用户在 Gitee 网页操作：仓库 `richardogu/snipaste` → 管理 → 基本信息，把**名称**改为 `PopTools`、**路径**改为 `poptools`
-  2. 用户确认后执行：`git remote set-url origin https://gitee.com/richardogu/poptools.git`，再 `git ls-remote origin` 验证连通
-  3. 本地项目文件夹 `F:\snipaste` → `F:\poptools`：需用户关闭编辑器/AI 会话后手动改名（会话终端占用工作目录，Windows 不允许改）
-- **关键上下文**：本地三个提交（协议 / 更名 / 交接文档）已推送 origin master（推的是旧 URL，改名后 Gitee 会重定向，set-url 后即对齐）
+（暂无）
 
 ## 踩坑记录
 
