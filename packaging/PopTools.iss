@@ -35,9 +35,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制
+; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制；
+; 排除误入的单元测试程序（Excludes 模式对递归子目录同样生效）
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "poptools_domain_tests.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "PopTools.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

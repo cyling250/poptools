@@ -67,10 +67,47 @@ if(NOT EXISTS "${QT_BIN_DIR}/windeployqt.exe")
 endif()
 add_custom_command(TARGET PopTools POST_BUILD
     # -no-translations：本机 Qt 套件不含 translations/ 目录（未下载），且应用不加载
-    # QTranslator/.qm，跳过翻译部署以消除 windeployqt 的 "(developer build?)" 警告
-    COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release -no-translations "$<TARGET_FILE:PopTools>"
+    # QTranslator/.qm，跳过翻译部署以消除 windeployqt 的 "(developer build?)" 警告。
+    # 不用 windeployqt 的 --compiler-runtime：其探测逻辑识别不了本机 VS 2026 的
+    # Redist 目录，加了也不会拷贝（已实测），VC 运行库改由下方显式部署
+    COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release
+        -no-translations "$<TARGET_FILE:PopTools>"
     COMMENT "Deploying Qt runtime via windeployqt"
+    # 纯 Widgets 应用不会加载 D3D 着色器编译器（dxcompiler/dxil/D3Dcompiler
+    # 仅供 RHI/Qt Quick 的 D3D 后端使用，Qt6Gui/qwindows 均无静态导入），
+    # windeployqt 默认会部署三件约 20MB，紧随其后剔除以免混入安装包
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:PopTools>/dxcompiler.dll"
+        "$<TARGET_FILE_DIR:PopTools>/dxil.dll"
+        "$<TARGET_FILE_DIR:PopTools>/D3Dcompiler_47.dll"
 )
+
+# VC 运行库（msvcp140/vcruntime140 等）：从当前编译器路径回溯 VS 安装根，
+# 定位 VC/Redist/MSVC/<版本>/x64/Microsoft.VC*.CRT（多版本并存时取排序最后，
+# 跳过 onecore 变体），部署到 exe 旁——根目录此前缺这些 DLL，未装 VC++ Redist
+# 的机器无法启动
+get_filename_component(_vs_root "${CMAKE_CXX_COMPILER}" DIRECTORY) # .../bin/Hostx64/x64
+foreach(_i RANGE 0 6)
+    get_filename_component(_vs_root "${_vs_root}" DIRECTORY)
+endforeach()
+# 此时 _vs_root = <VS 安装根>（x64 向上 7 级：Hostx64/bin/<ver>/MSVC/Tools/VC/<VS根>）
+file(GLOB _vc_crt_dirs "${_vs_root}/VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT")
+list(FILTER _vc_crt_dirs EXCLUDE REGEX "/onecore/")
+list(SORT _vc_crt_dirs)
+if(_vc_crt_dirs)
+    list(GET _vc_crt_dirs -1 _vc_crt_dir)
+    message(STATUS "VC CRT redist: ${_vc_crt_dir}")
+    file(GLOB _vc_crt_dlls "${_vc_crt_dir}/*.dll")
+    foreach(_dll IN LISTS _vc_crt_dlls)
+        add_custom_command(TARGET PopTools POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_dll}" "$<TARGET_FILE_DIR:PopTools>"
+        )
+    endforeach()
+else()
+    message(WARNING "未找到 VC Redist CRT（${_vs_root}/VC/Redist/MSVC/*/x64），"
+        "部署目录将缺 VC 运行库，请手动拷贝")
+endif()
 
 # 部署 PaddleOCR-json（离线 OCR 引擎，QProcess 子进程调用）
 # 整个 paddleocr 目录复制到可执行文件旁，包含 exe、模型、配置文件与
