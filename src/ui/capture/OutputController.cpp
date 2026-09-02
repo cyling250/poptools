@@ -6,6 +6,7 @@
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QMessageBox>
+#include <QDateTime>
 
 #include "core/annotation/AnnotationPainter.h"
 
@@ -32,9 +33,13 @@ QPixmap OutputController::render() const
 void OutputController::save(QWidget *parent)
 {
     const QPixmap result = render();
+    // 只提供 PNG（无损）格式：截图必须无损画质，不落 JPEG 等有损压缩格式
+    const QString defName = QStringLiteral("Snipaste_%1.png")
+                                .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss"));
     const QString path = QFileDialog::getSaveFileName(
-        parent, "保存截图", QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
-        "PNG 图片 (*.png);;JPEG 图片 (*.jpg)");
+        parent, "保存截图",
+        QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) + "/" + defName,
+        "PNG 图片（无损） (*.png)");
     if (path.isEmpty())
         return; // 用户取消对话框 → 留在编辑界面
     if (!result.save(path)) {
