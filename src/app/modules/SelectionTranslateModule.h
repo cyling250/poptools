@@ -4,7 +4,7 @@
 
 #include "../IFeatureModule.h"
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 class GlobalMouseHook;
@@ -53,4 +53,4 @@ private:
     TranslateCard *m_card = nullptr;                // 全局唯一划词卡片（复用）
 };
 
-} // namespace snipaste
+} // namespace poptools

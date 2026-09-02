@@ -7,7 +7,7 @@
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/ScreenCapturer.h"
 
-namespace snipaste {
+namespace poptools {
 
 class ToolBar;
 
@@ -55,4 +55,4 @@ inline void commitItem(ToolContext *ctx, const AnnotationItem &it)
     ctx->requestUpdate();
 }
 
-} // namespace snipaste
+} // namespace poptools

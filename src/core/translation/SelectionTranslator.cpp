@@ -4,7 +4,7 @@
 #include <windows.h>
 #endif
 
-namespace snipaste {
+namespace poptools {
 
 SelectionTranslator::SelectionTranslator(QObject *parent)
     : QObject(parent)
@@ -114,4 +114,4 @@ void SelectionTranslator::simulateCtrlC()
 #endif
 }
 
-} // namespace snipaste
+} // namespace poptools

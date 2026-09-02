@@ -13,7 +13,7 @@ QT_BEGIN_NAMESPACE
 class QWidget;
 QT_END_NAMESPACE
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // OCR 功能对宿主（CaptureWindow）的最小依赖：文字栏面板与扫描动效回调。
@@ -66,4 +66,4 @@ private:
     QWidget *m_parent = nullptr; // 当前操作父窗口（供 QMessageBox 使用，避免被置顶窗口遮挡）
 };
 
-} // namespace snipaste
+} // namespace poptools

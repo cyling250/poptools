@@ -9,7 +9,7 @@
 
 #include "AnnotationTypes.h"
 
-namespace snipaste {
+namespace poptools {
 
 // 单条标注项
 //
@@ -30,4 +30,4 @@ struct AnnotationItem
     QImage mosaicImage;       // Mosaic 的马赛克图像（局部坐标区域）
 };
 
-} // namespace snipaste
+} // namespace poptools

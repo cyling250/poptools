@@ -10,7 +10,7 @@
 
 #include "core/annotation/AnnotationPainter.h"
 
-namespace snipaste {
+namespace poptools {
 
 // 输出为物理分辨率：逻辑选区 → 物理矩形裁剪；标注为选区局部逻辑坐标，
 // 通过 scale(k,k) 等比放大（k = 物理宽 / 逻辑宽）。
@@ -34,7 +34,7 @@ void OutputController::save(QWidget *parent)
 {
     const QPixmap result = render();
     // 只提供 PNG（无损）格式：截图必须无损画质，不落 JPEG 等有损压缩格式
-    const QString defName = QStringLiteral("Snipaste_%1.png")
+    const QString defName = QStringLiteral("PopTools_%1.png")
                                 .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss"));
     const QString path = QFileDialog::getSaveFileName(
         parent, "保存截图",
@@ -55,4 +55,4 @@ void OutputController::copy()
     m_ctx->exitRequested(); // 复制后退出截图界面（显式操作才退出，防误触）
 }
 
-} // namespace snipaste
+} // namespace poptools

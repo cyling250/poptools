@@ -24,7 +24,7 @@
 
 #include "core/translation/Translator.h"
 
-namespace snipaste
+namespace poptools
 {
 
     CaptureWindow::CaptureWindow(PaddleOcrService *ocrService, QWidget *parent)
@@ -903,4 +903,4 @@ namespace snipaste
         p.drawRect(cardRect);
     }
 
-} // namespace snipaste
+} // namespace poptools

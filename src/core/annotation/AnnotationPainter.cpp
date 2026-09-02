@@ -6,7 +6,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <QPalette>
 
-namespace snipaste {
+namespace poptools {
 
 qreal AnnotationPainter::pointToSegmentDist(const QPointF &p, const QPointF &a, const QPointF &b)
 {
@@ -357,4 +357,4 @@ void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
     }
 }
 
-} // namespace snipaste
+} // namespace poptools

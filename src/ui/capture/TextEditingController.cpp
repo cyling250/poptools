@@ -10,7 +10,7 @@
 
 #include "ToolBar.h"
 
-namespace snipaste
+namespace poptools
 {
 
     void TextEditingController::init(QWidget *parent)
@@ -408,4 +408,4 @@ namespace snipaste
                          QSizeF(qMax(box.width(), 8.0), qMax(box.height(), 8.0)));
     }
 
-} // namespace snipaste
+} // namespace poptools

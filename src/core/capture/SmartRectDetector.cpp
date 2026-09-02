@@ -31,7 +31,7 @@
 #include <cmath>
 #endif
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 工作线程：持有 COM STA 与 IUIAutomation 会话，串行处理最新查询
@@ -566,7 +566,7 @@ QRect SmartRectDetector::Worker::detect(const Query &q)
         }
 
         ULONGLONG budget = 800;
-        if (const int env = qEnvironmentVariableIntValue("SNIPASTE_SMART_BUDGET"); env > 0)
+        if (const int env = qEnvironmentVariableIntValue("POPTOOLS_SMART_BUDGET"); env > 0)
             budget = ULONGLONG(env);
 
         // 暖启动：悬停在空间上连续，鼠标仍在上次命中的元素内时从该元素继续下行，
@@ -673,6 +673,6 @@ void SmartRectDetector::submit(const QPoint &physPos, qreal dpr, quint64 gen, vo
     m_worker->submit(physPos, dpr, gen, excludeHwnd); // Worker::submit 线程安全
 }
 
-} // namespace snipaste
+} // namespace poptools
 
 #include "SmartRectDetector.moc"

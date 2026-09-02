@@ -2,7 +2,7 @@
 
 #include "ToolBase.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 橡皮擦：按下命中删除最近标注（eraseAt 内含撤销快照），无草稿
@@ -26,4 +26,4 @@ public:
     Qt::CursorShape cursor() const override { return Qt::PointingHandCursor; }
 };
 
-} // namespace snipaste
+} // namespace poptools

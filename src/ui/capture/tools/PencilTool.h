@@ -2,7 +2,7 @@
 
 #include "BrushTool.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 铅笔（自由画笔）：单色细笔迹
@@ -15,4 +15,4 @@ public:
     AnnotationType annotationType() const override { return AnnotationType::Freehand; }
 };
 
-} // namespace snipaste
+} // namespace poptools

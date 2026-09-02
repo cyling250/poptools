@@ -12,7 +12,7 @@
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 
-using namespace snipaste;
+using namespace poptools;
 
 // ============================================================
 // 域逻辑单元测试（无 GUI）：

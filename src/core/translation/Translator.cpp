@@ -7,7 +7,7 @@
 #include <QNetworkRequest>
 #include <QUrl>
 
-namespace snipaste {
+namespace poptools {
 
 namespace {
 
@@ -251,4 +251,4 @@ void Translator::onReplyFinished()
         emit translateFinished(true, result, QString());
 }
 
-} // namespace snipaste
+} // namespace poptools

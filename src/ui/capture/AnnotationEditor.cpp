@@ -2,7 +2,7 @@
 
 #include "SelectionController.h"
 
-namespace snipaste {
+namespace poptools {
 
 // 标注控制点方块（局部坐标）：线段类端点（P0/P1）经 handlePos 定位
 QRectF AnnotationEditor::handleRect(const AnnotationItem &it, Handle h) const
@@ -191,4 +191,4 @@ Qt::CursorShape AnnotationEditor::cursorAt(const QPointF &local) const
                : Qt::ArrowCursor;
 }
 
-} // namespace snipaste
+} // namespace poptools

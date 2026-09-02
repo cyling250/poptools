@@ -2,7 +2,7 @@
 
 #include "ToolBase.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 直线 / 箭头工具：按下定起点，拖动定终点，释放提交
@@ -53,4 +53,4 @@ private:
     QPointF m_end;
 };
 
-} // namespace snipaste
+} // namespace poptools

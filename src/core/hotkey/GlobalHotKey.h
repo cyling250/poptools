@@ -4,7 +4,7 @@
 #include <QAbstractNativeEventFilter>
 #include <QHash>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // Windows 全局热键封装
@@ -47,4 +47,4 @@ private:
     QHash<int, Entry> m_keys;
 };
 
-} // namespace snipaste
+} // namespace poptools

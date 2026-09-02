@@ -3,11 +3,11 @@
 #include <QCoreApplication>
 #include <QDir>
 
-namespace snipaste {
+namespace poptools {
 
 // 配置文件存放在可执行文件旁（构建输出/安装目录），随程序打包分发、便于查看
 Settings::Settings()
-    : m_s(QCoreApplication::applicationDirPath() + "/Snipaste.ini",
+    : m_s(QCoreApplication::applicationDirPath() + "/PopTools.ini",
           QSettings::IniFormat)
 {
 }
@@ -134,8 +134,8 @@ void Settings::setTranslateTerms(const QList<TermPair> &terms)
 
 QString Settings::pinSaveDir() const
 {
-    // 默认贴图文件夹：软件目录（exe 旁）下的 tempSnipaste
-    const QString def = QCoreApplication::applicationDirPath() + "/tempSnipaste";
+    // 默认贴图文件夹：软件目录（exe 旁）下的 tempPopTools
+    const QString def = QCoreApplication::applicationDirPath() + "/tempPopTools";
     return m_s.value("pin/saveDir", def).toString();
 }
 
@@ -147,7 +147,7 @@ void Settings::setPinSaveDir(const QString &dir)
 
 bool Settings::autoStartEnabled() const
 {
-    return autoStartRegistry().contains("Snipaste");
+    return autoStartRegistry().contains("PopTools");
 }
 
 void Settings::setAutoStartEnabled(bool on)
@@ -157,9 +157,9 @@ void Settings::setAutoStartEnabled(bool on)
         // Run 值要求带引号的可执行文件路径
         const QString exe =
             "\"" + QDir::toNativeSeparators(QCoreApplication::applicationFilePath()) + "\"";
-        reg.setValue("Snipaste", exe);
+        reg.setValue("PopTools", exe);
     } else {
-        reg.remove("Snipaste");
+        reg.remove("PopTools");
     }
     reg.sync();
 }
@@ -182,4 +182,4 @@ void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
     m_s.sync();
 }
 
-} // namespace snipaste
+} // namespace poptools

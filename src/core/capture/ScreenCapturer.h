@@ -6,7 +6,7 @@
 
 class QScreen;
 
-namespace snipaste {
+namespace poptools {
 
 // 一次截屏的结果：物理分辨率画面 + 逻辑/物理虚拟桌面几何
 struct CaptureResult
@@ -42,4 +42,4 @@ public:
     static QRect toPhysicalRect(const QRect &logicalGlobal);
 };
 
-} // namespace snipaste
+} // namespace poptools

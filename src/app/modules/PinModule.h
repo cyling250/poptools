@@ -2,7 +2,7 @@
 
 #include "../IFeatureModule.h"
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 
@@ -27,4 +27,4 @@ private:
     AppServices *m_services = nullptr;
 };
 
-} // namespace snipaste
+} // namespace poptools

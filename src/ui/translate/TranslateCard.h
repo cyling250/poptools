@@ -7,7 +7,7 @@ class QTextEdit;
 class QPushButton;
 class QComboBox;
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 划词翻译结果卡片
@@ -79,4 +79,4 @@ private:
     QString m_originalText;
 };
 
-} // namespace snipaste
+} // namespace poptools

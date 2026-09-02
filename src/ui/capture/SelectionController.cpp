@@ -2,7 +2,7 @@
 
 #include <QPainterPath>
 
-namespace snipaste {
+namespace poptools {
 
 // ---- 几何（纯函数） ----
 
@@ -239,4 +239,4 @@ void SelectionController::paintSelectionFrame(QPainter &p, const QRect &sel) con
                QString("%1 × %2").arg(phys.width()).arg(phys.height()));
 }
 
-} // namespace snipaste
+} // namespace poptools

@@ -2,7 +2,7 @@
 
 #include "ToolBase.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 文字工具：按下启动文字内嵌编辑（新建），无草稿交互
@@ -24,4 +24,4 @@ public:
     void paintDraft(QPainter &) const override {}
 };
 
-} // namespace snipaste
+} // namespace poptools

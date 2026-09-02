@@ -1,7 +1,7 @@
 #include "AnnotationCanvas.h"
 #include "AnnotationPainter.h"
 
-namespace snipaste {
+namespace poptools {
 
 void AnnotationCanvas::addItem(const AnnotationItem &item)
 {
@@ -86,4 +86,4 @@ void AnnotationCanvas::clear()
     m_redoStack.clear();
 }
 
-} // namespace snipaste
+} // namespace poptools

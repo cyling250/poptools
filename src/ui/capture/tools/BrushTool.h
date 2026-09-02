@@ -2,7 +2,7 @@
 
 #include "ToolBase.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 笔刷工具基类：按笔迹（折线）累积顶点，拖动实时描画，释放提交
@@ -64,4 +64,4 @@ protected:
     QPolygonF m_points;
 };
 
-} // namespace snipaste
+} // namespace poptools

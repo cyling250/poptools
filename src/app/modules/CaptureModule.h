@@ -2,7 +2,7 @@
 
 #include "../IFeatureModule.h"
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 class CaptureWindow;
@@ -27,4 +27,4 @@ private:
     CaptureWindow *m_window = nullptr; // 顶层窗口，随 QApplication 退出清理
 };
 
-} // namespace snipaste
+} // namespace poptools

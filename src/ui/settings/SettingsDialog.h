@@ -10,7 +10,7 @@ class QPlainTextEdit;
 class QLabel;
 class QToolButton;
 
-namespace snipaste {
+namespace poptools {
 
 class ApiTester;
 
@@ -42,4 +42,4 @@ private:
     QPushButton *m_autoStart; // 开机启动开关（加入/取消）
 };
 
-} // namespace snipaste
+} // namespace poptools

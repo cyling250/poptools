@@ -6,7 +6,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
-namespace snipaste {
+namespace poptools {
 
 // 去掉用户填写的 Base URL 首尾空白与尾部斜杠（常有人粘贴 https://host/v1/ 这类
 // 带尾斜杠的地址），便于直接拼接端点路径
@@ -99,4 +99,4 @@ private:
     bool m_tryDisableThinking = true;
 };
 
-} // namespace snipaste
+} // namespace poptools

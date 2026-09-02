@@ -1,6 +1,6 @@
 #include "ToolDrawingController.h"
 
-namespace snipaste {
+namespace poptools {
 
 void ToolDrawingController::setTool(Tool t)
 {
@@ -141,4 +141,4 @@ AnnotationItem ToolDrawingController::buildMosaicItem(const QPolygonF &points, q
     return draft;
 }
 
-} // namespace snipaste
+} // namespace poptools

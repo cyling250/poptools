@@ -4,7 +4,7 @@
 #include <windows.h>
 #endif
 
-namespace snipaste {
+namespace poptools {
 
 #ifdef Q_OS_WIN
 namespace {
@@ -68,4 +68,4 @@ void GlobalMouseHook::stop()
 #endif
 }
 
-} // namespace snipaste
+} // namespace poptools

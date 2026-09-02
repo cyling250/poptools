@@ -18,7 +18,7 @@
 #include <windows.h> // 鼠标钩子回调中的 WindowFromPoint / GetWindowThreadProcessId
 #endif
 
-namespace snipaste {
+namespace poptools {
 
 SelectionTranslateModule::SelectionTranslateModule(QObject *parent)
     : QObject(parent)
@@ -169,4 +169,4 @@ void SelectionTranslateModule::onTranslateFinished(bool ok, const QString &resul
         m_card->showError(error);
 }
 
-} // namespace snipaste
+} // namespace poptools

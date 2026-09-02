@@ -11,7 +11,7 @@
 
 #include <algorithm>
 
-namespace snipaste {
+namespace poptools {
 
 // ---- OcrBox 兼容：PaddleOcrBox 转 OcrBox ----
 // 外部使用 OcrBox（定义在 OcrService.h），这里用 PaddleOcrBox 内部处理，
@@ -137,7 +137,7 @@ void PaddleOcrService::sendImage(const QImage &image)
     cleanupTemp();
     const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     QDir().mkpath(tempDir);
-    m_tempFile = tempDir + QStringLiteral("/snipaste_ocr_")
+    m_tempFile = tempDir + QStringLiteral("/poptools_ocr_")
                  + QUuid::createUuid().toString(QUuid::WithoutBraces)
                  + QStringLiteral(".png");
     image.save(m_tempFile, "PNG");
@@ -264,4 +264,4 @@ void PaddleOcrService::cleanupTemp()
     }
 }
 
-} // namespace snipaste
+} // namespace poptools

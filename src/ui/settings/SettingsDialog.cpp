@@ -17,12 +17,12 @@
 #include <QRegularExpression>
 #include <QToolButton>
 
-namespace snipaste {
+namespace poptools {
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle("Snipaste 设置");
+    setWindowTitle("PopTools 设置");
     setMinimumWidth(460);
 
     // 对话框整体样式
@@ -280,4 +280,4 @@ void SettingsDialog::updateAutoStartButton()
                              : "加入到开机启动");
 }
 
-} // namespace snipaste
+} // namespace poptools

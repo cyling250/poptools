@@ -10,7 +10,7 @@
 class QComboBox;
 class QFrame;
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 标注工具栏（编辑态，贴画布下方靠右显示，两行紧凑布局）
@@ -110,4 +110,4 @@ private:
     static ToolBar *s_instance;            // 单例实例
 };
 
-} // namespace snipaste
+} // namespace poptools

@@ -6,7 +6,7 @@
 
 #include "AnnotationItem.h"
 
-namespace snipaste {
+namespace poptools {
 
 // 标注/选区的编辑控制点
 //   TL/T/TR/R/BR/B/BL/L：矩形类 8 个角与边中点
@@ -67,4 +67,4 @@ private:
     static qreal pointToSegmentDist(const QPointF &p, const QPointF &a, const QPointF &b);
 };
 
-} // namespace snipaste
+} // namespace poptools

@@ -11,7 +11,7 @@
 class QTextEdit;
 class QTextCharFormat;
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 文字内嵌编辑控制器
@@ -56,4 +56,4 @@ private:
     qreal m_defaultFontSize = 14.0; // 无文本选中时的默认字号（接下来输入）
 };
 
-} // namespace snipaste
+} // namespace poptools

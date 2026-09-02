@@ -8,7 +8,7 @@
 #include "tools/ToolFactory.h"
 #include "CaptureContext.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 工具绘制控制器：按当前工具创建工具实例（策略模式 + 工厂），
@@ -41,4 +41,4 @@ private:
     bool m_drawing = false;           // 工具按下至释放期间
 };
 
-} // namespace snipaste
+} // namespace poptools

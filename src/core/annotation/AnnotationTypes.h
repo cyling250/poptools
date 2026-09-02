@@ -1,6 +1,6 @@
 #pragma once
 
-namespace snipaste {
+namespace poptools {
 
 // 可绘制的标注类型
 enum class AnnotationType {
@@ -29,4 +29,4 @@ enum class Tool {
     Eraser,      // 橡皮擦
 };
 
-} // namespace snipaste
+} // namespace poptools

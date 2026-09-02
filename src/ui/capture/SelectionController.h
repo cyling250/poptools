@@ -8,7 +8,7 @@
 #include "core/annotation/AnnotationPainter.h"
 #include "CaptureContext.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 选区控制器：框选 / 整体移动 / 控制点精调 + 选区几何与绘制
@@ -63,4 +63,4 @@ private:
     QPoint m_moveOffset;
 };
 
-} // namespace snipaste
+} // namespace poptools

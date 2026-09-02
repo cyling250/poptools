@@ -5,7 +5,7 @@
 #include <QRect>
 #include <QThread>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 智能框选矩形探测器：查询鼠标所在点的「元素级」矩形（窗口内
@@ -57,4 +57,4 @@ private:
     QThread m_thread;
 };
 
-} // namespace snipaste
+} // namespace poptools

@@ -6,7 +6,7 @@
 #include <windows.h>
 #endif
 
-namespace snipaste {
+namespace poptools {
 
 GlobalHotKey::GlobalHotKey(QObject *parent)
     : QObject(parent)
@@ -73,4 +73,4 @@ bool GlobalHotKey::nativeEventFilter(const QByteArray &eventType, void *message,
     return false;
 }
 
-} // namespace snipaste
+} // namespace poptools

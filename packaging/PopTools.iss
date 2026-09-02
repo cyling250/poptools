@@ -1,16 +1,16 @@
-; Snipaste 安装程序脚本（Inno Setup 6）
+; PopTools 安装程序脚本（Inno Setup 6）
 ; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + PaddleOCR 引擎）
-; 编译：ISCC.exe packaging\Snipaste.iss
+; 编译：ISCC.exe packaging\PopTools.iss
 
-#define MyAppName "Snipaste"
+#define MyAppName "PopTools"
 #define MyAppVersion "0.2.0"
-#define MyAppPublisher "Snipaste"
-#define MyAppExeName "Snipaste.exe"
-#define MyAppAssocName "Snipaste 截图"
+#define MyAppPublisher "PopTools"
+#define MyAppExeName "PopTools.exe"
+#define MyAppAssocName "PopTools 截图"
 #define SourceDir "..\build\Release"
 
 [Setup]
-AppId={{B4389B1C-0F4A-4F8B-8554-EB8229E27039}
+AppId={{01FA8E05-78BD-4319-9057-8EFB7C998BD7}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -19,12 +19,12 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=Snipaste-Setup-{#MyAppVersion}
+OutputBaseFilename=PopTools-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=Snipaste.ico
-UninstallDisplayIcon={app}\Snipaste.exe
+SetupIconFile=PopTools.ico
+UninstallDisplayIcon={app}\PopTools.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName}
@@ -38,11 +38,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "Snipaste.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "PopTools.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Snipaste.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Snipaste.ico"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\PopTools.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\PopTools.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

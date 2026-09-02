@@ -12,7 +12,7 @@
 #include "../AppServices.h"
 #include "ui/pin/PinWindow.h"
 
-namespace snipaste {
+namespace poptools {
 
 void PinModule::init(AppServices &services)
 {
@@ -53,4 +53,4 @@ void PinModule::pinFromClipboard()
     pin->pin(img, pos);
 }
 
-} // namespace snipaste
+} // namespace poptools

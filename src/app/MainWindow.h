@@ -7,7 +7,7 @@
 #include "FeatureRegistry.h"
 #include "core/hotkey/GlobalHotKey.h"
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 class PaddleOcrService;
@@ -40,4 +40,4 @@ private:
     FeatureRegistry m_registry;         // 功能模块注册表
 };
 
-} // namespace snipaste
+} // namespace poptools

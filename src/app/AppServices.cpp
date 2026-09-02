@@ -5,7 +5,7 @@
 
 #include "core/hotkey/GlobalHotKey.h"
 
-namespace snipaste {
+namespace poptools {
 
 AppServices::AppServices(QObject *parent)
     : QObject(parent)
@@ -45,4 +45,4 @@ void AppServices::onHotKeyActivated(int id)
         cb();
 }
 
-} // namespace snipaste
+} // namespace poptools

@@ -8,7 +8,7 @@
 #include <QProcess>
 #include <QByteArray>
 
-namespace snipaste {
+namespace poptools {
 
 // OCR 文本框行（复用旧接口类型，保持与 OcrController 的兼容）
 struct OcrBox
@@ -70,4 +70,4 @@ private:
     QString m_tempFile;       // 当前临时图片路径
 };
 
-} // namespace snipaste
+} // namespace poptools

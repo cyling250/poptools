@@ -10,18 +10,18 @@
 #include "modules/SelectionTranslateModule.h"
 #include "ui/settings/SettingsDialog.h"
 
-namespace snipaste {
+namespace poptools {
 
 MainWindow::MainWindow(QObject *parent)
     : QObject(parent)
 {
     // 托盘（使用资源图标：Material Design 相机图标，Apache 2.0 许可）
     m_tray = new QSystemTrayIcon(QIcon(":/app_icon.svg"), this);
-    m_tray->setToolTip("Snipaste\n按 F1 截图");
+    m_tray->setToolTip("PopTools\n按 F1 截图");
 
     m_menu = new QMenu();
     m_menu->setObjectName("TrayMenu");
-    m_menu->setTitle("Snipaste");
+    m_menu->setTitle("PopTools");
 
     // ---- 共享服务（组合根持有所有权，注入各功能模块） ----
     m_ocr = new PaddleOcrService(this);
@@ -41,8 +41,8 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addAction("设置...", this, &MainWindow::onShowSettings);
     m_menu->addSeparator();
     m_menu->addAction("关于", [] {
-        QMessageBox::about(nullptr, "Snipaste",
-            "Snipaste v0.2.0\n\n"
+        QMessageBox::about(nullptr, "PopTools",
+            "PopTools v0.2.0\n\n"
             "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
             "快捷键：F1 截图\n"
             "OCR 引擎：PaddleOCR（本地离线）\n"
@@ -63,4 +63,4 @@ void MainWindow::onShowSettings()
     // 无需额外操作；若有缓存配置的组件，在此处刷新。
 }
 
-} // namespace snipaste
+} // namespace poptools

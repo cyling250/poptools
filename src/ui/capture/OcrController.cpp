@@ -7,7 +7,7 @@
 
 #include "ToolBar.h"
 
-namespace snipaste {
+namespace poptools {
 
 OcrController::OcrController(CaptureContext *ctx, PaddleOcrService *ocr, OcrHostCallbacks host)
     : QObject(nullptr) // 无 Qt 父子所有权：由 CaptureWindow 的 unique_ptr 独占管理
@@ -201,4 +201,4 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
         m_host.translateRequested(text);
 }
 
-} // namespace snipaste
+} // namespace poptools

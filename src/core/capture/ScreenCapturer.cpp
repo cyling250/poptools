@@ -4,7 +4,7 @@
 #include <QScreen>
 #include <QPainter>
 
-namespace snipaste {
+namespace poptools {
 
 QRect ScreenCapturer::screenPhysicalRect(const QScreen *s)
 {
@@ -70,4 +70,4 @@ QRect ScreenCapturer::toPhysicalRect(const QRect &logicalGlobal)
     return QRect(tl, br - QPoint(1, 1));
 }
 
-} // namespace snipaste
+} // namespace poptools

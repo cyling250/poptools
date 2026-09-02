@@ -4,7 +4,7 @@
 
 #include "CaptureContext.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 输出控制器：按物理分辨率裁剪选区并合成标注与草稿
@@ -23,4 +23,4 @@ private:
     CaptureContext *m_ctx;
 };
 
-} // namespace snipaste
+} // namespace poptools

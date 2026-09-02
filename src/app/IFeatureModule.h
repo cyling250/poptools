@@ -2,7 +2,7 @@
 
 #include <QString>
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 
@@ -32,4 +32,4 @@ public:
     virtual void shutdown() { }
 };
 
-} // namespace snipaste
+} // namespace poptools

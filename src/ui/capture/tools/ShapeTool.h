@@ -2,7 +2,7 @@
 
 #include "ToolBase.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 矩形 / 椭圆工具：按下定起点，拖动定对角，释放提交
@@ -56,4 +56,4 @@ private:
     QRectF m_rect;
 };
 
-} // namespace snipaste
+} // namespace poptools

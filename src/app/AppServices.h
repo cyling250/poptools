@@ -9,7 +9,7 @@
 class QAction;
 class QMenu;
 
-namespace snipaste {
+namespace poptools {
 
 class GlobalHotKey;
 class PaddleOcrService;
@@ -61,4 +61,4 @@ private:
     bool m_hotkeyWired = false;
 };
 
-} // namespace snipaste
+} // namespace poptools

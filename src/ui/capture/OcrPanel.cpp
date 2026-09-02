@@ -14,7 +14,7 @@
 #include <QClipboard>
 #include <QTimer>
 
-namespace snipaste {
+namespace poptools {
 
 OcrPanel::OcrPanel(QWidget *parent)
     : QWidget(parent)
@@ -182,4 +182,4 @@ void OcrPanel::showEvent(QShowEvent *event)
     QWidget::showEvent(event);
 }
 
-} // namespace snipaste
+} // namespace poptools

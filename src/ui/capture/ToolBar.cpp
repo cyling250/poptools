@@ -13,7 +13,7 @@
 #include <QLabel>
 #include <QDoubleValidator>
 
-namespace snipaste
+namespace poptools
 {
 
     // ============================================================
@@ -167,8 +167,8 @@ namespace snipaste
         m_dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
 
         setAttribute(Qt::WA_StyledBackground);
-        // 注意：不能用类型选择器 "ToolBar { ... }" —— 类位于 snipaste 命名空间，
-        // QMetaObject::className() 返回 "snipaste::ToolBar"，样式表类型选择器失配 → 底衬丢失。
+        // 注意：不能用类型选择器 "ToolBar { ... }" —— 类位于 poptools 命名空间，
+        // QMetaObject::className() 返回 "poptools::ToolBar"，样式表类型选择器失配 → 底衬丢失。
         // 改用 objectName ID 选择器（#annotationToolBar）与命名空间解耦。
         setObjectName("annotationToolBar");
         // 面板：浅色=灰白底+黑边；深色=深灰底+浅灰边；选中：蓝底白图标；悬停：跟随主题
@@ -568,4 +568,4 @@ void ToolBar::onFontSizeCommitted()
         syncFontSizeDisplay();
     }
 
-} // namespace snipaste
+} // namespace poptools

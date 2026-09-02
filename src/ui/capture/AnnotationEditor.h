@@ -8,7 +8,7 @@
 #include "core/annotation/AnnotationPainter.h"
 #include "CaptureContext.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 标注项编辑器：选择模式下标注的选中 / 拖动 / 控制点缩放 / 删除
@@ -54,4 +54,4 @@ private:
     AnnotationItem m_itemStartGeom;               // 按下时的标注几何快照
 };
 
-} // namespace snipaste
+} // namespace poptools

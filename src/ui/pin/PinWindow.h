@@ -7,7 +7,7 @@
 #include <QSize>
 #include <QString>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 贴图窗口（F3）
@@ -62,4 +62,4 @@ private:
     static constexpr int kMargin = kShadowBlur * 2 + kShadowOffsetY + 2;
 };
 
-} // namespace snipaste
+} // namespace poptools

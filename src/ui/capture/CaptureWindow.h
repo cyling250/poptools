@@ -14,7 +14,7 @@
 
 class QScreen;  // Qt 全局类
 
-namespace snipaste {
+namespace poptools {
 
 class ToolBar;
 class CaptureContext;
@@ -142,4 +142,4 @@ private:
     void onTranslateRequested();  // 【译】：OCR + 翻译，自动打开面板显示原文与翻译结果
 };
 
-} // namespace snipaste
+} // namespace poptools

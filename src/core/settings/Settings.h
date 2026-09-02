@@ -6,7 +6,7 @@
 #include <QPair>
 #include <QList>
 
-namespace snipaste {
+namespace poptools {
 
 // 应用设置持久化（QSettings 存储于注册表/配置文件）
 class Settings
@@ -64,4 +64,4 @@ private:
     QSettings m_s;
 };
 
-} // namespace snipaste
+} // namespace poptools

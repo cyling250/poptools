@@ -9,7 +9,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 
-namespace snipaste {
+namespace poptools {
 
 ApiTester::ApiTester(QObject *parent)
     : QObject(parent)
@@ -103,4 +103,4 @@ void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QStrin
     });
 }
 
-} // namespace snipaste
+} // namespace poptools

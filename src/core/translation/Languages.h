@@ -3,7 +3,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 语言下拉框的显示名与语言代码映射（TranslateCard / OcrPanel 共用）
@@ -52,4 +52,4 @@ inline QString langCodeToDisplay(const QString &code)
     return code;
 }
 
-} // namespace snipaste
+} // namespace poptools

@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QPoint>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // Windows 全局低级鼠标钩子（WH_MOUSE_LL）
@@ -44,4 +44,4 @@ private:
     void *m_hook = nullptr; // HHOOK（Win32 句柄存 void*，避免头文件引入 windows.h）
 };
 
-} // namespace snipaste
+} // namespace poptools

@@ -8,7 +8,7 @@
 
 class QNetworkReply;
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // API 连接测试（设置对话框「测试连接」按钮用）
@@ -41,4 +41,4 @@ private:
     bool m_busy = false;
 };
 
-} // namespace snipaste
+} // namespace poptools

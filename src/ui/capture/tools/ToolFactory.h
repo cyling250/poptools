@@ -11,7 +11,7 @@
 #include "ShapeTool.h"
 #include "TextTool.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 工具工厂：按 Tool 枚举创建对应的工具实例（策略模式）
@@ -38,4 +38,4 @@ public:
     }
 };
 
-} // namespace snipaste
+} // namespace poptools

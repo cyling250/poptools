@@ -19,7 +19,7 @@
 #include <QTimer>
 #include <QtMath>
 
-namespace snipaste {
+namespace poptools {
 
 namespace {
 
@@ -416,4 +416,4 @@ void TranslateCard::hideEvent(QHideEvent *event)
     QWidget::hideEvent(event);
 }
 
-} // namespace snipaste
+} // namespace poptools

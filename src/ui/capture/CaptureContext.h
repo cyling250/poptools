@@ -10,7 +10,7 @@
 
 class QPainter;
 
-namespace snipaste {
+namespace poptools {
 
 class ToolBar;
 
@@ -53,4 +53,4 @@ struct CaptureContext
     int selectedIndex() const { return selectedItem ? *selectedItem : -1; }
 };
 
-} // namespace snipaste
+} // namespace poptools

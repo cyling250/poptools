@@ -5,7 +5,7 @@
 
 #include "IFeatureModule.h"
 
-namespace snipaste {
+namespace poptools {
 
 class AppServices;
 
@@ -49,4 +49,4 @@ private:
     std::vector<std::unique_ptr<IFeatureModule>> m_modules;
 };
 
-} // namespace snipaste
+} // namespace poptools

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Snipaste VERSION 0.2.0 LANGUAGES CXX)
+project(PopTools VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,13 +29,13 @@ add_subdirectory(src/core)
 add_subdirectory(src/ui)
 
 # ---- 单元测试（可选，默认开启；ctest 运行） ----
-option(SNIPASTE_BUILD_TESTS "Build unit tests" ON)
-if(SNIPASTE_BUILD_TESTS)
+option(POPTOOLS_BUILD_TESTS "Build unit tests" ON)
+if(POPTOOLS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-qt_add_executable(Snipaste WIN32
+qt_add_executable(PopTools WIN32
     src/main.cpp
     src/app/MainWindow.cpp
     src/app/MainWindow.h
@@ -52,9 +52,9 @@ qt_add_executable(Snipaste WIN32
     src/resources/resources.qrc
 )
 
-target_link_libraries(Snipaste PRIVATE
-    snipaste_core
-    snipaste_ui
+target_link_libraries(PopTools PRIVATE
+    poptools_core
+    poptools_ui
 )
 
 # Qt 运行库：构建（make）完成后由本地 Qt 套件自带的 windeployqt 自动部署到
@@ -64,10 +64,10 @@ if(NOT EXISTS "${QT_BIN_DIR}/windeployqt.exe")
     message(FATAL_ERROR "windeployqt.exe not found at ${QT_BIN_DIR}. "
         "请先运行 script/install_qt.py 下载 Qt 到 tools/qt（或设置 QT_ROOT 指向 Qt 套件目录）")
 endif()
-add_custom_command(TARGET Snipaste POST_BUILD
+add_custom_command(TARGET PopTools POST_BUILD
     # -no-translations：本机 Qt 套件不含 translations/ 目录（未下载），且应用不加载
     # QTranslator/.qm，跳过翻译部署以消除 windeployqt 的 "(developer build?)" 警告
-    COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release -no-translations "$<TARGET_FILE:Snipaste>"
+    COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release -no-translations "$<TARGET_FILE:PopTools>"
     COMMENT "Deploying Qt runtime via windeployqt"
 )
 
@@ -77,13 +77,13 @@ add_custom_command(TARGET Snipaste POST_BUILD
 # Windows 加载器按 exe 所在目录 → CWD 找 DLL）
 set(PADDLEOCR_DIR "${CMAKE_SOURCE_DIR}/tools/paddleocr")
 if(EXISTS "${PADDLEOCR_DIR}/PaddleOCR-json.exe")
-    add_custom_command(TARGET Snipaste POST_BUILD
+    add_custom_command(TARGET PopTools POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${PADDLEOCR_DIR}"
-            "$<TARGET_FILE_DIR:Snipaste>/paddleocr"
+            "$<TARGET_FILE_DIR:PopTools>/paddleocr"
         COMMENT "Deploying PaddleOCR-json engine"
     )
 endif()
 
 # 安装规则（可选）
-install(TARGETS Snipaste RUNTIME DESTINATION .)
+install(TARGETS PopTools RUNTIME DESTINATION .)

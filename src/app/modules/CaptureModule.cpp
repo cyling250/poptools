@@ -7,7 +7,7 @@
 #include "core/settings/Settings.h"
 #include "ui/capture/CaptureWindow.h"
 
-namespace snipaste {
+namespace poptools {
 
 void CaptureModule::init(AppServices &services)
 {
@@ -40,4 +40,4 @@ void CaptureModule::init(AppServices &services)
     });
 }
 
-} // namespace snipaste
+} // namespace poptools

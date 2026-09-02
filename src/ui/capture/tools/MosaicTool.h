@@ -2,7 +2,7 @@
 
 #include "BrushTool.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 马赛克工具：沿笔刷足迹像素化屏幕源图像
@@ -48,4 +48,4 @@ public:
     }
 };
 
-} // namespace snipaste
+} // namespace poptools

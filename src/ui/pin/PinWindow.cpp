@@ -20,7 +20,7 @@
 // 与操作系统原生窗口投影同一视觉语言，呈现"浮于屏幕之上"。
 // ============================================================
 
-namespace snipaste {
+namespace poptools {
 
 namespace {
 
@@ -209,4 +209,4 @@ void PinWindow::contextMenuEvent(QContextMenuEvent *event)
         close(); // WA_DeleteOnClose → 关闭即销毁本实例，不影响其它贴图
 }
 
-} // namespace snipaste
+} // namespace poptools

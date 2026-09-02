@@ -4,7 +4,7 @@
 #include <QString>
 #include <QTimer>
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 划词翻译：获取 Windows 当前选中文本
@@ -47,4 +47,4 @@ private:
     int m_pollCount = 0;     // 轮询计数（重发/超时控制）
 };
 
-} // namespace snipaste
+} // namespace poptools

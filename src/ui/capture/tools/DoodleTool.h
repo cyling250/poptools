@@ -2,7 +2,7 @@
 
 #include "BrushTool.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 涂鸦笔：半透明"划重点"式笔迹笔刷
@@ -26,4 +26,4 @@ public:
     }
 };
 
-} // namespace snipaste
+} // namespace poptools

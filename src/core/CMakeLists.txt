@@ -1,5 +1,5 @@
 # ============================================================
-# snipaste_core：核心域静态库（与 UI 解耦）
+# poptools_core：核心域静态库（与 UI 解耦）
 # 包含：标注模型/渲染、屏幕捕获、OCR、翻译、设置、全局热键
 # ============================================================
 set(CMAKE_AUTOMOC ON)
@@ -8,7 +8,7 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg)
 
-add_library(snipaste_core STATIC
+add_library(poptools_core STATIC
     annotation/AnnotationCanvas.cpp
     annotation/AnnotationCanvas.h
     annotation/AnnotationItem.h
@@ -36,7 +36,7 @@ add_library(snipaste_core STATIC
     translation/ApiTester.h
 )
 
-target_link_libraries(snipaste_core PUBLIC
+target_link_libraries(poptools_core PUBLIC
     Qt6::Core
     Qt6::Gui
     Qt6::Network
@@ -44,8 +44,8 @@ target_link_libraries(snipaste_core PUBLIC
 
 # Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）
 if(WIN32)
-    target_link_libraries(snipaste_core PRIVATE user32 dwmapi)
+    target_link_libraries(poptools_core PRIVATE user32 dwmapi)
 endif()
 
 # 导出头文件目录（core/* 以相对路径包含）
-target_include_directories(snipaste_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_include_directories(poptools_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

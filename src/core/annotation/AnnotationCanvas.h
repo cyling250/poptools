@@ -6,7 +6,7 @@
 #include "AnnotationItem.h"
 #include "AnnotationTypes.h"
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // 标注画板模型：标注集合 + 撤销/重做 + 工具状态
@@ -58,4 +58,4 @@ private:
     QVector<QVector<AnnotationItem>> m_redoStack;
 };
 
-} // namespace snipaste
+} // namespace poptools

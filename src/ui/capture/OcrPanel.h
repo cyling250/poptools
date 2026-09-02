@@ -8,7 +8,7 @@ class QComboBox;
 class QPushButton;
 class QShowEvent;
 
-namespace snipaste {
+namespace poptools {
 
 // ============================================================
 // OCR 文字栏面板
@@ -56,4 +56,4 @@ private:
     QString m_ocrText;
 };
 
-} // namespace snipaste
+} // namespace poptools
