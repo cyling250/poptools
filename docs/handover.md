@@ -32,11 +32,11 @@
   - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
   - `src/ui/` — 界面层按功能分库：`snipaste_ui_capture`（截图画布+工具栏+OCR 面板）/ `snipaste_ui_pin`（贴图窗口）/ `snipaste_ui_translate`（划词翻译卡片）/ `snipaste_ui_settings`（设置对话框），聚合为 INTERFACE 目标 `snipaste_ui`
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
-  - `src/resources/` — qrc 资源与应用/工具图标（svg）
+  - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
   - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
-  - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录
-  - `dist/` — 安装包输出（已忽略；现存旧名 Snipaste 的 0.1.3 Setup exe）
+  - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
+  - `dist/` — 安装包输出（已忽略；现存更名后 `PopTools-Setup-0.2.0.exe` 与旧名 Snipaste 的 0.1.3 / 0.2.0 Setup）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
   - `build/` — CMake 构建输出（已忽略；`build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **常用命令**：
@@ -47,12 +47,34 @@
   - 运行：`build/Release/PopTools.exe`
   - 打包：`ISCC.exe packaging\PopTools.iss`（输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；**更名后尚未产出/发布新安装包**；本地项目文件夹仍为 `F:\snipaste`，待用户关闭会话后改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：v0.2.0 已发布（旧名 Snipaste，tag v0.2.0）；2026-09-02 完成全局更名 PopTools + GPL-3.0 协议变更（T-024），远程仓库已改名 `https://gitee.com/richardogu/poptools`（remote 已更新并验证）；同日更换应用图标（T-026，含补上 exe 内嵌图标缺口），安装包已含新图标重打 `dist/PopTools-Setup-0.2.0.exe`（T-025/T-026，**均未发布**——未提交、未打新 tag）；本地项目文件夹已改名为 `F:\poptools`；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-026 更换应用图标：「破框而出」新形象 + 补上 exe 内嵌图标缺口
+- **完成日期**：2026-09-02
+- **背景**：用户要求更换图标（原 `app_icon.svg` 为 Material 蓝色相机）。梳理发现图标共三条链路且原有一个缺口：托盘/窗口图标（qrc SVG）、安装包图标（`packaging/PopTools.ico`）、**exe 内嵌图标原本根本不存在**（全项目无 .rc 文件，资源管理器/任务栏里 exe 显示系统默认白框图标）。
+- **结果**：
+  1. **新图标设计**（AI 手写 SVG，概念「破框而出」）：蓝→紫渐变圆角方砖 + 白色截图取景框四角（呼应应用内 scan 图标的选区语言）+ 斜向弹出的白色面板（pop/贴图，板上两条淡蓝文字线代表 OCR/翻译）+ 琥珀色激活圆点。**严格限定 QtSvg 渲染子集**（仅 path/rect/circle/linearGradient/transform/opacity，无 filter/mask/clipPath），保证托盘端 Qt 渲染与 Edge 预览一致。
+  2. **三链路全部换新**：① `src/resources/app_icon.svg` 直接替换（Qt 原生支持 SVG）；② `packaging/PopTools.ico` 由脚本重新生成——Edge headless（`--default-background-color=00000000` 透明底）渲染 512px 主图 → Pillow LANCZOS 合成 16/24/32/48/64/128/256 七帧 32bpp BMP（解析 ICO 目录逐帧校验过，361KB）；③ 新增 `src/app/app.rc`（`1 ICON`）挂入根 CMakeLists 的 qt_add_executable 源，exe 内嵌图标补缺。
+  3. `src/main.cpp` 补 `QApplication::setWindowIcon(":/app_icon.svg")`（此前窗口/任务栏运行期图标未设置）。
+  4. **验证**：多尺寸预览（512 主图缩放 16/24/32/48/64/256，明暗双底）人工检视通过，16px 下图形仍可辨；Release 构建、ctest、启动冒烟、ISCC 重打 `dist/PopTools-Setup-0.2.0.exe` 全部通过；exe 内嵌图标经 PowerShell `ExtractAssociatedIcon` 提取比对确认为新图标。
+  - **待用户真机目检**：托盘图标的 QtSvg 实际渲染观感（预览管线是 Edge，Qt 为另一渲染器，特性子集已兼容但像素级观感可能有细微差异）。
+- **关键改动**：`src/resources/app_icon.svg`、`packaging/PopTools.ico`、`src/app/app.rc`（新增）、`CMakeLists.txt`、`src/main.cpp`、`scripts/make_ico.py`（.ico 再生成管线，已沉淀入库）；设计期预览脚本（Edge 多尺寸渲染条）留在 `temp_scripts/` 默认保留
+- **相关坑**：[P-017](#p-017-edge-headless-按尺寸逐个渲染小尺寸会随机挂起)
+
+### T-025 更名后首打包：PopTools-Setup-0.2.0
+- **完成日期**：2026-09-02
+- **背景**：T-024 全局更名后尚未产出新安装包；且本地文件夹随后由 `F:\snipaste` 改名 `F:\poptools`，原 `build/` 的 CMake 缓存全部指向旧路径，不可增量构建（见 [P-015](#p-015-项目文件夹改名后-cmake-缓存指向旧路径)）。
+- **结果**：
+  1. 清空 `build/` 重新配置（VS 18 2026 生成器）→ Release 构建通过（windeployqt 与 paddleocr/ 部署正常，PaddleOCR-json.exe 位于 `build/Release/paddleocr/`）→ ctest 1/1 通过 → 启动冒烟通过（进程拉起确认后清理）。
+  2. ISCC（`D:\Inno Setup 6\ISCC.exe`）编译 `packaging/PopTools.iss`，产出 `dist/PopTools-Setup-0.2.0.exe`（约 106MB；AppId 为 T-024 更换的新 GUID，安装器视作新产品）；dist/ 中旧名 Snipaste 的 0.1.3 / 0.2.0 安装包保留未动。
+  3. **仅构建产物，未发布**：版本号三处保持 0.2.0 未动，未提交、未打 tag——是否升版本走完整发布流程由用户决定。
+- **关键改动**：无源码/配置变更（仅 `docs/handover.md` 与 `dist/` 构建产物）
+- **相关坑**：[P-015](#p-015-项目文件夹改名后-cmake-缓存指向旧路径)、[P-016](#p-016-git-bash-会把-taskkill-的斜杠参数误转换为路径)
 
 ### T-024 项目更名 PopTools、协议换 GPL-3.0、清理 OpenCV 遗留
 - **完成日期**：2026-09-02
@@ -286,6 +308,24 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-017 Edge headless 按尺寸逐个渲染小尺寸会随机挂起
+- **关联任务**：[T-026](#t-026-更换应用图标破框而出新形象--补上-exe-内嵌图标缺口)
+- **现象**：同一脚本内 Edge headless（`--headless=new --screenshot`）按 512/256/64/48 顺序渲染均正常，轮到 32px 窗口时进程挂起直至超时，且非必然复现
+- **原因**：未深究（疑似小窗口与 headless 合成器的时序问题）；逐尺寸渲染本身也慢（每尺寸一次完整启动）
+- **解决**：改为只渲染一张 512px 透明底主图，其余尺寸用 Pillow `LANCZOS` 缩放——与最终 .ico 生成管线一致，预览即所得；渲染约 2 秒且稳定
+
+### P-015 项目文件夹改名后 CMake 缓存指向旧路径
+- **关联任务**：[T-025](#t-025-更名后首打包poptools-setup-020)
+- **现象**：T-024 后文件夹由 `F:\snipaste` 改名 `F:\poptools`，`build/` 随之移动，但 `CMakeCache.txt` 内 `CMAKE_HOME_DIRECTORY`、Qt 工具链路径、目标 SOURCE_DIR/BINARY_DIR 等仍为 `F:/snipaste`
+- **原因**：CMake 与 MSBuild 生成文件内嵌配置时的绝对路径，项目根路径变更后全部失效，增量构建与打包源（`build/Release`）不可信
+- **解决**：`rm -rf build` 整目录删除后重新 `cmake -S . -B build -G "Visual Studio 18 2026" -A x64` 全量重建；凡项目根路径变更，`build/` 必须整目录重建，不能增量
+
+### P-016 Git Bash 会把 taskkill 的斜杠参数误转换为路径
+- **关联任务**：[T-025](#t-025-更名后首打包poptools-setup-020)
+- **现象**：Git Bash 中 `taskkill /F /IM PopTools.exe /T` 静默失败（进程原样存活），报错重定向到 /dev/null 时更难察觉；冒烟测试后残留两个实例
+- **原因**：MSYS 参数转换把 `/F`、`/IM` 当作 Unix 路径转写成 Windows 路径（如 `F:\`），taskkill 收到无效参数
+- **解决**：改用 PowerShell `Stop-Process -Name PopTools -Force`（本机已验证）；若坚持 taskkill，需双斜杠 `taskkill //F //IM` 或设 `MSYS_NO_PATHCONV=1`。教训：进程清理后必须再次 `tasklist` 复核为空
 
 ### P-014 会话 shell 工作目录占用 build 目录导致无法整目录删除
 - **关联任务**：[T-023](#t-023-v020-版本发布)
