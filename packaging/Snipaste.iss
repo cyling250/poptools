@@ -3,7 +3,7 @@
 ; 编译：ISCC.exe packaging\Snipaste.iss
 
 #define MyAppName "Snipaste"
-#define MyAppVersion "0.1.3"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "Snipaste"
 #define MyAppExeName "Snipaste.exe"
 #define MyAppAssocName "Snipaste 截图"

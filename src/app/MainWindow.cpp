@@ -42,7 +42,7 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addSeparator();
     m_menu->addAction("关于", [] {
         QMessageBox::about(nullptr, "Snipaste",
-            "Snipaste v0.1.3\n\n"
+            "Snipaste v0.2.0\n\n"
             "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
             "快捷键：F1 截图\n"
             "OCR 引擎：PaddleOCR（本地离线）\n"

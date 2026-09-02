@@ -7,7 +7,7 @@
 
 - **项目名称**：Snipaste（前身为 MySnipaste，2026-08-24 更名）
 - **一句话描述**：Windows 全场景截图工具——区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 API）+ 贴图，Snipaste 免费替代方案
-- **当前版本**：0.1.3。版本号在两处需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)` 与 `packaging/Snipaste.iss` 的 `#define MyAppVersion`
+- **当前版本**：0.2.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/Snipaste.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
   - C++17，代码统一在 `snipaste` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
@@ -17,37 +17,82 @@
   - 窗口/控件识别：Win32 窗口枚举（user32 + dwmapi）+ Windows UI Automation（UIA 控件树，系统组件无第三方依赖），实现见 `core/capture/SmartRectDetector`
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
   - 设置持久化：QSettings 写 exe 同目录 `Snipaste.ini`，单例 `core/settings/Settings`
-- **架构概览**（三层分层，core 与 ui 各为静态库，依赖方向 ui → core）：
-  - `app/MainWindow`（QObject，非窗体）＝应用控制器：系统托盘 + 三个全局热键（F1 截图 / F3 贴图 / Ctrl+Alt+Shift+X 划词翻译）+ 服务编排
-  - 截图主流程：`CaptureWindow`（全屏画布式编辑，内部按控制器拆分：SelectionController / AnnotationEditor / ToolDrawingController / TextEditingController / OcrController / OutputController）→ OutputController 产出到剪贴板 → ResultDialog 查看或 PinWindow 贴图
+- **架构概览**（分层 + 功能模块化：core 与 ui 各为静态库（ui 内按功能分库），依赖方向 ui → core；app 可执行承载组合根与功能模块）：
+  - **功能模块**（`app/IFeatureModule` + `FeatureRegistry` + `AppServices`）：截图 CaptureModule / 贴图 PinModule / 划词翻译 SelectionTranslateModule 三个自包含模块（`app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口/钩子/事件过滤器；MainWindow 是组合根（托盘 + 服务装配 + 模块注册 + 设置/关于/退出）。模块间互不 include，跨模块交互经 AppServices 能力槽（`captureActive`/`captureIntercept`/`lastCaptureRect`）。**拔插功能 = 组合根删一处 add() + CMake 删一个目标**
+  - `app/MainWindow`（QObject，非窗体）＝应用控制器：系统托盘 + 模块装配
+  - 截图主流程：`CaptureWindow`（全屏画布式编辑，内部按控制器拆分：SelectionController / AnnotationEditor / ToolDrawingController / TextEditingController / OcrController / OutputController）→ OutputController 产出到剪贴板 → PinWindow 贴图（构造注入应用级共享 `PaddleOcrService`，OCR 子进程全局唯一；OCR 面板/动效经 `OcrHostCallbacks` 窄接口注入 OcrController，CaptureContext 保持纯画布/选区共享态）
   - OCR 流程：OcrController → `PaddleOcrService`（子进程）→ 识别文本以文本框覆盖画布，或打开 `OcrPanel` 文字栏
-  - 翻译流程：`Translator`（大模型 API，提示词=基础指令+领域/术语表）→ OcrPanel（截图翻译）或 `TranslateCard`（划词翻译卡片，全局仅一张）；`SelectionTranslator` 负责模拟 Ctrl+C 抓取选中文本；目标语言在两处入口共享并持久化（`translate/targetLang`），切换即记忆；源语言不记忆，每次新任务重置为自动检测；语言显示名↔代码映射统一在 `core/translation/Languages.h`
+  - 翻译流程：`Translator`（大模型 API，提示词=基础指令+领域/术语表；CaptureWindow 内嵌一例服务截图翻译，SelectionTranslateModule 内一例服务划词卡片，各自单消费者）→ OcrPanel（截图翻译）或 `TranslateCard`（划词翻译卡片，全局仅一张）；`SelectionTranslator` 负责模拟 Ctrl+C 抓取选中文本；目标语言在两处入口共享并持久化（`translate/targetLang`），切换即记忆；源语言不记忆，每次新任务重置为自动检测；语言显示名↔代码映射统一在 `core/translation/Languages.h`
   - 标注数据模型与渲染在 `core/annotation`（AnnotationCanvas / AnnotationItem / AnnotationPainter），UI 工具在 `ui/capture/tools`（ToolBase + ToolFactory + 各工具类）
 - **目录含义**：
   - `src/main.cpp` — 程序入口
-  - `src/app/` — 应用控制器（托盘 + 热键 + 服务编排）
+  - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施
+  - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译），各自自包含
   - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
-  - `src/ui/` — 界面层静态库 `snipaste_ui`（capture 截图画布+工具栏+OCR 面板、pin 贴图窗口、result 结果面板、settings 设置对话框、translate 划词翻译卡片）
+  - `src/ui/` — 界面层按功能分库：`snipaste_ui_capture`（截图画布+工具栏+OCR 面板）/ `snipaste_ui_pin`（贴图窗口）/ `snipaste_ui_translate`（划词翻译卡片）/ `snipaste_ui_settings`（设置对话框），聚合为 INTERFACE 目标 `snipaste_ui`
+  - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与应用/工具图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
   - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
   - `packaging/` — Inno Setup 6 安装包脚本 `Snipaste.iss`，打包源为 `build/Release` 整目录
-  - `dist/` — 安装包输出（已忽略；现存 0.1.2 / 0.1.3 两版 Setup exe）
+  - `dist/` — 安装包输出（已忽略；现存 0.1.3 Setup exe）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
-  - `build/` — CMake 构建输出（已忽略；当前 `build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
+  - `build/` — CMake 构建输出（已忽略；`build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **常用命令**：
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`
-  - 配置：`cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
+  - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、拷贝整个 paddleocr/ 目录）
+  - 测试：`cd build && ctest -C Release --output-on-failure`
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：T-019（OCR 覆盖文字原位拟合）已完成，构建与冒烟通过、待用户目检；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：v0.2.0 已发布（T-023：安装包产出并推送，tag v0.2.0）；T-021/T-022 真机反馈修复随本版发布；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-023 v0.2.0 版本发布
+- **完成日期**：2026-09-02
+- **结果**：版本号三处同步升至 0.2.0（构建脚本 / 安装包脚本 / 关于对话框文案——第三处为本次补记）；清理重建（ctest 通过、启动冒烟通过）；ISCC 打包 `dist/Snipaste-Setup-0.2.0.exe`（约 110MB，0.1.3 安装包保留）；git 分三个逻辑提交（`refactor(app)` 模块化+ESC 单次退出 / `fix(capture)` 笔刷修复 / `chore(release)` 发版）推送 origin master，并打 tag `v0.2.0`。
+- **本版内容**（自 0.1.3 以来）：翻译体验系列（语言记忆/关思考/领域术语/Anthropic 双协议/测试连接/卡片缩放与复制）、智能框选重写（UIA 控件树）、贴图无损 1:1 与高斯投影、OCR 原位拟合、涂鸦半透明与马赛克笔宽修复、ESC 单次退出、应用层模块化架构 + 域逻辑单元测试。
+- **关键改动**：`CMakeLists.txt`、`packaging/Snipaste.iss`、`src/app/MainWindow.cpp`（版本文案）、`docs/handover.md`
+- **相关坑**：[P-014](#p-014-会话-shell-工作目录占用-build-目录导致无法整目录删除)
+
+### T-022 ESC 退出改为单次按压
+- **完成日期**：2026-09-02
+- **背景**：用户要求——截图界面在「编辑态 + 选择模式（无激活工具）」下需连按两次 ESC 才退出，且第一次会在画布中央弹出 2 秒的「再按 ESC 退出」提示框（原防误触设计），改为**按一次 ESC 立即退出**。
+- **结果**：
+  1. `keyPressEvent`：编辑态选择模式分支由「武装/两连按」改为直接 `cancel()`。其余 ESC 路径保持不变——文字输入态 ESC 仍是取消输入（不退出截图）、工具激活态 ESC 仍是退回选择模式（放弃草稿）、框选态原本就是单次退出。
+  2. 拆除全部配套：画布中央「再按 ESC 退出」半透明提示框绘制（paintEvent）、`m_escArmed`/`m_escTimer` 成员、构造中的定时器装配、`startCapture`/`onToolSelected` 中的复位代码。
+  - Release 构建通过、ctest 通过、启动冒烟通过；交互手感待用户复检。
+- **关键改动**：`src/ui/capture/CaptureWindow.h`、`src/ui/capture/CaptureWindow.cpp`
+- **相关坑**：无
+
+### T-021 标注笔刷真机反馈修复：涂鸦半透明与马赛克笔宽
+- **完成日期**：2026-09-02
+- **背景**：T-020 真机回归中用户反馈两个标注笔刷问题：① 涂鸦笔字迹应为半透明（类似"划重点"荧光笔）；② 马赛克笔触太粗，应与涂鸦笔笔触大小类似。
+- **原因**：① DoodleTool 与铅笔共用 BrushTool 默认渲染，颜色不透明；② `MosaicTool::strokeWidth` 为线宽 5 倍（下限 10px），而涂鸦笔为线宽 1 倍。
+- **结果**：
+  1. **涂鸦半透明**：`DoodleTool::draftColor()` 把 alpha≈45%（115）烘焙进标注色。渲染端 `AnnotationPainter::drawOne` 直接以 `it.color` 描线，无需改渲染器；拖动草稿预览与最终渲染（画布/复制/保存）天然一致。`drawPolyline` 为单次描边操作，同一笔迹内自交不会叠加变深；跨笔画重叠处像真实荧光笔一样加深。
+  2. **马赛克笔宽**：`MosaicTool::strokeWidth` 从 `max(10, width×5)` 改为 `max(6, width)`——与涂鸦笔一致随线宽缩放，6px 下限保证小线宽下马赛克块仍可辨。`buildMosaicItem` 按传入宽度生成足迹 mask，无需其他改动。
+  - Release 构建通过、ctest 通过、启动冒烟通过；笔刷观感待用户复检。
+- **关键改动**：`src/ui/capture/tools/DoodleTool.h`、`src/ui/capture/tools/MosaicTool.h`
+- **相关坑**：无
+
+### T-020 架构模块化改造：功能模块可拔插
+- **完成日期**：2026-09-02
+- **背景**：架构评审（同日）发现——ResultDialog 死路径仍被供养并可能拉起第二个 PaddleOCR 子进程；`m_selTranslateActive` 布尔旗标路由翻译结果；MainWindow 集中耦合全部功能的具体类型；`CaptureContext` 混入 OCR/翻译功能回调正在滑向 Service Locator；ui 单体静态库；零测试。
+- **结果**：
+  1. **P0 还债**：删除 `ui/result/`（ResultDialog 死路径，全代码无 show/exec 入口）及 MainWindow 为它供养的第二个 `PaddleOcrService`/`Translator`——OCR 引擎回到全局唯一；翻译服务改为"单服务单消费者"，`m_selTranslateFinished` 中以"卡片可见与否"判定丢弃在途结果，布尔旗标 `m_selTranslateActive` 移除；死成员 `m_lastPixmap` 移除（F3 贴图取剪贴板，`m_lastRect` 保留定位用）。
+  2. **P1 模块化**：新增 `src/app/IFeatureModule.h`（id / init / shutdown 接口）、`FeatureRegistry.h`（按注册顺序装配 + 按 id 查找）、`AppServices.{h,cpp}`（QObject 服务容器：共享服务 hotkey/ocr/trayMenu + 跨模块能力槽 `captureActive`/`captureIntercept`/`lastCaptureRect` + 贡献点 `addTrayAction`/`registerHotKey`——热键 id 由 AppServices 内部分配并自动路由）。**截图 / 贴图 / 划词翻译改为独立功能模块**（`src/app/modules/`），各自收编自己的热键、托盘贡献、全局鼠标钩子与应用级事件过滤器；`MainWindow` 退化为组合根（托盘 + 服务装配 + 三行模块注册 + 设置/关于/退出）。`CaptureWindow` 构造注入共享 OCR 服务（null 时内部自建兜底）；`OcrController` 因共享服务寿命长于自己而改为 QObject（connect 以 this 为 context，析构自动断连）。
+  3. **P2 接缝治理**：`CaptureContext` 剥离 OCR 专属回调（showOcrPanel/translateRequested/setPanelBusy/ocrBusy）→ 新增 `OcrHostCallbacks` 窄接口由 CaptureWindow 注入 OcrController，通用上下文回归纯画布/选区共享态。**Settings 变更通知经评估不做**：SettingsDialog 无热键配置项，通知无消费方，避免投机设计；Translator 直读 `Settings::instance()` 的现状保留，记录为后续可选项（连同版本号两处同步、core 内部 platform/domain 子分层）。
+  4. **P3 基建**：ui 层按功能拆四个静态库（`snipaste_ui_capture/pin/translate/settings`，互不链接）+ INTERFACE 聚合目标 `snipaste_ui`（app 链接方式不变）；新增 `tests/`（QtTest）：标注画板撤销/重做/交互修改/清除、语言映射往返、API 格式与端点辅助、FeatureRegistry 装配顺序与查找，`ctest -C Release` 1/1 通过（`SNIPASTE_BUILD_TESTS` 默认 ON）。
+  5. **架构纪律复检**：core→ui/app 零反向依赖；ui 四功能目录零互引；每个 app 模块只 include 自己的功能目录。此后拔插一个功能 = 组合根删一处 `add()` + CMake 删一个目标。
+  - Release 构建通过、ctest 通过、应用启动冒烟通过；**截图/贴图/划词翻译/OCR 的真机交互回归待用户目检**。
+- **关键改动**：`src/app/`（MainWindow 重写为组合根，新增 AppServices/IFeatureModule/FeatureRegistry/modules 三模块）、`src/ui/CMakeLists.txt`（功能拆库）、`src/ui/capture/CaptureWindow.*`（OCR 注入 + host 回调）、`src/ui/capture/OcrController.*`（QObject 化 + OcrHostCallbacks）、`src/ui/capture/CaptureContext.h`（去功能化）、`src/ui/result/`（删除）、`tests/`（新增）、`CMakeLists.txt`（测试开关）
+- **相关坑**：[P-013](#p-013-本机-vs-2026-生成器名与失败配置的残留缓存)
 
 ### T-019 OCR 覆盖文字原位拟合修复
 - **完成日期**：2026-09-02
@@ -226,6 +271,18 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-014 会话 shell 工作目录占用 build 目录导致无法整目录删除
+- **关联任务**：[T-023](#t-023-v020-版本发布)
+- **现象**：`rm -rf build` 报 "Device or resource busy"，且已 `cd` 到其他目录仍失败；但 `rm -rf build/*`（清空内容）成功
+- **原因**：AI 会话的终端工作目录在两次调用之间持久——此前某条命令 `cd` 进了 `build/` 跑 ctest，持有该目录句柄的 shell 进程一直存在；Windows 不允许删除任何进程的当前工作目录
+- **解决**：`rm -rf build/*` 清空内容 + 原地重新 `cmake -S . -B build` 配置，等效于整目录清理；预防：构建/测试命令避免 `cd` 进 build（用 `ctest --test-dir build` 等绝对/相对路径形式）
+
+### P-013 本机 VS 2026 生成器名与失败配置的残留缓存
+- **关联任务**：[T-020](#t-020-架构模块化改造功能模块可拔插)
+- **现象**：按旧命令 `cmake -G "Visual Studio 17 2022"` 配置报 "could not find any instance of Visual Studio"；改用 VS 2026 生成器重新配置又报 "does not match the generator used previously: Visual Studio 17 2022"
+- **原因**：本机仅装 VS 2026 Community（`D:\Microsoft Visual Studio\18\Community`），生成器名为 **"Visual Studio 18 2026"**；第一次失败配置已写入 `build/CMakeCache.txt`，缓存锁定生成器导致后续换生成器被拒
+- **解决**：删除 `build/` 后用 `cmake -S . -B build -G "Visual Studio 18 2026" -A x64`；本快照「常用命令」已同步更正。教训：换生成器必须先清缓存目录，只删 CMakeCache.txt 不够（CMakeFiles/ 也要删）
 
 ### P-012 贴图像素级自动验证的三个坑
 - **关联任务**：[T-018](#t-018-贴图无损-11-与真实投影重做)
