@@ -42,12 +42,27 @@
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：T-016（智能框选重写为窗口枚举 + UIA 控件树，含 Chromium 系三轮适配与稳定性修复）已完成，Release 构建通过、真机验证基本成功；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：T-017（工具栏可维护性重构 + 调色盘移第二行 + OCR 扫描图标）已完成，Release 构建通过、用户真机验证通过；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-017 标注工具栏可维护性重构：调色盘移第二行 + OCR 换扫描图标
+- **完成日期**：2026-09-02
+- **背景**：工具栏（ToolBar）评审发现可维护性差——跨两行 QGridLayout 手写列号 0~18（`i >= 8 ? i + 3 : i` 补位编排、跨行分隔线），增删按钮需全盘重排；工具图标/枚举/tooltip 散落三处 switch；程序性刷新回射用户信号。另有两处体验问题：调色盘占最右侧且跨两行；OCR 按钮用文字「文」易误解为文字输入工具。用户确认修复生效。
+- **结果**：
+  1. **布局重构**：跨两行 QGridLayout 改为每行一个 QHBoxLayout + QVBoxLayout 收口，增删按钮只影响所在行；重复的分隔线代码收敛为 `makeSeparator()`；删除头文件中声明但从未实现的 `makeToolButton`/`makeActionButton` 死声明。
+  2. **元数据表单一数据源**：新增文件级 `kTools[]`（tool/icon/tip）+ `findTool()`，按钮创建、tooltip、`setTool()` 图标刷新三处共用，新增工具只改一处。
+  3. **信号语义修正**：`applyWidthOptions()` 程序性刷新（`setTool`/`setWidth`/构造期间）不再发射 `widthSelected`（原先每次切工具都触发宿主 `m_textEditCtrl->commit()`，构造期间也向空发射）；仅用户点击线宽档位时发射。切工具后的线宽值同步改为 `CaptureWindow::onToolSelected` 主动读 `toolbar->currentWidth()`（新增取值器；注意不能命名为 `width()`，会遮蔽 `QWidget::width()` 导致 `positionToolbar` 等调用静默变义）。
+  4. **字号提交去重**：activated + returnPressed + editingFinished 三路连接在回车时双发 `fontSizeSelected`，删去 returnPressed（editingFinished 已覆盖回车与失焦两条路径）。
+  5. **调色盘移到第二行**：16 色 2×8 色板（色块 18px→12px，2×12+行距 2=26 恰为行高）+ 22px 当前色大色块置于第二行尾部（行尾 addStretch 防间距均摊），工具栏总宽仍由第一行决定、整体不增宽；色板按钮补 `setCheckable(true)` 使"当前色蓝框描边"真正生效（原先 `setChecked` 在非 checkable 按钮上是无效调用，选中态从未显示过）。
+  6. **OCR 按钮图标化**：新增 `resources/icons/scan.svg`（四角取景框 + 扫描线，24×24 单路径与现有图标同风格），替代文字「文」，消除"文字输入工具"歧义；删除其手写样式表、走全局 QToolButton 样式。【译】为语义文字按钮，保留文字形态。
+  7. **图标高 DPI 适配**：`svgIcon`/`widthIcon`/`fillIcon` 按屏幕 `devicePixelRatio` 渲染位图（原固定 20 逻辑像素，高分屏被放大发虚）。
+  - Release 构建通过；用户真机验证确认三项改动生效。
+- **关键改动**：`src/ui/capture/ToolBar.*`（重构主体）、`src/ui/capture/CaptureWindow.cpp`（onToolSelected 同步线宽）、`src/resources/icons/scan.svg`（新增）、`src/resources/resources.qrc`
+- **相关坑**：无（构建时再次遇到运行实例锁产物，见 [P-008](#p-008-运行中的实例会锁住-buildrelease-产物导致构建失败)）
 
 ### T-016 智能框选重写：窗口枚举 + UIA 控件树（移除 OpenCV 图像识别）
 - **完成日期**：2026-09-02

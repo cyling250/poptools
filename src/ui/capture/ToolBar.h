@@ -8,6 +8,7 @@
 #include "core/annotation/AnnotationTypes.h"
 
 class QComboBox;
+class QFrame;
 
 namespace snipaste {
 
@@ -15,12 +16,15 @@ namespace snipaste {
 // 标注工具栏（编辑态，贴画布下方靠右显示，两行紧凑布局）
 //
 // 第一行（工具，互斥高亮）：
-//   矩形 椭圆 直线 箭头 铅笔 涂鸦 马赛克 文字 文 译 橡皮 | 撤销 重做 | 保存 复制
+//   矩形 椭圆 直线 箭头 铅笔 涂鸦 马赛克 文字 [扫描OCR] 译 橡皮 | 撤销 重做 | 保存 复制
 // 第二行（属性）：
-//   小线宽 中线宽 大线宽 | 填充/纯线 | 字号(多选+输入) | 颜色板(两行八列) + 当前色大色块
+//   小线宽 中线宽 大线宽 | 填充/纯线 | 字号(多选+输入) | 颜色板(2×8) + 当前色大色块
 //
 // 高亮规则：第一类工具互斥，点击高亮（蓝底白图标）进入编辑模式；
 // 再次点击当前高亮工具则取消（进入选择模式可拖动画布）。
+//
+// 信号语义：*Selected/*Requested 仅由用户操作触发；setTool/setWidth 等
+// 程序性同步只刷新显示、不回射信号（宿主同步画布宽度用 currentWidth()）。
 // ============================================================
 class ToolBar : public QWidget
 {
@@ -47,6 +51,8 @@ public:
     Tool currentTool() const { return m_tool; }
     // 当前颜色
     QColor currentColor() const { return m_currentColor; }
+    // 当前线宽（随工具的线宽档位表变化；切换工具后由宿主经此同步画布）
+    qreal currentWidth() const { return m_width; }
     // 当前字号（pt）
     qreal fontSize() const { return m_fontSize; }
 
@@ -60,7 +66,7 @@ signals:
     void redoRequested();
     void saveRequested();
     void copyRequested();
-    void ocrRequested();                       // 【文】：OCR 结果以文本框覆盖到画布，不打开面板
+    void ocrRequested();                       // 扫描按钮：OCR 结果以文本框覆盖到画布，不打开面板
     void translateRequested();                 // 【译】：OCR + 翻译，自动打开面板显示原文与翻译结果
 
 private slots:
@@ -71,8 +77,7 @@ private slots:
     void onFontSizeCommitted();                // 字号提交（验证合法才 emit）
 
 private:
-    QToolButton *makeToolButton(const QString &iconName);
-    QToolButton *makeActionButton(const QString &iconName, const QString &tip);
+    QFrame *makeSeparator();                   // 行内竖分隔线（跟随主题色）
 
     // 根据当前主题返回图标颜色（深色主题用浅色图标）
     QColor iconColor() const;

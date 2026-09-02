@@ -281,6 +281,8 @@ namespace snipaste
         if (m_textEditCtrl->isEditing())
             m_textEditCtrl->commit();
         m_canvas.tool = t;
+        // 线宽档位值随工具变化；工具栏程序性刷新不发 widthSelected，这里主动同步
+        m_canvas.width = m_toolbar->currentWidth();
         m_toolDrawing->setTool(t); // 工厂创建工具实例（None=选择模式）
         m_annotationEditor->clearSelection(); // 切换工具取消标注选中 + 字号栏刷新
         m_escArmed = false; // 切换工具清除 ESC 二次退出提示
