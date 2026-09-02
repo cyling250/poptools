@@ -73,30 +73,31 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
     return true;
 }
 
-// 覆盖文字字号与原文字匹配：OCR 行框高度 ≈ 原文字实际绘制高度，
-// 用 QFontMetricsF 实测迭代，使覆盖文字高度落在 [local.height()-1, local.height()] 区间
-// （pixelSize 与字体高度近似线性）
-QFont OcrController::fitFontHeight(const QRectF &local)
+// OCR 原位拟合字号：用 tightBoundingRect 实测文字墨迹高度（字体行高含
+// ascent+descent，远大于字形实际高度，按行高拟合会使文字明显小于识别框），
+// 迭代使墨迹高度逼近框高；最终覆盖由 AnnotationPainter 的仿射映射保证
+QFont OcrController::fitFontHeight(const QRectF &local, const QString &text)
 {
     QFont f(QStringLiteral("Microsoft YaHei"));
     f.setPixelSize(qBound(6, qRound(local.height() * 0.8), 200));
     QFontMetricsF fm(f);
-    if (!qFuzzyIsNull(fm.height()))
+    const qreal inkH = fm.tightBoundingRect(text).height();
+    if (inkH > 0)
     {
-        // 比例修正一次即可逼近目标（字体高度 ∝ pixelSize）
-        const int ps = qBound(6, qRound(f.pixelSize() * local.height() / fm.height()), 200);
-        f.setPixelSize(ps);
+        // 墨迹高度 ∝ pixelSize，比例修正一次即可逼近目标
+        f.setPixelSize(qBound(6, qRound(f.pixelSize() * local.height() / inkH), 200));
         fm = QFontMetricsF(f);
     }
     // 精调 ±1px：不超过原文字高度，也不明显小于它
     for (int guard = 0; guard < 20; ++guard)
     {
-        if (fm.height() > local.height() && f.pixelSize() > 6)
+        const qreal h = fm.tightBoundingRect(text).height();
+        if (h > local.height() && f.pixelSize() > 6)
         {
             f.setPixelSize(f.pixelSize() - 1);
             fm = QFontMetricsF(f);
         }
-        else if (fm.height() + 1.0 < local.height() && f.pixelSize() < 200)
+        else if (h + 1.0 < local.height() && f.pixelSize() < 200)
         {
             f.setPixelSize(f.pixelSize() + 1);
             fm = QFontMetricsF(f);
@@ -144,7 +145,8 @@ void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString
         it.width = m_ctx->canvas->width;
         it.rect = local;
         it.text = box.text;
-        it.font = fitFontHeight(local);
+        it.font = fitFontHeight(local, box.text);
+        it.inPlaceFit = true;
         m_ctx->canvas->addItem(it);
     }
     m_ctx->stateChanged();

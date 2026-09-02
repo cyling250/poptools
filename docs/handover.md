@@ -42,12 +42,25 @@
   - 运行：`build/Release/Snipaste.exe`
   - 打包：`ISCC.exe packaging\Snipaste.iss`（输出 `dist/Snipaste-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
-- **当前状态**：T-018（贴图无损 1:1 + 真实高斯投影重做 + 保存仅 PNG）已完成，像素级真机验证与用户目检均通过；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：T-019（OCR 覆盖文字原位拟合）已完成，构建与冒烟通过、待用户目检；无自动化测试、无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-019 OCR 覆盖文字原位拟合修复
+- **完成日期**：2026-09-02
+- **背景**：OCR 识别文字本身正确，但覆盖到截图上的文字明显偏小（宽高同比例缩到约 7 折），没有"原位识别"的覆盖效果。
+- **原因**：`OcrController::fitFontHeight` 用 `QFontMetricsF::height()`（行高 = ascent+descent）去匹配 OCR 框高度，但字体行高远大于字形实际墨迹——微软雅黑 em=100 时行高 133px、中文字形墨迹仅约 97px，按行高拟合后实际渲染字形只有框的约 73%。
+- **结果**：
+  1. **墨迹紧贴拟合**：`fitFontHeight` 改用 `tightBoundingRect(text)` 实测文字墨迹高度拟合框高（先按墨迹∝pixelSize 一次比例修正，再 ±1px 精调）。
+  2. **渲染端精确覆盖**：`AnnotationItem` 新增 `inPlaceFit` 标记（仅 OCR 项设置，不影响用户文字工具）；`AnnotationPainter` 纯文本分支遇该标记时，用 `tightBoundingRect` 把文字墨迹矩形映射到 OCR 框。**第二轮反馈（横向拉伸感）后改进**：纵向精确匹配；横向优先调字距（每字符间隙分摊宽度差，钳制在 [-0.1em, 0.35em]），残余差异再以 ±10% 内的横向缩放兜底，字形基本无形变。
+  3. **引擎坐标验证**：用 PIL 生成已知字号测试图直跑 PaddleOCR-json（`temp_scripts/script_ocr_box_scale.py`），确认引擎返回框坐标与真实文字墨迹一致（24px 字→26px 框），排除引擎内部缩图嫌疑。
+  4. **顺带修复两个交互 BUG（用户反馈）**：① 右键不再无条件退出截图——改为与左键一致，仅点击选区外退出（Selecting 态无选区，右键任意处退出；Editing 态右键选区内忽略）；② 预选高亮闪回——用户在预高亮框外按下拖动手动框选时，在途的智能检测结果回包会把高亮重新画出来（界面双框），现按下预高亮框外即清除高亮并递增 `m_smartGen` 作废在途结果。
+  - Release 构建通过、应用启动冒烟通过；原位覆盖观感与交互修复待用户真机目检。
+- **关键改动**：`src/core/annotation/AnnotationItem.h`（inPlaceFit 字段）、`src/core/annotation/AnnotationPainter.cpp`（原位仿射渲染）、`src/ui/capture/OcrController.*`（墨迹拟合）
+- **相关坑**：无
 
 ### T-018 贴图无损 1:1 与真实投影重做
 - **完成日期**：2026-09-02

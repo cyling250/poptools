@@ -471,7 +471,9 @@ namespace snipaste
 
         if (event->button() == Qt::RightButton)
         {
-            cancel();
+            // 与左键一致：仅点击选区外退出（Selecting 态尚无选区，右键任意处退出）
+            if (m_state == State::Selecting || !m_selection.contains(pos))
+                cancel();
             return;
         }
 
@@ -480,15 +482,23 @@ namespace snipaste
 
         if (m_state == State::Selecting)
         {
-            // 智能框选：按下预高亮区域 → 暂不进入编辑态，先判定"点选"还是"按住拖动自选"
-            if (!m_smartRect.isEmpty())
+            // 智能框选：按下预高亮区域内 → 暂不进入编辑态，先判定"点选"还是"按住拖动自选"
+            if (!m_smartRect.isEmpty() && m_smartRect.contains(pos))
             {
                 m_smartPressPending = true;
                 m_smartPressRect = m_smartRect;
                 m_smartPressPos = pos;
                 m_smartRect = QRect(); // 取消预高亮高亮显示，待拖动判定
+                m_smartGen++;          // 使在途检测结果失效，防止拖动中预高亮闪回
                 update();
                 return;
+            }
+            // 预高亮区域外按下：清除高亮，直接开始手动框选
+            if (!m_smartRect.isEmpty())
+            {
+                m_smartRect = QRect();
+                m_smartGen++;
+                update();
             }
             m_selectionCtrl->beginSelect(pos);
             return;

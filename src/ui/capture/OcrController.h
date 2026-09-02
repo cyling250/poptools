@@ -29,7 +29,7 @@ private:
     bool prepareAndRecognize(QWidget *parent); // 公共准备（检查状态 + 裁剪 + 启动识别）；不可用返回 false
     void onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString &error);
     void onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, const QString &error);
-    static QFont fitFontHeight(const QRectF &local); // 覆盖文字字号与原文字匹配（实测逼近）
+    static QFont fitFontHeight(const QRectF &local, const QString &text); // 覆盖文字字号与原文字墨迹高度匹配（实测逼近）
 
     CaptureContext *m_ctx;
     PaddleOcrService m_ocr;

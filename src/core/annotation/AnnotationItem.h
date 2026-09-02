@@ -26,6 +26,7 @@ struct AnnotationItem
     QString text;             // Text 内容（纯文本）
     QFont font;               // Text 默认字体（family / bold / 默认字号）
     QString html;             // Text 富文本内容（含多字号片段；空 = 纯文本渲染，兼容旧数据）
+    bool inPlaceFit = false;  // OCR 原位拟合：渲染时把文字墨迹矩形精确映射到 rect（盖住所识别的原文字）
     QImage mosaicImage;       // Mosaic 的马赛克图像（局部坐标区域）
 };
 

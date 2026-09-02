@@ -300,9 +300,43 @@ void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
         break;
     case AnnotationType::Text: {
         if (it.html.isEmpty()) {
-            // 纯文本（旧数据 / OCR 生成）：单一字体直接绘制
-            p.setFont(it.font);
-            p.drawText(it.rect.toRect(), Qt::AlignLeft | Qt::AlignTop, it.text);
+            if (it.inPlaceFit) {
+                // OCR 原位拟合：字体行高（ascent+descent）远大于字形实际墨迹
+                //（如雅黑行高≈1.33em、中文字形墨迹≈0.97em，按行高拟合会缩小约 27%），
+                // 故用 tightBoundingRect 实测墨迹矩形映射到 rect。
+                // 纵向精确匹配；横向优先调字距（不使字形变形），
+                // 残余差异再以很小的横向缩放兜底（避免明显的横向拉伸感）
+                QFont f = it.font;
+                const QFontMetricsF fm0(f);
+                const QRectF ink0 = fm0.tightBoundingRect(it.text);
+                if (ink0.width() > 0 && ink0.height() > 0)
+                {
+                    const qreal sy = it.rect.height() / ink0.height();
+                    const int gaps = qMax(0, it.text.length() - 1);
+                    if (gaps > 0)
+                    {
+                        // 每个字符间隙分摊宽度差，限制在 [-0.1em, 0.35em] 内
+                        const qreal em = f.pixelSize() > 0 ? f.pixelSize() : f.pointSizeF();
+                        const qreal sp = qBound(-0.1 * em, (it.rect.width() - ink0.width()) / gaps,
+                                                0.35 * em);
+                        f.setLetterSpacing(QFont::AbsoluteSpacing, sp);
+                    }
+                    const QRectF ink = QFontMetricsF(f).tightBoundingRect(it.text);
+                    // 兜底横向缩放钳制在 ±10% 内；超出部分接受轻微未盖满
+                    const qreal sx = qBound(0.9, it.rect.width() / ink.width(), 1.1);
+                    // tightBoundingRect 以基线为 y=0；先平移再横向缩放，把墨迹矩形对到 rect
+                    p.save();
+                    p.setFont(f);
+                    p.translate(it.rect.left() - ink.left() * sx, it.rect.top() - ink.top());
+                    p.scale(sx, sy);
+                    p.drawText(QPointF(0, 0), it.text);
+                    p.restore();
+                }
+            } else {
+                // 纯文本（用户文字工具）：单一字体从左上角直接绘制
+                p.setFont(it.font);
+                p.drawText(it.rect.toRect(), Qt::AlignLeft | Qt::AlignTop, it.text);
+            }
         } else {
             // 富文本（含多字号片段）：按与输入框一致的布局渲染
             // （不换行：宽=最长行、高=总行高；body 无颜色 → 用标注色兜底）
