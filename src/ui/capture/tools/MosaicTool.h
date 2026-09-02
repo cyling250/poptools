@@ -20,8 +20,9 @@ public:
     // 草稿为半透明占位（最终为像素化图像）
     QColor draftColor() const override { return QColor(0, 0, 0, 70); }
 
-    // 马赛克笔刷加宽（相对线宽放大，最小 10px）
-    qreal strokeWidth() const override { return qMax(10.0, m_ctx->canvas->width * 5.0); }
+    // 马赛克笔刷宽度：与涂鸦笔一致随线宽缩放；
+    // 6px 下限保证小线宽下马赛克块仍可辨（此前为线宽 5 倍、过粗）
+    qreal strokeWidth() const override { return qMax(6.0, m_ctx->canvas->width); }
 
     void commitStroke() override
     {
