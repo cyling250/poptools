@@ -62,7 +62,7 @@
   2. 清空 `build/` 全量重建（删整目录重新配置 VS 18 2026）→ ctest 1/1 → 打包 `dist/PopTools-Setup-0.3.2-20260904_2352.exe`（105,713,542 字节）；dist 按惯例仅保留最新包（0.3.1 包已删）。
   3. 本版内容 = [T-032](#t-032-智能框选两处交互缺陷拖动中橙色预选框回闪双框并存按下瞬间蒙版断层透明闪烁) 全部修复（拖动双框竞态 + 按下瞬间蒙版断层）。
 - **关键改动**：`CMakeLists.txt`、`packaging/PopTools.iss`、`src/app/MainWindow.cpp`（版本文案）、`docs/handover.md`
-- **待用户**：GitHub Release 页基于 tag v0.3.2 创建 Release 并上传安装包（可选）。remote 为 `github.com/cyling250/poptools`
+- **待用户**：无——GitHub Release 已直接创建并上传安装包：<https://github.com/cyling250/poptools/releases/tag/v0.3.2>（标题 "PopTools v0.3.2 · 截图选区交互修复"，资产 `PopTools-Setup-0.3.2-20260904_2352.exe` 105,713,542 字节与本地一致）。发布用 GitHub CLI 便携版已留 `temp_scripts/gh-cli/bin/gh.exe`（v2.100.0，认证走 Git 凭据管理器的 gho_ 令牌 + 代理），后续发布可复用
 
 ### T-032 智能框选两处交互缺陷：拖动中橙色预选框回闪双框并存、按下瞬间蒙版断层透明闪烁
 - **完成日期**：2026-09-04
