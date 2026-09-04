@@ -370,10 +370,17 @@ namespace poptools
         if (m_state == State::Idle)
             return;
 
-        // 灰色蒙版 + 框选虚线框（Selecting 态）；智能框选预高亮区域在蒙版中挖空（全透明）
+        // 灰色蒙版 + 框选虚线框（Selecting 态）；预高亮区域在蒙版中挖空（全透明）。
+        // 按下待判定期改挖空按下的预选矩形：按下瞬间蒙版仍在（半透明），
+        // 被按住的窗口保持清晰——松手即点选该区域，拖动则无缝转手动框选
         QRect smartWin;
-        if (m_state == State::Selecting && !m_smartRect.isEmpty())
-            smartWin = m_smartRect.translated(-m_cap.desktop.topLeft());
+        if (m_state == State::Selecting)
+        {
+            if (m_smartPressPending && !m_smartPressRect.isEmpty())
+                smartWin = m_smartPressRect.translated(-m_cap.desktop.topLeft());
+            else if (!m_smartRect.isEmpty())
+                smartWin = m_smartRect.translated(-m_cap.desktop.topLeft());
+        }
         m_selectionCtrl->paintMaskAndFrame(p, rect(), m_state == State::Selecting, smartWin);
 
         // 智能框选：预先高亮鼠标下的窗口矩形（橙色虚线，区别于框选蓝虚线）
@@ -663,6 +670,10 @@ namespace poptools
     {
         if (m_state != State::Selecting || m_smartPressPending)
             return;
+        // 左键按住（拖动框选中）不再提交：否则按下瞬间未消费的鼠标位移会在
+        // 拖动中触发一次提交，橙色预选框回闪，与蓝色选框并存
+        if (QApplication::mouseButtons() & Qt::LeftButton)
+            return;
         if (m_smartMousePos == m_smartLastPos)
             return; // 位置未变，跳过提交（静止时零开销）
         m_smartLastPos = m_smartMousePos;
@@ -677,6 +688,10 @@ namespace poptools
     void CaptureWindow::onSmartFound(quint64 gen, const QRect &rect)
     {
         if (gen != quint64(m_smartGen))
+            return;
+        // 回包时已不在选择态或左键按住（提交与按下之间的竞态）：丢弃，
+        // 防止手动框选拖动中橙色预选框回闪、与蓝色选框并存
+        if (m_state != State::Selecting || (QApplication::mouseButtons() & Qt::LeftButton))
             return;
         if (!rect.isEmpty() && !rect.contains(m_smartMousePos))
             return;

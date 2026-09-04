@@ -194,7 +194,9 @@ void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect
                                             const QRect &highlightRect) const
 {
     const QRect sel = m_ctx->selectionRect().translated(-m_ctx->cap->desktop.topLeft());
-    if (sel.isEmpty() && highlightRect.isEmpty())
+    // 框选态无条件压暗：按下瞬间选区/挖空区均为空时也画全屏半透明蒙版，
+    // 否则按下到拖出选区之间蒙版消失，屏幕闪现无压暗画面
+    if (sel.isEmpty() && highlightRect.isEmpty() && !selecting)
         return;
 
     // 灰色蒙版：选区 / 预高亮区域外变暗，区域内保持原图（挖空全透明）
