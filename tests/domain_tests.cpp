@@ -9,12 +9,14 @@
 #include "app/FeatureRegistry.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
+#include "core/capture/QrScanner.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
 
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -269,6 +271,22 @@ private slots:
                  QStringLiteral("rewrite"));
         QVERIFY(llmActionFromKey(QStringLiteral("bogus")) == LlmAction::Translate);
         QCOMPARE(llmActionNames().size(), 4);
+    }
+
+    // ---- 二维码识别（zxing-cpp 后端；夹具图内含一个已知内容的二维码） ----
+    void qr_scan_fixture()
+    {
+        if (!qr::available())
+            QSKIP("zxing-cpp 未安装（tools/zxing 缺失），跳过");
+        QImage img(QStringLiteral("fixtures/qr_test.png"));
+        QVERIFY(!img.isNull());
+        const QStringList codes = qr::scan(img);
+        QCOMPARE(codes.size(), 1);
+        QCOMPARE(codes.first(), QStringLiteral("https://poptools.example/qr-test"));
+        // 无码图返回空
+        QImage blank(64, 64, QImage::Format_ARGB32);
+        blank.fill(Qt::white);
+        QVERIFY(qr::scan(blank).isEmpty());
     }
 
     // ---- Settings：注入式实例读写与非法值回退 ----

@@ -228,12 +228,20 @@ namespace poptools
         translateBtn->setToolTip(QStringLiteral("识别并翻译：识别选区文字，自动打开面板并显示原文与翻译结果"));
         connect(translateBtn, &QToolButton::clicked, this, &ToolBar::translateRequested);
 
+        // 二维码识别按钮：识别选区内二维码，内容弹窗展示并复制到剪贴板
+        auto *qrBtn = new QToolButton(this);
+        qrBtn->setFixedSize(32, 32);
+        qrBtn->setIcon(svgIcon("qrcode", iconColor()));
+        qrBtn->setToolTip(QStringLiteral("识别二维码：识别选区内二维码，内容展示并复制到剪贴板"));
+        connect(qrBtn, &QToolButton::clicked, this, &ToolBar::qrRequested);
+
         for (const ToolInfo &info : kTools)
         {
             if (info.tool == Tool::Eraser)
             {
                 row1->addWidget(ocrBtn);
                 row1->addWidget(translateBtn);
+                row1->addWidget(qrBtn);
             }
             auto *btn = new QToolButton(this);
             btn->setFixedSize(32, 32);

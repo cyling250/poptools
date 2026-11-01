@@ -17,6 +17,10 @@ target_include_directories(poptools_domain_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 
+# 二维码识别回归测试夹具（生成器脚本一次性生成，测试只依赖解码结果）
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/qr_test.png"
+               "${CMAKE_CURRENT_BINARY_DIR}/fixtures/qr_test.png" COPYONLY)
+
 add_test(NAME domain_tests COMMAND poptools_domain_tests)
 # Windows 下运行需 Qt DLL（Qt6Test/Qt6Core 等）在 PATH 中： prepend 本地 Qt 套件 bin
 set_tests_properties(domain_tests PROPERTIES

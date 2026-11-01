@@ -19,6 +19,8 @@ add_library(poptools_core STATIC
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp
     capture/SmartRectDetector.h
+    capture/QrScanner.cpp
+    capture/QrScanner.h
     hotkey/GlobalHotKey.cpp
     hotkey/GlobalHotKey.h
     hotkey/HotKeyNames.h
@@ -46,6 +48,27 @@ target_link_libraries(poptools_core PUBLIC
 # Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）
 if(WIN32)
     target_link_libraries(poptools_core PRIVATE user32 dwmapi)
+endif()
+
+# ---- 二维码识别（可选）：zxing-cpp 静态编入（源码由 scripts/install_zxing.py
+#      下载到 tools/zxing，不入库）。缺失时 QrScanner 编译为"不可用"，不阻断构建。
+#      注意开关名是 BUILD_*（ZXING_* 无效）：BUILD_EXAMPLES 默认 ON，会经
+#      FetchContent 联网拉取 stb —— 必须关掉，保持离线可构建 ----
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/zxing/CMakeLists.txt")
+    set(BUILD_SHARED_LIBS OFF)
+    set(BUILD_WRITERS OFF)          # 只需解码
+    set(BUILD_EXAMPLES OFF)
+    set(BUILD_BLACKBOX_TESTS OFF)
+    set(BUILD_UNIT_TESTS OFF)
+    set(BUILD_PYTHON_MODULE OFF)
+    set(BUILD_C_API OFF)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../tools/zxing"
+                     "${CMAKE_BINARY_DIR}/tools/zxing-build" EXCLUDE_FROM_ALL)
+    target_link_libraries(poptools_core PUBLIC ZXing::ZXing)
+    target_compile_definitions(poptools_core PUBLIC POPTOOLS_HAVE_ZXING)
+    message(STATUS "QR: zxing-cpp enabled (tools/zxing)")
+else()
+    message(STATUS "QR: tools/zxing 不存在，二维码识别编译为不可用（scripts/install_zxing.py 可安装）")
 endif()
 
 # 导出头文件目录（core/* 以相对路径包含）

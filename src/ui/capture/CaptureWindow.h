@@ -154,6 +154,7 @@ private:
     void onFontSizeSelected(qreal pt);
     void onOcrRequested();        // 【文】：OCR 结果以文本框覆盖到画布，不打开面板
     void onTranslateRequested();  // 【译】：OCR + 翻译，自动打开面板显示原文与翻译结果
+    void onQrRequested();         // 【码】：识别选区内二维码，内容弹窗展示并复制
 };
 
 } // namespace poptools

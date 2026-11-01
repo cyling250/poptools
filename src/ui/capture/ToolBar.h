@@ -68,6 +68,7 @@ signals:
     void copyRequested();
     void ocrRequested();                       // 扫描按钮：OCR 结果以文本框覆盖到画布，不打开面板
     void translateRequested();                 // 【译】：OCR + 翻译，自动打开面板显示原文与翻译结果
+    void qrRequested();                        // 【码】：识别选区内二维码，内容弹窗展示并复制
 
 private slots:
     void onToolClicked();

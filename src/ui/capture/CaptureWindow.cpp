@@ -9,8 +9,10 @@
 #include <QScreen>
 #include <QClipboard>
 #include <QLabel>
+#include <QMessageBox>
 
 #include "core/annotation/AnnotationPainter.h"
+#include "core/capture/QrScanner.h"
 #include "core/capture/SmartRectDetector.h"
 
 #include "ToolBar.h"
@@ -196,6 +198,7 @@ namespace poptools
                 });
         connect(m_toolbar, &ToolBar::ocrRequested, this, &CaptureWindow::onOcrRequested);
         connect(m_toolbar, &ToolBar::translateRequested, this, &CaptureWindow::onTranslateRequested);
+        connect(m_toolbar, &ToolBar::qrRequested, this, &CaptureWindow::onQrRequested);
 
         // 智能框选检测定时器（40ms）：与鼠标事件解耦，检测不阻塞取色卡片跟随。
         // 探测器持常驻工作线程（COM/UIA），构造即启动，随窗口销毁
@@ -347,6 +350,35 @@ namespace poptools
         m_ocrPanel->setTranslateText(QStringLiteral("翻译中…"));
         m_ocrPanel->setBusy(true); // 后置：禁用复制，避免复制到"翻译中…"占位文本
         m_ocrCtrl->requestTranslate(this);
+    }
+
+    // 【码】：识别选区内二维码。结果弹窗展示并复制到剪贴板（多码逐行）；
+    // 组件缺失（tools/zxing 未安装）时提示安装脚本
+    void CaptureWindow::onQrRequested()
+    {
+        if (m_state != State::Editing || m_selection.isEmpty())
+            return;
+        if (!qr::available())
+        {
+            QMessageBox::information(this, QStringLiteral("二维码识别"),
+                QStringLiteral("二维码组件未安装：运行 scripts/install_zxing.py 下载 "
+                               "zxing-cpp 后重新构建即可启用。"));
+            return;
+        }
+        // 选区物理像素裁剪（与 OCR 同源），识别（支持一图多码）
+        const QRect physCrop = ScreenCapturer::toPhysicalRect(m_selection)
+                                   .translated(-m_cap.physDesktop.topLeft());
+        const QStringList codes = qr::scan(m_cap.screen.copy(physCrop).toImage());
+        if (codes.isEmpty())
+        {
+            QMessageBox::information(this, QStringLiteral("二维码识别"),
+                                     QStringLiteral("选区内未识别到二维码。"));
+            return;
+        }
+        const QString text = codes.join(QLatin1Char('\n'));
+        QGuiApplication::clipboard()->setText(text);
+        QMessageBox::information(this, QStringLiteral("二维码识别"),
+                                 text + QStringLiteral("\n\n—— 内容已复制到剪贴板"));
     }
 
     // 面板模式：OCR 识别文字显示到文字栏（清空上次翻译，重新定位）
