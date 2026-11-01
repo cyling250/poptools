@@ -13,6 +13,13 @@
 
 namespace poptools {
 
+namespace {
+// 空闲自动回收阈值：识别完成后 3 分钟无新请求则结束子进程。
+// 子进程常驻约 770MB（Paddle 推理库 + 模型），是全项目最大单一开销；
+// 冷启动实测约 0.6s，回收后下次请求自动重启，代价可接受
+constexpr int kOcrIdleRecycleMs = 3 * 60 * 1000;
+} // namespace
+
 // ---- OcrBox 兼容：PaddleOcrBox 转 OcrBox ----
 // 外部使用 OcrBox（定义在 OcrService.h），这里用 PaddleOcrBox 内部处理，
 // 最终 emit 时转换为 QVector<OcrBox>。但为了简化，外部直接使用 OcrBox，
@@ -60,14 +67,28 @@ PaddleOcrService::PaddleOcrService(QObject *parent)
             m_process->kill(); // 触发 CrashExit finished，收尾路径不会重复报错
         fail(QStringLiteral("OCR 识别超时（20 秒无响应），引擎已重启，请重试"));
     });
+
+    // 空闲自动回收：识别完成即开表（finishRequest），新请求即停（sendImage）。
+    // 超时 kill 子进程——CrashExit 处理器里 m_busy 为 false，不会误报
+    m_idleTimer = new QTimer(this);
+    m_idleTimer->setSingleShot(true);
+    m_idleTimer->setInterval(kOcrIdleRecycleMs);
+    connect(m_idleTimer, &QTimer::timeout, this, [this]
+    {
+        if (m_busy || !m_process)
+            return;
+        m_process->kill();
+    });
 }
 
-// 请求收尾（不含 emit）：停超时看门狗、清临时文件、复位忙态
+// 请求收尾（不含 emit）：停超时看门狗、清临时文件、复位忙态，
+// 并启动空闲自动回收倒计时（3 分钟无新请求则结束子进程省内存）
 void PaddleOcrService::finishRequest()
 {
     m_timeoutTimer->stop();
     m_busy = false;
     cleanupTemp();
+    m_idleTimer->start();
 }
 
 void PaddleOcrService::fail(const QString &msg)
@@ -173,6 +194,7 @@ void PaddleOcrService::sendImage(const QImage &image)
     m_buffer.clear();
     m_process->write(cmd);
     m_timeoutTimer->start(); // 识别超时看门狗开表
+    m_idleTimer->stop();     // 有活跃请求：暂停空闲回收倒计时
 }
 
 void PaddleOcrService::onReadyRead()

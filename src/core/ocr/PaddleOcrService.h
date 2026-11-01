@@ -69,6 +69,9 @@ private:
 
     QProcess *m_process = nullptr;
     QTimer *m_timeoutTimer = nullptr; // 识别超时看门狗（引擎无响应 → kill + 报错）
+    QTimer *m_idleTimer = nullptr;    // 空闲自动回收：N 分钟无请求则结束子进程
+                                      // （常驻约 770MB，是全项目最大单一开销；
+                                      //  冷启动约 0.6s，回收代价可接受）
     bool m_busy = false;
     QByteArray m_buffer;      // stdout 累积缓冲区
     QString m_tempFile;       // 当前临时图片路径
