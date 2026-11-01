@@ -75,7 +75,7 @@
   4. ctest 1/1 通过；基线：启动 72ms / 主进程 35.4MB / OCR 子进程懒启动 0MB（性能红线守住）。
   5. dist 删 0.3.2 包仅留最新；GitHub Release 直发（安装包资产）。
 - **提交**：`a1236fc`（perf 裁剪）、docs 与版本翻转提交见 git log（tag `v0.4.0`）
-- **相关坑**：无项目新坑（本会话 Git Bash PATH 无 cmake，实测改用 `D:\CMake\bin` 绝对路径——属本机环境技能待更新项，非项目问题）
+- **相关坑**：①本会话 Git Bash PATH 无 cmake，实测改用 `D:\CMake\bin` 绝对路径（本机环境技能待更新，非项目问题）；②temp_scripts/gh-cli 在机器搬迁（F:\→E:\）中丢失、gh 登录态随之失效——已重装 gh 2.103.3 便携版至原路径，认证用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-033 的「认证走凭据管理器」记载已过时，此为当前有效做法）
 - **待用户**：①ch v4 模型对去留（裁掉安装包约再省 14MB → ~33MB）；②UI 第二批范围提案（待下一会话产出）；③T-034~T-040 交互项未真机回归（用户明示跳过），日常使用发现问题按普通缺陷报。
 
 ### T-040 OCR 引擎切换 RapidOCR-json（安装包 105.7 → 80.8MB）
@@ -504,7 +504,7 @@
 - **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注）
 - **待办 2：ch v4 模型对去留**（det/rec v4 约 15.5MB 未被服务引用，裁掉安装包约再省 14MB → ~33MB；等用户拍板）
 - **待办 3：功能候选清单**见下方小节（用户指示下一步再挑）；批量图片 OCR 仍为已否决项
-- 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；gh CLI 便携版在 `temp_scripts/gh-cli/bin/gh.exe` 可复用
+- 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；发版工具链已恢复：gh CLI 便携版 `temp_scripts/gh-cli/bin/gh.exe`（2.103.3，本会话重装），gh 自身未登录——用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-041 实操可复制）
 
 
 ### 功能候选（未排期——下一会话可直接从表内挑活）
