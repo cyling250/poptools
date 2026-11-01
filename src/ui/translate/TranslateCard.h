@@ -3,9 +3,12 @@
 #include <QWidget>
 #include <QString>
 
+#include "core/translation/Translator.h" // LlmAction / llmActionNames（动作下拉）
+
 class QTextEdit;
 class QPushButton;
 class QComboBox;
+class QLabel;
 
 namespace poptools {
 
@@ -40,8 +43,9 @@ public:
 signals:
     // 用户关闭卡片
     void closed();
-    // 用户点击翻译按钮
-    void translateRequested(const QString &text, const QString &fromLang, const QString &toLang);
+    // 用户点击动作按钮（动作 = 卡片动作下拉当前项，int 为 LlmAction 枚举值）
+    void translateRequested(const QString &text, const QString &fromLang, const QString &toLang,
+                            int action);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -63,11 +67,17 @@ private:
     void fitTextEdit(QTextEdit *edit, int maxH);
     // 解除文本区固定高度，交给布局按拉伸系数分配（用户开始拖拽调大小时调用）
     void beginUserResize();
+    // 动作下拉当前项（下标即 LlmAction 枚举值，llmActionNames 顺序对齐）
+    LlmAction currentAction() const;
+    // 动作切换后的界面同步：动作按钮文案 + 结果区小节标题
+    void syncActionUi();
 
     QTextEdit *m_sourceText = nullptr;
     QTextEdit *m_translateText = nullptr;
     QComboBox *m_fromCombo = nullptr;
     QComboBox *m_toCombo = nullptr;
+    QComboBox *m_actionCombo = nullptr; // LLM 动作：翻译 / 解释 / 总结 / 改写
+    QLabel *m_trTitle = nullptr;        // 结果区小节标题（随动作切换文案）
     QPushButton *m_swapBtn = nullptr;
     QPushButton *m_translateBtn = nullptr;
     QPushButton *m_copyBtn = nullptr;

@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QClipboard>
+#include <QLabel>
 
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/SmartRectDetector.h"
@@ -24,6 +25,8 @@
 
 #include "core/translation/Translator.h"
 
+#include "ui/ThemeColors.h"
+
 namespace poptools
 {
 
@@ -35,12 +38,13 @@ namespace poptools
         setCursor(Qt::CrossCursor);
         setMouseTracking(true); // 编辑态下实时反馈控制点光标
 
-        // OCR 引擎：优先使用应用级共享实例（子进程昂贵，全局唯一）；未注入则自建兜底
+        // OCR 引擎：应用级共享实例（子进程昂贵，全局唯一），由组合根注入。
+        // 原先"未注入则自建兜底"已删除——它会绕过全局唯一假设，静默拉起
+        // 第二个 PaddleOCR 子进程；漏注入属组合根装配缺陷，断言在开发期暴露
         m_ocrService = ocrService;
-        if (!m_ocrService) {
-            m_ownedOcr = std::make_unique<PaddleOcrService>();
-            m_ocrService = m_ownedOcr.get();
-        }
+        Q_ASSERT(m_ocrService);
+        if (!m_ocrService)
+            qWarning("CaptureWindow 未注入共享 OCR 服务，OCR 功能不可用");
 
         // 工具栏（单例，编辑态显示）
         m_toolbar = ToolBar::create(this);
@@ -131,11 +135,26 @@ namespace poptools
         // ---- OCR 扫描动效定时器（动效开关见 ocrHost.ocrBusy） ----
         m_ocrScanTimer.setInterval(30);
         connect(&m_ocrScanTimer, &QTimer::timeout, this, [this] {
+            const qreal oldPos = m_ocrScanPos;
             m_ocrScanPos += 0.018; // 一次完整扫描约 1.7 秒
             if (m_ocrScanPos > 1.0)
                 m_ocrScanPos = 0.0; // 循环扫描
-            update();
+            // 只重绘扫描带（新旧位置并集，±6px 覆盖 4px 光晕 + 2px 线），
+            // 原先每 30ms 全窗 update，4K 下动效期间 GPU/光栅化持续满载
+            if (m_state == State::Editing && !m_selection.isEmpty())
+            {
+                const QRect sel = m_selection.translated(-m_cap.desktop.topLeft());
+                const auto band = [sel](qreal pos)
+                {
+                    return QRect(sel.left(), sel.top() + qRound(sel.height() * pos) - 6,
+                                 sel.width(), 12);
+                };
+                update(band(oldPos).united(band(m_ocrScanPos)));
+            }
         });
+
+        // ---- ESC 退出确认定时器：武装态 1 秒无后续按键自动解除，提示不常驻 ----
+        connect(&m_exitArmTimer, &QTimer::timeout, this, &CaptureWindow::disarmExitConfirm);
 
         // ---- 工具栏信号（路由到控制器） ----
         connect(m_toolbar, &ToolBar::toolSelected, this, &CaptureWindow::onToolSelected);
@@ -196,10 +215,13 @@ namespace poptools
 
         m_state = State::Selecting;
         m_selection = QRect();
+        m_dblReselect = false; // 双击重画待吞 release 状态复位
         m_smartRect = QRect(); // 智能框选高亮复位
         m_smartPressPending = false; // 预高亮点选判定复位
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 取色缓存失效（screen 画面已更新）
+        m_baseScaled = QPixmap(); // 底图缩放缓存失效（screen 画面已更新）
+        m_lastColorCardRect = QRect(); // 取色卡片跟随局部重绘状态复位
         m_smartMousePos = QCursor::pos(); // 检测起点为当前鼠标位置
         m_smartLastPos = m_smartMousePos;
         ++m_smartGen; // 新捕获代次，丢弃仍在途的旧检测结果
@@ -223,10 +245,12 @@ namespace poptools
     {
         m_state = State::Idle;
         m_selection = QRect();
+        m_dblReselect = false; // 双击重画待吞 release 状态复位
         m_smartRect = QRect(); // 智能框选高亮复位
         m_smartPressPending = false; // 预高亮点选判定复位
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 释放取色缓存
+        m_baseScaled = QPixmap(); // 释放底图缩放缓存（约 8-33MB，空闲期不留驻）
         m_smartDetectTimer.stop(); // 停止智能框选检测
         m_ocrScanning = false; // 停止 OCR 扫描动效
         m_ocrScanTimer.stop();
@@ -235,6 +259,7 @@ namespace poptools
         m_selectionCtrl->cancelActive();
         m_annotationEditor->clearSelection();
         m_textEditCtrl->detach(); // 文字编辑态清理（隐藏输入框）
+        disarmExitConfirm();      // ESC 退出确认武装态与轻提示一并清理
         hide();
     }
 
@@ -364,8 +389,13 @@ namespace poptools
     {
         Q_UNUSED(event)
         QPainter p(this);
-        p.setRenderHint(QPainter::SmoothPixmapTransform); // 物理原图缩放到逻辑窗口时保持平滑
-        p.drawPixmap(rect(), m_cap.screen);               // 底层为原始屏幕画面（物理分辨率）
+        // 底图：物理原图 → 逻辑窗口的平滑缩放结果缓存（每轮截图/尺寸变化只算一次）。
+        // 原先每帧对整幅物理桌面图做 SmoothPixmapTransform，4K 下每帧数十 MB 光栅化，
+        // 是全窗口重绘路径的最大单点成本；悬停/动效的局部重绘必须以本缓存为前提
+        if (m_baseScaled.size() != rect().size())
+            m_baseScaled = m_cap.screen.scaled(size(), Qt::IgnoreAspectRatio,
+                                               Qt::SmoothTransformation);
+        p.drawPixmap(0, 0, m_baseScaled); // 底层为原始屏幕画面（物理分辨率）
 
         if (m_state == State::Idle)
             return;
@@ -387,7 +417,7 @@ namespace poptools
         if (m_state == State::Selecting && !m_smartRect.isEmpty())
         {
             const QRect sr = m_smartRect.translated(-m_cap.desktop.topLeft());
-            p.setPen(QPen(QColor(255, 140, 0), 2, Qt::DashLine));
+            p.setPen(QPen(overlay::smartOrange(), 2, Qt::DashLine));
             p.setBrush(Qt::NoBrush);
             p.drawRect(sr);
         }
@@ -429,7 +459,8 @@ namespace poptools
             m_selectionCtrl->paintSelectionFrame(p, sel);
         }
 
-        // ESC 二次退出提示已移除：编辑态选择模式下按一次 ESC 即退出截图
+        // ESC 二次退出提示已改为 armExitConfirm 的轻提示胶囊（QLabel 子控件，
+        // 有墨迹时才出现），不再走 paintEvent 绘制
 
         // ---- OCR 扫描动效：选区内的扫描线（提示用户 OCR 正在运行） ----
         if (m_ocrScanning && m_state == State::Editing && !m_selection.isEmpty())
@@ -437,16 +468,20 @@ namespace poptools
             const QRect sel = m_selection.translated(-m_cap.desktop.topLeft());
             const int scanY = sel.top() + qRound(sel.height() * m_ocrScanPos);
 
-            // 发光带：扫描线上下各 4px 的半透明渐变
+            // 发光带：扫描线上下各 4px 的半透明渐变（主色蓝，替代旧 (0,150,255)）
+            const QColor scanBlue = overlay::accent();
+            QColor glowEdge = scanBlue;  glowEdge.setAlpha(0);
+            QColor glowCore = scanBlue;  glowCore.setAlpha(50);
+            QColor scanLine = scanBlue;  scanLine.setAlpha(200);
             QLinearGradient glow(0, scanY - 4, 0, scanY + 4);
-            glow.setColorAt(0, QColor(0, 150, 255, 0));
-            glow.setColorAt(0.4, QColor(0, 150, 255, 50));
-            glow.setColorAt(0.6, QColor(0, 150, 255, 50));
-            glow.setColorAt(1, QColor(0, 150, 255, 0));
+            glow.setColorAt(0, glowEdge);
+            glow.setColorAt(0.4, glowCore);
+            glow.setColorAt(0.6, glowCore);
+            glow.setColorAt(1, glowEdge);
             p.fillRect(sel.left(), scanY - 4, sel.width(), 8, glow);
 
-            // 扫描线：2px 亮蓝实线
-            p.setPen(QPen(QColor(0, 150, 255, 200), 2));
+            // 扫描线：2px 实线
+            p.setPen(QPen(scanLine, 2));
             p.drawLine(sel.left(), scanY, sel.right(), scanY);
         }
     }
@@ -455,10 +490,24 @@ namespace poptools
 
     void CaptureWindow::mousePressEvent(QMouseEvent *event)
     {
+        // 武装态下点击鼠标（任意键）：解除退出确认，本次点击按原语义正常处理
+        if (m_exitArmActive)
+            disarmExitConfirm();
+
         const QPoint pos = event->globalPosition().toPoint();
 
         if (event->button() == Qt::RightButton)
         {
+            // 编辑态有墨迹时右键选区外退出与 ESC 保护对齐：首次武装确认，
+            // 再按（含再右键）才退出，防误触一键清掉全部标注
+            if (m_state == State::Editing && !m_selection.contains(pos) && hasInk())
+            {
+                if (m_exitArmActive)
+                    cancel();
+                else
+                    armExitConfirm();
+                return;
+            }
             // 与左键一致：仅点击选区外退出（Selecting 态尚无选区，右键任意处退出）
             if (m_state == State::Selecting || !m_selection.contains(pos))
                 cancel();
@@ -476,17 +525,20 @@ namespace poptools
                 m_smartPressPending = true;
                 m_smartPressRect = m_smartRect;
                 m_smartPressPos = pos;
+                const QRect oldWin = m_smartRect.translated(-m_cap.desktop.topLeft());
                 m_smartRect = QRect(); // 取消预高亮高亮显示，待拖动判定
                 m_smartGen++;          // 使在途检测结果失效，防止拖动中预高亮闪回
-                update();
+                // 蒙版挖空区不变（转入按下矩形），仅橙色虚线框消失 → 只刷该矩形
+                update(oldWin);
                 return;
             }
             // 预高亮区域外按下：清除高亮，直接开始手动框选
             if (!m_smartRect.isEmpty())
             {
+                const QRect oldWin = m_smartRect.translated(-m_cap.desktop.topLeft());
                 m_smartRect = QRect();
                 m_smartGen++;
-                update();
+                update(oldWin);
             }
             m_selectionCtrl->beginSelect(pos);
             return;
@@ -556,9 +608,12 @@ namespace poptools
                 m_selectionCtrl->dragSelect(pos);
                 return;
             }
-            // 记录鼠标位置供智能框选定时器检测；取色卡片每次移动立即重绘（不节流、无 MSAA 阻塞）
+            // 记录鼠标位置供智能框选定时器检测；取色卡片跟随改为局部重绘
+            // （新旧卡片矩形并集 + 阴影余量），原先每次移动全窗 update
             m_smartMousePos = pos;
-            update();
+            const QRect newCard = colorPickerCardRect(pos);
+            update(m_lastColorCardRect.united(newCard).adjusted(-4, -4, 6, 8));
+            m_lastColorCardRect = newCard;
             return;
         }
 
@@ -625,6 +680,14 @@ namespace poptools
 
         if (m_state == State::Selecting)
         {
+            // 双击重画的尾随 release：吞掉并以释放点为新起点（见 mouseDoubleClickEvent）
+            if (m_dblReselect)
+            {
+                m_dblReselect = false;
+                m_selectionCtrl->cancelActive();
+                m_selectionCtrl->beginSelect(event->globalPosition().toPoint());
+                return;
+            }
             // 智能框选点选：按下预高亮且未拖动 → 直接框选该区域
             if (m_smartPressPending)
             {
@@ -697,8 +760,11 @@ namespace poptools
             return;
         if (rect != m_smartRect)
         {
+            const QRect oldWin = m_smartRect.translated(-m_cap.desktop.topLeft());
             m_smartRect = rect;
-            update();
+            // 局部重绘：新旧预选矩形并集（蒙版挖空区变化 + 2px 虚线 + 抗锯齿余量）
+            update(oldWin.united(rect.translated(-m_cap.desktop.topLeft()))
+                       .adjusted(-3, -3, 3, 3));
         }
     }
 
@@ -721,8 +787,10 @@ namespace poptools
             // 选区内其它双击：忽略（防误触——退出截图仅通过 Esc / Enter / 复制、保存按钮）
             return;
         }
-        // 双击选区外 → 重新开始框选（重画）
+        // 双击选区外 → 重新开始框选（重画）。第二击的 release 稍后到达，
+        // 由 m_dblReselect 吞掉（否则 1px 退化矩形触发"过小视为取消"秒退）
         m_state = State::Selecting;
+        m_dblReselect = true;
         m_toolbar->hide();
         m_annotationEditor->clearSelection();
         m_selectionCtrl->beginSelect(pos);
@@ -730,6 +798,10 @@ namespace poptools
 
     void CaptureWindow::keyPressEvent(QKeyEvent *event)
     {
+        // 武装态下按其他键：解除退出确认并按原语义处理（Enter 仍是确认截图等）
+        if (m_exitArmActive && event->key() != Qt::Key_Escape)
+            disarmExitConfirm();
+
         if (event->key() == Qt::Key_Escape)
         {
             if (m_textEditCtrl->isEditing())
@@ -743,14 +815,22 @@ namespace poptools
                 cancel();
                 return;
             }
-            // 工具模式：ESC 退出到选择模式（放弃当前草稿），不退出截图
-            if (m_canvas.tool != Tool::None)
+            // 正在拖拽绘制：仅取消当前笔画（工具与截图保留），不退出
+            if (m_toolDrawing->isDrawing())
             {
-                m_toolbar->setTool(Tool::None);
-                onToolSelected(Tool::None);
+                m_toolDrawing->abortDraft();
                 return;
             }
-            // 编辑态选择模式：按一次 ESC 即退出截图（原为连按两次防误触，已按用户要求改单次）
+            // 画布有墨迹（标注 / OCR 文字框）：首次 ESC 武装防误触，再次 ESC 才退出；
+            // 无墨迹时没有可丢失的内容，直接退出零摩擦
+            if (hasInk())
+            {
+                if (m_exitArmActive)
+                    cancel();
+                else
+                    armExitConfirm();
+                return;
+            }
             cancel();
         }
         else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
@@ -765,9 +845,35 @@ namespace poptools
             if (m_state == State::Editing && !m_textEditCtrl->isEditing())
                 m_annotationEditor->deleteSelected();
         }
-        else if (event->key() == Qt::Key_C)
+        else if (event->key() == Qt::Key_Z && (event->modifiers() & Qt::ControlModifier)
+                 && !(event->modifiers() & Qt::ShiftModifier)) // Ctrl+Shift+Z 让位给重做别名
         {
-            // 取色：复制鼠标下像素的 16 进制颜色到剪贴板，并直接退出截图模式
+            // 撤销（Ctrl+Z）：编辑态生效；文字输入中由 QTextEdit 自理，拖拽绘制中不介入
+            if (m_state == State::Editing && !m_textEditCtrl->isEditing() && !m_toolDrawing->isDrawing()
+                && m_canvas.canUndo())
+            {
+                m_canvas.undo();
+                m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
+                update();
+            }
+        }
+        else if ((event->modifiers() & Qt::ControlModifier)
+                 && (event->key() == Qt::Key_Y
+                     || (event->key() == Qt::Key_Z && (event->modifiers() & Qt::ShiftModifier))))
+        {
+            // 重做（Ctrl+Y，兼容通用别名 Ctrl+Shift+Z）：条件同撤销
+            if (m_state == State::Editing && !m_textEditCtrl->isEditing() && !m_toolDrawing->isDrawing()
+                && m_canvas.canRedo())
+            {
+                m_canvas.redo();
+                m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
+                update();
+            }
+        }
+        else if (event->key() == Qt::Key_C && event->modifiers() == Qt::NoModifier)
+        {
+            // 取色：复制鼠标下像素的 16 进制颜色到剪贴板，并直接退出截图模式。
+            // 要求无修饰键：Ctrl+C 留给"复制截图"语义，不再误触取色
             if (m_state == State::Selecting && !(QApplication::mouseButtons() & Qt::LeftButton))
             {
                 const QColor c = screenColorAt(QCursor::pos());
@@ -789,7 +895,8 @@ namespace poptools
 
     void CaptureWindow::confirm()
     {
-        if (m_selection.isEmpty())
+        // 拖拽绘制中忽略确认：半截草稿不该被合成进输出（等松手后再按 Enter）
+        if (m_selection.isEmpty() || m_toolDrawing->isDrawing())
             return;
         if (m_textEditCtrl->isEditing())
             m_textEditCtrl->commit();
@@ -821,6 +928,59 @@ namespace poptools
         emit captured(QPixmap(), QRect());
     }
 
+    // ==================== ESC 退出确认（有墨迹时防误触） ====================
+
+    void CaptureWindow::armExitConfirm()
+    {
+        m_exitArmActive = true;
+        if (!m_escToast)
+        {
+            // 胶囊提示：深色底白字在任何截图内容上都可读；不拦鼠标不挡操作
+            // （P-022/P-023：样式写在控件自身，objectName ID 选择器）
+            m_escToast = new QLabel(this);
+            m_escToast->setObjectName(QStringLiteral("escExitToast"));
+            m_escToast->setStyleSheet(QStringLiteral(
+                "QLabel#escExitToast {"
+                "  background: rgba(28, 28, 30, 235);"
+                "  color: #FFFFFF;"
+                "  border: 1px solid rgba(255, 255, 255, 45);"
+                "  border-radius: 6px;"
+                "  padding: 7px 16px;"
+                "  font-size: 13px;"
+                "}"));
+            m_escToast->setAttribute(Qt::WA_TransparentForMouseEvents);
+        }
+        m_escToast->setText(QStringLiteral("再按一次 ESC 退出截图 · 标注将丢弃"));
+        m_escToast->adjustSize();
+        positionEscToast();
+        m_escToast->show();
+        m_escToast->raise();
+        m_exitArmTimer.start(1000); // 1 秒内未再按 ESC 自动解除，提示不常驻
+    }
+
+    void CaptureWindow::disarmExitConfirm()
+    {
+        m_exitArmActive = false;
+        m_exitArmTimer.stop();
+        if (m_escToast)
+            m_escToast->hide();
+    }
+
+    void CaptureWindow::positionEscToast()
+    {
+        if (!m_escToast)
+            return;
+        // 工具栏上缘居中（用户视线锚点在工具栏）；贴近窗口上缘放不下转下方
+        const QRect tb = m_toolbar->geometry();
+        int x = tb.center().x() - m_escToast->width() / 2;
+        int y = tb.top() - m_escToast->height() - 6;
+        if (y < 0)
+            y = tb.bottom() + 6;
+        x = qBound(0, x, width() - m_escToast->width());
+        y = qBound(0, y, height() - m_escToast->height());
+        m_escToast->move(x, y);
+    }
+
     QPointF CaptureWindow::toLocal(const QPoint &global) const
     {
         return QPointF(global - m_selection.topLeft());
@@ -838,6 +998,24 @@ namespace poptools
         if (!QRect(0, 0, m_screenImage.width(), m_screenImage.height()).contains(phys))
             return QColor();
         return m_screenImage.pixelColor(phys);
+    }
+
+    // 取色卡片几何：鼠标右下 (20,20)，越界翻转到左上，最终夹紧窗口内。
+    // 绘制（paintColorPicker）与悬停局部重绘（mouseMoveEvent）共用同一套逻辑，
+    // 保证局部重绘算出的矩形与实际绘制完全一致
+    QRect CaptureWindow::colorPickerCardRect(const QPoint &pos) const
+    {
+        constexpr int kZoomW = 155, kZoomH = 105, kColorH = 50;
+        const QSize cardSize(kZoomW, kZoomH + kColorH);
+
+        QPoint cardPos = pos - m_cap.desktop.topLeft() + QPoint(20, 20);
+        if (cardPos.x() + cardSize.width() > width())
+            cardPos.setX(cardPos.x() - cardSize.width() - 40);
+        if (cardPos.y() + cardSize.height() > height())
+            cardPos.setY(cardPos.y() - cardSize.height() - 40);
+        cardPos.setX(qBound(0, cardPos.x(), width() - cardSize.width()));
+        cardPos.setY(qBound(0, cardPos.y(), height() - cardSize.height()));
+        return QRect(cardPos, cardSize);
     }
 
     void CaptureWindow::paintColorPicker(QPainter &p) const
@@ -861,24 +1039,28 @@ namespace poptools
         if (src.isEmpty())
             return;
 
-        // 卡片几何：放大区 155×105（5 倍放大），颜色区 50 高
+        // 卡片几何（绘制与悬停局部重绘共用一套定位逻辑）
         const int kZoom = 5;
         const int kZoomW = 155, kZoomH = 105, kColorH = 50;
-        const QSize cardSize(kZoomW, kZoomH + kColorH);
+        const QRect cardRect = colorPickerCardRect(pos);
 
-        // 位置：鼠标右下 (20,20)，越界翻转到左上，最终夹紧窗口内
-        QPoint cardPos = pos - m_cap.desktop.topLeft() + QPoint(20, 20);
-        if (cardPos.x() + cardSize.width() > width())
-            cardPos.setX(cardPos.x() - cardSize.width() - 40);
-        if (cardPos.y() + cardSize.height() > height())
-            cardPos.setY(cardPos.y() - cardSize.height() - 40);
-        cardPos.setX(qBound(0, cardPos.x(), width() - cardSize.width()));
-        cardPos.setY(qBound(0, cardPos.y(), height() - cardSize.height()));
-        const QRect cardRect(cardPos, cardSize);
+        // 卡片阴影（双层近似高斯：近层实影 + 远层扩散），先于卡片内容绘制
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 60));
+        p.drawRoundedRect(QRectF(cardRect).translated(0, 3).adjusted(-1, -1, 1, 1), 12, 12);
+        p.setBrush(QColor(0, 0, 0, 30));
+        p.drawRoundedRect(QRectF(cardRect).translated(0, 9).adjusted(-3, -3, 3, 3), 14, 14);
+
+        // ---- 卡片主体：12px 圆角，放大区经路径裁剪贴合圆角 ----
+        QPainterPath cardPath;
+        cardPath.addRoundedRect(QRectF(cardRect), 12, 12);
 
         // ---- 上 2/3：放大区域 ----
         const QRect zoomRect(cardRect.left(), cardRect.top(), kZoomW, kZoomH);
         const QImage crop = m_screenImage.copy(src);
+        p.save();
+        p.setClipPath(cardPath);
         p.drawImage(zoomRect, crop.scaled(zoomRect.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation));
 
         // 十字线：穿过中心像素中线的单像素线，互补色保证可见
@@ -889,33 +1071,38 @@ namespace poptools
         p.setPen(QPen(xColor, 1));
         p.drawLine(zoomRect.left(), cy, zoomRect.right(), cy);
         p.drawLine(cx, zoomRect.top(), cx, zoomRect.bottom());
+        p.restore();
 
-        // ---- 下 1/3：颜色区域（中心像素精确颜色，两种显示方式）----
+        // ---- 下 1/3：颜色信息区（白底 + 圆角色块徽章 + Hex/RGB 文本） ----
         const QRect colorRect(cardRect.left(), zoomRect.bottom() + 1, kZoomW, kColorH);
-        p.fillRect(colorRect, center);
-        const bool dark = (center.red() * 299 + center.green() * 587 + center.blue() * 114) / 1000 > 128;
-        p.setPen(dark ? QColor(0, 0, 0) : QColor(255, 255, 255));
+        p.fillRect(colorRect, Qt::white);
+        const QRect chip(colorRect.left() + 12, colorRect.top() + 12, 26, 26);
+        QPainterPath chipPath;
+        chipPath.addRoundedRect(QRectF(chip), 8, 8);
+        p.fillPath(chipPath, center);
+        p.setPen(QPen(QColor(0, 0, 0, 35), 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(QRectF(chip), 8, 8);
 
+        const QRect textRect(chip.right() + 11, colorRect.top(),
+                             colorRect.right() - chip.right() - 11, kColorH);
         QFont f = p.font();
-        f.setBold(true);
+        f.setPixelSize(14);
+        f.setWeight(QFont::DemiBold);
         p.setFont(f);
-        p.drawText(colorRect.adjusted(0, 0, 0, -kColorH / 2), Qt::AlignCenter,
+        p.setPen(QColor(0, 0, 0));
+        p.drawText(textRect.adjusted(0, 8, 0, 0), Qt::AlignLeft | Qt::AlignTop,
                    center.name(QColor::HexRgb).toUpper());
-        f.setBold(false);
-        f.setPointSizeF(qMax(6.0, f.pointSizeF() * 0.8));
+        f.setPixelSize(11);
+        f.setWeight(QFont::Normal);
         p.setFont(f);
-        p.drawText(colorRect.adjusted(0, kColorH / 2, 0, 0), Qt::AlignCenter,
+        p.drawText(textRect.adjusted(0, 0, 0, -8), Qt::AlignLeft | Qt::AlignBottom,
                    QString("RGB(%1, %2, %3)").arg(center.red()).arg(center.green()).arg(center.blue()));
-
-        // 卡片阴影（右下偏移 2px，半透明）
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 40));
-        p.drawRect(cardRect.translated(2, 2));
 
         // 卡片边框
         p.setPen(QPen(QColor(0, 0, 0, 80), 1));
         p.setBrush(Qt::NoBrush);
-        p.drawRect(cardRect);
+        p.drawRoundedRect(QRectF(cardRect), 12, 12);
     }
 
 } // namespace poptools

@@ -29,6 +29,7 @@ public:
     void start(const QPointF &local); // 工具按下
     void drag(const QPointF &local);  // 工具拖动
     void finish(const QPointF &local);// 工具释放
+    void abortDraft();                // 取消当前笔画草稿（工具实例保留，不提交标注）
     void paintDraft(QPainter &p) const;
     Qt::CursorShape cursor() const;   // 当前工具光标
 

@@ -6,6 +6,7 @@
 #include <QPoint>
 #include <QSize>
 #include <QString>
+#include <QTimer>
 
 namespace poptools {
 
@@ -17,10 +18,10 @@ namespace poptools {
 //     初始位置 = 截图选区位置、尺寸 = 选区尺寸，与原画面严丝合缝
 //   * 张贴同时保存到设置中的默认文件夹（PNG 无损）
 //   * 按住拖动移动位置
-//   * 鼠标滚轮缩放（0.2x ~ 5x，锚点 = 内容左上角）
-//   * 右键菜单：清除（仅清除屏幕贴图）/ 销毁（清除屏幕 + 删除文件）
-//   * 投影 = 内容矩形整体下移后的高斯模糊轮廓（真实 drop shadow，
-//     与操作系统原生窗口投影同源的视觉语言），呈现"浮于屏幕之上"
+    //   * 鼠标滚轮缩放（0.2x ~ 5x，锚点 = 鼠标位置：光标下的内容点缩放前后不动）
+    //   * 右键菜单：清除（仅清除屏幕贴图）/ 销毁（清除屏幕 + 删除文件）
+    //   * 投影 = 内容矩形整体下移后的高斯模糊轮廓（真实 drop shadow，
+    //     与操作系统原生窗口投影同源的视觉语言），呈现"浮于屏幕之上"
 // ============================================================
 class PinWindow : public QWidget
 {
@@ -30,6 +31,12 @@ public:
 
     // 将截图贴到屏幕上：保存到默认文件夹 + 按 globalTopLeft 定位（内容左上角）+ 置顶显示
     void pin(const QPixmap &pixmap, const QPoint &globalTopLeft);
+
+signals:
+    // 右键菜单「识别文字 / 翻译」：携带贴图内容（物理分辨率），
+    // 由 PinModule 经共享 OCR 服务与翻译服务处理（结果走托盘气泡 + 剪贴板）
+    void ocrRequested(const QPixmap &pixmap);
+    void translateRequested(const QPixmap &pixmap);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -53,6 +60,7 @@ private:
     qreal m_scale = 1.0;   // 缩放比例
     QString m_savedPath;   // 本次贴图保存的文件路径（销毁时删除）
     QImage m_shadow;       // 预生成的投影轮廓（Format_Alpha8，窗口大小）
+    QTimer m_shadowDebounce; // 投影重算防抖：滚轮连滚只在停歇 50ms 后重算轮廓
 
     // 投影参数（逻辑像素），量级对齐操作系统原生窗口投影
     static constexpr int kShadowBlur = 12;    // 盒模糊半径 ≈ 高斯 σ

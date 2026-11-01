@@ -25,15 +25,32 @@ Settings &Settings::instance()
     return inst;
 }
 
+// 落盘并检查可写性：QSettings::sync 在目录无写权限（如 Program Files）时
+// 静默失败，用户改过的设置全部不保存且毫无感知——首次失败时告警一次
+void Settings::syncChecked()
+{
+    m_s.sync();
+    if (m_s.status() == QSettings::AccessError) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            qWarning("PopTools.ini 不可写（目录权限不足？），设置将无法保存");
+        }
+    }
+}
+
 quint32 Settings::captureHotKeyVk() const
 {
-    return m_s.value("hotkey/captureVk", 0x70 /* F1 */).toUInt(); // VK_F1 = 0x70
+    // 手改 INI 写入非法值（0/越界）时回退默认：vk=0 传进 RegisterHotKey
+    // 必然失败，且失败提示会误导为"快捷键被占用"
+    const quint32 vk = m_s.value("hotkey/captureVk", 0x70 /* F1 */).toUInt(); // VK_F1 = 0x70
+    return (vk >= 0x01 && vk <= 0xFE) ? vk : 0x70;
 }
 
 void Settings::setCaptureHotKeyVk(quint32 vk)
 {
     m_s.setValue("hotkey/captureVk", vk);
-    m_s.sync(); // 立即落盘，异常退出也不丢配置
+    syncChecked(); // 立即落盘，异常退出也不丢配置
 }
 
 QString Settings::apiBaseUrl() const
@@ -44,7 +61,7 @@ QString Settings::apiBaseUrl() const
 void Settings::setApiBaseUrl(const QString &url)
 {
     m_s.setValue("translate/apiBaseUrl", url);
-    m_s.sync();
+    syncChecked();
 }
 
 QString Settings::apiKey() const
@@ -56,7 +73,7 @@ QString Settings::apiKey() const
 void Settings::setApiKey(const QString &key)
 {
     m_s.setValue("translate/apiKey", key);
-    m_s.sync();
+    syncChecked();
 }
 
 QString Settings::apiModel() const
@@ -67,7 +84,7 @@ QString Settings::apiModel() const
 void Settings::setApiModel(const QString &model)
 {
     m_s.setValue("translate/apiModel", model);
-    m_s.sync();
+    syncChecked();
 }
 
 // API 接口格式，默认 OpenAI 兼容（存量配置无此键时行为不变）
@@ -79,7 +96,7 @@ QString Settings::apiFormat() const
 void Settings::setApiFormat(const QString &format)
 {
     m_s.setValue("translate/apiFormat", format);
-    m_s.sync();
+    syncChecked();
 }
 
 // 记忆的目标语言，默认中文（zh）
@@ -91,7 +108,19 @@ QString Settings::translateTargetLang() const
 void Settings::setTranslateTargetLang(const QString &code)
 {
     m_s.setValue("translate/targetLang", code);
-    m_s.sync();
+    syncChecked();
+}
+
+// 记忆的 LLM 动作，默认翻译（translate）
+QString Settings::translateAction() const
+{
+    return m_s.value("translate/action", "translate").toString();
+}
+
+void Settings::setTranslateAction(const QString &action)
+{
+    m_s.setValue("translate/action", action);
+    syncChecked();
 }
 
 QStringList Settings::translateDomains() const
@@ -102,7 +131,7 @@ QStringList Settings::translateDomains() const
 void Settings::setTranslateDomains(const QStringList &domains)
 {
     m_s.setValue("translate/domains", domains);
-    m_s.sync();
+    syncChecked();
 }
 
 // 术语对用两个平行的字符串列表存储（termSources/termTargets），
@@ -129,7 +158,7 @@ void Settings::setTranslateTerms(const QList<TermPair> &terms)
     }
     m_s.setValue("translate/termSources", sources);
     m_s.setValue("translate/termTargets", targets);
-    m_s.sync();
+    syncChecked();
 }
 
 QString Settings::pinSaveDir() const
@@ -142,7 +171,7 @@ QString Settings::pinSaveDir() const
 void Settings::setPinSaveDir(const QString &dir)
 {
     m_s.setValue("pin/saveDir", dir);
-    m_s.sync();
+    syncChecked();
 }
 
 bool Settings::autoStartEnabled() const
@@ -167,7 +196,8 @@ void Settings::setAutoStartEnabled(bool on)
 // 划词翻译热键：默认 Ctrl+Alt+Shift+X（VK_X = 0x58, MOD_CONTROL = 0x0002, MOD_ALT = 0x0001, MOD_SHIFT = 0x0004）
 quint32 Settings::selectionTranslateHotKeyVk() const
 {
-    return m_s.value("hotkey/selectionTranslateVk", 0x58 /* X */).toUInt();
+    const quint32 vk = m_s.value("hotkey/selectionTranslateVk", 0x58 /* X */).toUInt();
+    return (vk >= 0x01 && vk <= 0xFE) ? vk : 0x58; // 非法值回退默认（同 captureVk）
 }
 
 quint32 Settings::selectionTranslateHotKeyModifiers() const
@@ -179,7 +209,7 @@ void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
 {
     m_s.setValue("hotkey/selectionTranslateVk", vk);
     m_s.setValue("hotkey/selectionTranslateMod", modifiers);
-    m_s.sync();
+    syncChecked();
 }
 
 } // namespace poptools

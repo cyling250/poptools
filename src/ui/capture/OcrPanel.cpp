@@ -70,7 +70,9 @@ OcrPanel::OcrPanel(QWidget *parent)
     auto *arrow = new QLabel(QStringLiteral("→"), this);
     toolRow->addWidget(arrow);
     m_toCombo = new QComboBox(this);
-    m_toCombo->setEditable(true);
+    // 不可编辑（与划词卡片一致）：可编辑下拉的手输文本会经 currentTextChanged
+    // 直写 Settings 持久化，产生垃圾目标语言值
+    m_toCombo->setEditable(false);
     m_toCombo->addItems(languageDisplays().mid(1));
     // 恢复记忆的目标语言（用户上次切换的语言，划词卡片与文字栏共用）
     m_toCombo->setCurrentText(langCodeToDisplay(Settings::instance().translateTargetLang()));

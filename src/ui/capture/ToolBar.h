@@ -91,7 +91,7 @@ private:
     qreal m_width = 2.0;
     int m_widthIndex = 1;      // 线宽档位（0 小 / 1 中 / 2 大），切换工具时保持相对档位
     bool m_filled = false;
-    bool m_dark = false; // 系统深色主题
+    bool m_dark = false; // 面板主题（常暗玻璃面板：构造中固定 true，分支保留便于恢复跟随主题）
 
     qreal m_fontSize = 14.0;   // 当前字号（pt）
     bool m_fontSizeMixed = false; // 选中文本存在多个字号 → 字号栏显示为空

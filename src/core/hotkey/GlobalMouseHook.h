@@ -20,7 +20,8 @@ namespace poptools {
 //   hook.stop();
 //
 // 基于 SetWindowsHookEx(WH_MOUSE_LL)（user32.lib）；钩子回调在安装线程
-// （Qt 主线程）中执行，信号为直接连接，槽内勿做耗时操作（低级钩子有超时限制）。
+// （Qt 主线程）中执行，信号经队列转发到事件循环处理（回调内不做任何
+// 耗时工作——低级钩子有超时限制，超限会被系统静默摘钩）。
 // ============================================================
 class GlobalMouseHook : public QObject
 {

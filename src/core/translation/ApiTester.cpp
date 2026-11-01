@@ -14,6 +14,14 @@ namespace poptools {
 ApiTester::ApiTester(QObject *parent)
     : QObject(parent)
 {
+    // 超时看门狗必须是成员并随每次 test() 重启：原先用 singleShot 不随请求
+    // 取消——上一轮快速失败后 10 秒内重测，旧定时器会 abort 新请求误报超时
+    m_timeout = new QTimer(this);
+    m_timeout->setSingleShot(true);
+    connect(m_timeout, &QTimer::timeout, this, [this] {
+        if (m_reply)
+            m_reply->abort();
+    });
 }
 
 void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QString &model,
@@ -55,17 +63,13 @@ void ApiTester::test(const QString &baseUrl, const QString &apiKey, const QStrin
 
     m_busy = true;
     m_reply = m_nam.post(req, payload);
-
-    // 10 秒超时：中止请求（finished 随后触发，按 OperationCanceledError 报告）
-    QTimer::singleShot(10000, this, [this] {
-        if (m_reply)
-            m_reply->abort();
-    });
+    m_timeout->start(10000); // 10 秒超时：中止请求（finished 按超时报告）
 
     connect(m_reply, &QNetworkReply::finished, this, [this] {
         auto *reply = m_reply;
         m_reply = nullptr;
         m_busy = false;
+        m_timeout->stop();
         reply->deleteLater();
 
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();

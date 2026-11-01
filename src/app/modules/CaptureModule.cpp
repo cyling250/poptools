@@ -48,4 +48,14 @@ void CaptureModule::init(AppServices &services)
         });
 }
 
+void CaptureModule::shutdown()
+{
+    // 反装配：撤销发布的能力槽。模块对象析构早于 AppServices（组合根成员
+    // 逆序析构），不清空则槽位在析构窗口内悬垂
+    if (m_services) {
+        m_services->captureActive = nullptr;
+        m_services->captureIntercept = nullptr;
+    }
+}
+
 } // namespace poptools

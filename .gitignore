@@ -26,3 +26,4 @@ temp_scripts/
 .vscode/
 *.suo
 *.VC.db
+.zcode/

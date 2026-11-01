@@ -1,5 +1,7 @@
 #include "TextEditingController.h"
 
+#include "ui/ThemeColors.h"
+
 #include <QTextEdit>
 #include <QTextDocument>
 #include <QTextBlock>
@@ -84,7 +86,7 @@ namespace poptools
         // 输入中不显示白色底：背景透明，仅虚线标出输入区域；默认文本色 = 本次输入开始色
         // （与提交后渲染兜底色 it.color 一致：无显式色的文字编辑中/提交后显示同色）
         m_textEdit->setStyleSheet(QString(
-                                      "QTextEdit { background: transparent; border: 1px dashed #0078ff;"
+                                      "QTextEdit { background: transparent; border: 1px dashed #2B6FF2;"
                                       " border-radius: 3px; padding: 1px 2px; color: %1; }")
                                       .arg(m_startColor.name()));
 

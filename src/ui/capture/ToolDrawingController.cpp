@@ -57,6 +57,16 @@ void ToolDrawingController::finish(const QPointF &local)
     m_ctx->requestUpdate();
 }
 
+void ToolDrawingController::abortDraft()
+{
+    if (!m_drawing || !m_tool)
+        return;
+    // 仅丢弃草稿：工具实例保留（各工具 onPress 会重置草稿状态，
+    // 见 ShapeTool/BrushTool），用于 ESC 取消当前笔画而不退出工具
+    m_drawing = false;
+    m_ctx->requestUpdate();
+}
+
 void ToolDrawingController::paintDraft(QPainter &p) const
 {
     if (m_drawing && m_tool)

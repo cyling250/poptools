@@ -79,6 +79,7 @@ void SelectionTranslateModule::init(AppServices &services)
 void SelectionTranslateModule::shutdown()
 {
     hideCard();
+    qApp->removeEventFilter(this); // init 安装的应用级过滤器必须反装配（对齐 shutdown 契约）
 }
 
 void SelectionTranslateModule::triggerTranslate()
@@ -121,10 +122,12 @@ TranslateCard *SelectionTranslateModule::ensureCard()
     if (!m_card) {
         // 全局唯一实例，随 QApplication 退出清理
         m_card = new TranslateCard();
-        // 翻译请求：用户点击卡片内翻译按钮或新划词触发
+        // 翻译/解释/总结/改写请求：用户点击卡片内动作按钮或新划词触发
         connect(m_card, &TranslateCard::translateRequested, this,
-                [this](const QString &text, const QString &fromLang, const QString &toLang) {
-                    m_translator->translate(text, fromLang, toLang, false);
+                [this](const QString &text, const QString &fromLang, const QString &toLang,
+                       int action) {
+                    m_translator->translate(text, fromLang, toLang, false,
+                                            static_cast<LlmAction>(action));
                 });
         // 用户主动关闭（关闭按钮 / Esc）：走统一隐藏路径清理状态
         connect(m_card, &TranslateCard::closed, this, [this] { hideCard(); });

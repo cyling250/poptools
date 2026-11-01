@@ -23,7 +23,12 @@ LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
             || msg == WM_RBUTTONDOWN || msg == WM_NCRBUTTONDOWN
             || msg == WM_MBUTTONDOWN) {
             const auto *info = reinterpret_cast<const MSLLHOOKSTRUCT *>(lParam);
-            emit g_mouseHookInstance->mousePressed(QPoint(info->pt.x, info->pt.y));
+            // 排队转发（原先在钩子回调内同步 emit）：低级钩子回调有严格超时，
+            // 槽若耗时超限会被系统静默摘钩且无提示；排队把处理挪回事件循环，
+            // 回调本身只做一次入队
+            QMetaObject::invokeMethod(g_mouseHookInstance, "mousePressed",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(QPoint, QPoint(info->pt.x, info->pt.y)));
         }
     }
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
@@ -36,6 +41,10 @@ GlobalMouseHook::GlobalMouseHook(QObject *parent)
     : QObject(parent)
 {
 #ifdef Q_OS_WIN
+    // 全局仅一个实例（划词翻译卡片全局唯一）：二次构造会覆盖静态指针，
+    // 使第一个实例的钩子回调路由到错误对象
+    Q_ASSERT_X(g_mouseHookInstance == nullptr, "GlobalMouseHook",
+               "GlobalMouseHook 只允许一个实例（划词卡片为全局唯一浮窗）");
     g_mouseHookInstance = this;
 #endif
 }

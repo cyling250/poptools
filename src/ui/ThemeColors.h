@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QtGlobal>
@@ -39,7 +40,22 @@ struct ThemeColors
     const char *errBorder = nullptr;    // 错误态边框
     const char *closeText = nullptr;    // 关闭按钮文字（纯黑/纯白）
     const char *closeHover = nullptr;   // 关闭按钮悬停文字（强调蓝）
+    const char *accent = nullptr;       // 主色（按钮实底 / 焦点边框 / 选中态）
+    const char *accentHover = nullptr;  // 主色悬停（主色实底按钮）
+    const char *successText = nullptr;  // 成功态文字（测试连接 ✓）
 };
+
+// 截图覆盖层绘制语义色（paintEvent 直绘用）。强调色统一为应用主色 #2B6FF2
+// （此前 4 种蓝并存：#2B6FF2 / (0,120,255) / (0,150,255) / #0078FF）；
+// 语义色保持独立：智能框选橙（区别于选区蓝）、标注选中绿（区别于选区语言）。
+// 覆盖层恒为深色蒙版语境，不随系统主题切换
+namespace overlay {
+inline QColor accent()      { return QColor(0x2B, 0x6F, 0xF2); } // 选区框 / 手柄 / 尺寸徽章 / 扫描线
+inline QColor accentBadge() { QColor c = accent(); c.setAlpha(235); return c; }
+inline QColor smartOrange() { return QColor(255, 140, 0); }      // 智能框选预高亮
+inline QColor itemGreen()   { return QColor(0, 200, 120); }      // 标注选中态
+inline QColor mask()        { return QColor(0, 0, 0, 105); }     // 压暗蒙版
+} // namespace overlay
 
 inline bool systemSchemeDark()
 {
@@ -59,6 +75,7 @@ inline ThemeColors uiThemeColors(bool dark)
         c.line = "#2A2A2A";
         c.errText = "#FF6B6B";      c.errBg = "#2A0000";        c.errBorder = "#5C0000";
         c.closeText = "#FFFFFF";    c.closeHover = "#2B6FF2";
+        c.accent = "#2B6FF2";       c.accentHover = "#1A5CDB";  c.successText = "#4CC38A";
     } else {
         c.cardBg = "#FFFFFF";       c.cardBorder = "#D9D9D9";
         c.title = "#000000";        c.sectionTitle = "#000000";  c.body = "#000000";
@@ -68,6 +85,7 @@ inline ThemeColors uiThemeColors(bool dark)
         c.line = "#E0E0E0";
         c.errText = "#C0392B";      c.errBg = "#FDF0EF";        c.errBorder = "#F5B7B1";
         c.closeText = "#000000";    c.closeHover = "#2B6FF2";
+        c.accent = "#2B6FF2";       c.accentHover = "#1A5CDB";  c.successText = "#1E8E3E";
     }
     return c;
 }

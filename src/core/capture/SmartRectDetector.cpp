@@ -86,15 +86,17 @@ public slots:
             m_uia->Release();
             m_uia = nullptr;
         }
-        if (m_comInit)
-        {
-            CoUninitialize();
-            m_comInit = false;
-        }
         if (m_lastEl)
         {
             m_lastEl->Release();
             m_lastEl = nullptr;
+        }
+        // UIA 元素引用必须在 COM STA 关闭（CoUninitialize）之前释放：
+        // 跨进程 marshaled 代理在公寓关闭后释放属未定义行为
+        if (m_comInit)
+        {
+            CoUninitialize();
+            m_comInit = false;
         }
         m_lastTop = nullptr;
 #endif
@@ -381,9 +383,10 @@ IUIAutomationElement *DescendDeep(DescentCtx &cx, IUIAutomationElement *node,
             IUIAutomationElement *deeper = DescendDeep(cx, kid.el, kid.rect, depth + 1, &sub);
             if (deeper != kid.el)
             {
+                // 命中更深元素：deeper 是递归转出的新引用；本层全部孩子
+                // （含 kid.el 自己——它既未转移也未被返回）一并释放
                 for (const UiKid &k : kids)
-                    if (k.el != kid.el)
-                        k.el->Release();
+                    k.el->Release();
                 *outRect = sub;
                 return deeper;
             }
@@ -612,9 +615,8 @@ QRect SmartRectDetector::Worker::detect(const Query &q)
         else if (hit)
         {
             hit->Release();
+            hit = nullptr;
         }
-        if (hit)
-            hit->Release();
         m_lastTop = tctx.found;
         if (validRect(best))
             m_lastRect = best;
@@ -653,7 +655,9 @@ QRect SmartRectDetector::Worker::detect(const Query &q)
 
 SmartRectDetector::SmartRectDetector(QObject *parent)
     : QObject(parent)
-    , m_worker(new Worker(this))
+    // 无 parent：QObject 带 parent 时 moveToThread 按 Qt 规则静默失败，
+    // 整套 COM/UIA 检测会滞留 GUI 线程执行（线程形同虚设）
+    , m_worker(new Worker(nullptr))
 {
     m_worker->moveToThread(&m_thread);
     connect(&m_thread, &QThread::started, m_worker, &Worker::init);
@@ -665,7 +669,9 @@ SmartRectDetector::SmartRectDetector(QObject *parent)
 SmartRectDetector::~SmartRectDetector()
 {
     m_thread.quit();
-    m_thread.wait();
+    m_thread.wait(); // finished 已发射，cleanup 已在工作线程执行完毕
+    delete m_worker; // 无 parent，显式回收（线程已停，无并发访问）
+    m_worker = nullptr;
 }
 
 void SmartRectDetector::submit(const QPoint &physPos, qreal dpr, quint64 gen, void *excludeHwnd)

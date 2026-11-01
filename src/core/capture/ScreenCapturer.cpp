@@ -48,7 +48,11 @@ QPoint ScreenCapturer::toPhysical(const QPoint &logicalGlobal)
 {
     QScreen *s = nullptr;
     for (QScreen *sc : QGuiApplication::screens()) {
-        if (sc->geometry().contains(logicalGlobal)) {
+        // 半开区间判定（右/下边界归属本屏）：QRect::contains 不含右/下端点，
+        // 屏幕边界上的像素点会漏判落到主屏，异 DPI 多屏下产生 1px 级错位
+        const QRect g = sc->geometry();
+        if (logicalGlobal.x() >= g.left() && logicalGlobal.x() < g.left() + g.width()
+            && logicalGlobal.y() >= g.top() && logicalGlobal.y() < g.top() + g.height()) {
             s = sc;
             break;
         }

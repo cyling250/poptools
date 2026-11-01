@@ -39,7 +39,10 @@ bool AppServices::registerHotKey(quint32 vk, quint32 modifiers,
     if (hotkey) {
         ok = hotkey->registerKey(vk, id, modifiers);
         if (!ok)
-            m_failedHotKeyNames.append(hotKeyDisplayName(vk, modifiers));
+            // 失败名带具体原因（"已被其他程序占用"/Win32 错误码），
+            // 由组合根气泡透出——原先一律说"被占用"，参数错误时误导排查
+            m_failedHotKeyNames.append(hotKeyDisplayName(vk, modifiers)
+                                       + QStringLiteral("：") + hotkey->lastError());
     }
     m_hotkeyCallbacks.insert(id, std::move(triggered));
     return ok;

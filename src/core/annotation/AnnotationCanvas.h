@@ -24,7 +24,7 @@ class AnnotationCanvas
 {
 public:
     QVector<AnnotationItem> items;   // 当前标注列表
-    QColor color = Qt::red;          // 当前画笔/边框颜色
+    QColor color = QColor("#EF4444"); // 当前画笔/边框颜色（与工具栏现代调色板主红一致）
     qreal width = 2.0;               // 当前线宽
     bool filled = false;             // 矩形/椭圆是否填充
     Tool tool = Tool::Rect;          // 当前工具

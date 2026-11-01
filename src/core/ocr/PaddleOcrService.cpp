@@ -47,6 +47,33 @@ static QRect quadToRect(const QJsonArray &box)
 PaddleOcrService::PaddleOcrService(QObject *parent)
     : QObject(parent)
 {
+    // 识别超时看门狗：子进程活着但不响应时 m_busy 原先永真，后续请求被静默
+    // 丢弃且无报错（用户视角"扫描永远转圈"）。超时杀进程，下次请求自动重启
+    m_timeoutTimer = new QTimer(this);
+    m_timeoutTimer->setSingleShot(true);
+    m_timeoutTimer->setInterval(20000);
+    connect(m_timeoutTimer, &QTimer::timeout, this, [this]
+    {
+        if (!m_busy)
+            return;
+        if (m_process)
+            m_process->kill(); // 触发 CrashExit finished，收尾路径不会重复报错
+        fail(QStringLiteral("OCR 识别超时（20 秒无响应），引擎已重启，请重试"));
+    });
+}
+
+// 请求收尾（不含 emit）：停超时看门狗、清临时文件、复位忙态
+void PaddleOcrService::finishRequest()
+{
+    m_timeoutTimer->stop();
+    m_busy = false;
+    cleanupTemp();
+}
+
+void PaddleOcrService::fail(const QString &msg)
+{
+    finishRequest();
+    emit ocrBoxesFinished(false, QVector<OcrBox>(), msg);
 }
 
 PaddleOcrService::~PaddleOcrService()
@@ -87,13 +114,9 @@ void PaddleOcrService::ensureProcess()
             if (status == QProcess::CrashExit && m_busy)
             {
                 // 正在处理中崩溃 → 报错
-                m_busy = false;
-                if (m_boxesMode)
-                    emit ocrBoxesFinished(false, QVector<OcrBox>(),
-                                          QStringLiteral("OCR 引擎进程意外退出"));
-                else
-                    emit ocrFinished(false, QString(),
-                                     QStringLiteral("OCR 引擎进程意外退出"));
+                finishRequest();
+                emit ocrBoxesFinished(false, QVector<OcrBox>(),
+                                      QStringLiteral("OCR 引擎进程意外退出"));
             }
         });
     }
@@ -106,20 +129,9 @@ void PaddleOcrService::ensureProcess()
     // 等待进程启动（不等待初始化完成，模型加载在后台进行）
     if (!m_process->waitForStarted(5000))
     {
-        m_busy = false;
-        emit ocrBoxesFinished(false, QVector<OcrBox>(),
-                              QStringLiteral("无法启动 OCR 引擎进程"));
+        fail(QStringLiteral("无法启动 OCR 引擎进程"));
         return;
     }
-}
-
-void PaddleOcrService::recognize(const QImage &image)
-{
-    if (m_busy || image.isNull())
-        return;
-    m_busy = true;
-    m_boxesMode = false;
-    sendImage(image);
 }
 
 void PaddleOcrService::recognizeBoxes(const QImage &image)
@@ -127,7 +139,6 @@ void PaddleOcrService::recognizeBoxes(const QImage &image)
     if (m_busy || image.isNull())
         return;
     m_busy = true;
-    m_boxesMode = true;
     sendImage(image);
 }
 
@@ -140,23 +151,28 @@ void PaddleOcrService::sendImage(const QImage &image)
     m_tempFile = tempDir + QStringLiteral("/poptools_ocr_")
                  + QUuid::createUuid().toString(QUuid::WithoutBraces)
                  + QStringLiteral(".png");
-    image.save(m_tempFile, "PNG");
+    if (!image.save(m_tempFile, "PNG"))
+    {
+        fail(QStringLiteral("无法写入 OCR 临时图片文件"));
+        return;
+    }
 
     // 确保进程运行
     ensureProcess();
     if (!m_process || m_process->state() != QProcess::Running)
     {
-        m_busy = false;
-        cleanupTemp();
-        emit ocrBoxesFinished(false, QVector<OcrBox>(),
-                              QStringLiteral("OCR 引擎未运行"));
+        fail(QStringLiteral("OCR 引擎未运行"));
         return;
     }
 
-    // 发送命令 (管道模式：JSON 命令 + 换行符)
-    const QByteArray cmd = "{\"image_path\":\"" + m_tempFile.toUtf8() + "\"}\n";
+    // 发送命令 (管道模式：JSON 命令 + 换行符；经 QJsonDocument 构造保证路径转义)
+    const QByteArray cmd = QJsonDocument(
+                               QJsonObject{{QStringLiteral("image_path"), m_tempFile}})
+                               .toJson(QJsonDocument::Compact)
+                           + '\n';
     m_buffer.clear();
     m_process->write(cmd);
+    m_timeoutTimer->start(); // 识别超时看门狗开表
 }
 
 void PaddleOcrService::onReadyRead()
@@ -188,7 +204,6 @@ void PaddleOcrService::onReadyRead()
         {
             // 成功识别
             const QJsonArray data = root.value(QStringLiteral("data")).toArray();
-            QString fullText;
             QVector<OcrBox> boxes;
 
             for (const QJsonValue &val : data)
@@ -197,11 +212,6 @@ void PaddleOcrService::onReadyRead()
                 const QString text = item.value(QStringLiteral("text")).toString().trimmed();
                 if (text.isEmpty())
                     continue;
-
-                // 构建 fullText
-                if (!fullText.isEmpty())
-                    fullText += '\n';
-                fullText += text;
 
                 // 构建 OcrBox
                 const QJsonArray boxArr = item.value(QStringLiteral("box")).toArray();
@@ -217,39 +227,24 @@ void PaddleOcrService::onReadyRead()
                 }
             }
 
-            m_busy = false;
-            cleanupTemp();
-
-            if (m_boxesMode)
-                emit ocrBoxesFinished(true, boxes, QString());
-            else
-                emit ocrFinished(true, fullText, QString());
+            finishRequest();
+            emit ocrBoxesFinished(true, boxes, QString());
         }
         else if (code == 101)
         {
             // 未识别到文字
-            m_busy = false;
-            cleanupTemp();
+            finishRequest();
             const QString msg = root.value(QStringLiteral("msg")).toString();
-            if (m_boxesMode)
-                emit ocrBoxesFinished(false, QVector<OcrBox>(),
-                                      msg.isEmpty() ? QStringLiteral("未识别到文字") : msg);
-            else
-                emit ocrFinished(false, QString(),
-                                 msg.isEmpty() ? QStringLiteral("未识别到文字") : msg);
+            emit ocrBoxesFinished(false, QVector<OcrBox>(),
+                                  msg.isEmpty() ? QStringLiteral("未识别到文字") : msg);
         }
         else
         {
             // 其他错误码
-            m_busy = false;
-            cleanupTemp();
+            finishRequest();
             const QString msg = root.value(QStringLiteral("msg")).toString();
-            if (m_boxesMode)
-                emit ocrBoxesFinished(false, QVector<OcrBox>(),
-                                      msg.isEmpty() ? QStringLiteral("OCR 识别失败") : msg);
-            else
-                emit ocrFinished(false, QString(),
-                                 msg.isEmpty() ? QStringLiteral("OCR 识别失败") : msg);
+            emit ocrBoxesFinished(false, QVector<OcrBox>(),
+                                  msg.isEmpty() ? QStringLiteral("OCR 识别失败") : msg);
         }
         return; // 只处理第一个响应行（后续行留到下次 readyRead）
     }

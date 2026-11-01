@@ -13,6 +13,7 @@
 #include "CaptureContext.h"
 
 class QScreen;  // Qt 全局类
+class QLabel;   // Qt 全局类
 
 namespace poptools {
 
@@ -99,19 +100,28 @@ private:
     QRect m_smartPressRect;     // 按下时保存的预高亮矩形
     bool m_smartPressPending = false;
     QPoint m_smartPressPos;     // 按下点（拖动转框选时作为锚点）
+    bool m_dblReselect = false; // 双击选区外重画：待吞掉的双击尾随 release（否则 1px 退化矩形触发秒退）
 
     // 取色放大卡片（Selecting 态）：screen 像素图像懒加载缓存
     mutable QImage m_screenImage;
+    QPixmap m_baseScaled;    // 底图缩放缓存（每轮截图/尺寸变化只算一次；原先每帧全屏平滑缩放）
+    QRect m_lastColorCardRect; // 取色卡片上次绘制矩形（悬停局部重绘用，全局逻辑→窗口坐标）
 
     // ---- OCR 扫描动效（点击【文】时选区内的扫描线，提示用户"没卡死"） ----
     bool m_ocrScanning = false;
     qreal m_ocrScanPos = 0.0; // 扫描线位置 0.0~1.0（选区顶部→底部）
     QTimer m_ocrScanTimer;
 
+    // ---- ESC 退出确认（防误触）：画布有墨迹时，首次 ESC 武装并轻提示，
+    //      1 秒内再按 ESC 才真正退出；按其他键 / 点击鼠标即解除并继续编辑 ----
+    bool m_exitArmActive = false;
+    QTimer m_exitArmTimer;        // 武装超时（自动解除，提示不常驻）
+    QLabel *m_escToast = nullptr; // 「再按一次 ESC 退出」胶囊提示（不拦鼠标）
+    bool hasInk() const { return !m_canvas.items.isEmpty(); } // 画布是否有墨迹（标注 / OCR 文字框）
+
     // ---- 功能控制器（组合模式：构造时装配并注册） ----
     CaptureContext m_ctx;                                // 共享上下文（依赖注入）
-    PaddleOcrService *m_ocrService = nullptr;            // 共享 OCR 引擎（非拥有）
-    std::unique_ptr<PaddleOcrService> m_ownedOcr;        // 未注入时的兜底实例
+    PaddleOcrService *m_ocrService = nullptr;            // 共享 OCR 引擎（非拥有，必须注入）
     std::unique_ptr<SelectionController> m_selectionCtrl;
     std::unique_ptr<AnnotationEditor> m_annotationEditor;
     std::unique_ptr<ToolDrawingController> m_toolDrawing;
@@ -128,11 +138,15 @@ private:
     void exitCapture();        // 离开截图模式（隐藏窗口 + 工具栏）
     void confirm();            // 确认截图（Enter / 双击）
     void cancel();             // 取消截图（Esc）
+    void armExitConfirm();    // ESC 退出确认：进入武装态（显示轻提示 + 启动超时）
+    void disarmExitConfirm(); // 解除武装（隐藏轻提示、停表）；超时/其他操作也走此路
+    void positionEscToast();  // 轻提示定位：工具栏上缘居中（贴近窗口上缘转下方）
     void resetInteraction();   // 停止选区/标注的拖动缩放（文字编辑等入口）
     void showOcrPanel(const QString &text); // 面板模式：显示文字栏（OCR 文字）
     void positionOcrPanel();   // 文字栏定位：选区外（右侧/上方）优先，放不下则选区内
     QColor screenColorAt(const QPoint &logicalGlobal) const; // 鼠标下像素颜色（取色卡片）
     void paintColorPicker(QPainter &p) const; // 绘制取色放大卡片（Selecting 态）
+    QRect colorPickerCardRect(const QPoint &cursorPos) const; // 取色卡片几何（绘制与局部重绘共用）
 
     // 工具栏槽（路由到控制器）
     void onToolSelected(Tool t);

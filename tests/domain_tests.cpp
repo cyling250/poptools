@@ -10,9 +10,14 @@
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
 #include "core/hotkey/HotKeyNames.h"
+#include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryDir>
 
 using namespace poptools;
 
@@ -212,6 +217,85 @@ private slots:
         QVERIFY(registry.module(QStringLiteral("missing")) == nullptr);
 
         registry.shutdownAll(); // 应安全无操作（Fake 未覆写 shutdown）
+    }
+
+    // ---- Translator 请求体构造（双协议纯函数，单一实现源） ----
+    void translator_build_request_body()
+    {
+        // OpenAI：messages = [system, user]，thinking 字段随 disableThinking 取舍
+        const QJsonObject o = QJsonDocument::fromJson(
+            buildTranslateRequestBody(ApiFormat::OpenAI, "m1", "SYS", "TEXT", true)).object();
+        QCOMPARE(o.value("model").toString(), QStringLiteral("m1"));
+        QCOMPARE(o.value("messages").toArray().size(), 2);
+        QCOMPARE(o.value("messages").toArray()[0].toObject().value("role").toString(),
+                 QStringLiteral("system"));
+        QCOMPARE(o.value("messages").toArray()[1].toObject().value("content").toString(),
+                 QStringLiteral("TEXT"));
+        QVERIFY(o.contains("thinking"));
+
+        const QJsonObject o2 = QJsonDocument::fromJson(
+            buildTranslateRequestBody(ApiFormat::OpenAI, "m1", "SYS", "T", false)).object();
+        QVERIFY(!o2.contains("thinking"));
+
+        // Anthropic：system 独立于 messages、max_tokens 必填、messages 只有 user
+        const QJsonObject a = QJsonDocument::fromJson(
+            buildTranslateRequestBody(ApiFormat::Anthropic, "m2", "SYS", "TEXT", true)).object();
+        QCOMPARE(a.value("system").toString(), QStringLiteral("SYS"));
+        QCOMPARE(a.value("max_tokens").toInt(), 8192);
+        QCOMPARE(a.value("messages").toArray().size(), 1);
+        QVERIFY(a.contains("thinking"));
+
+        const QJsonObject a2 = QJsonDocument::fromJson(
+            buildTranslateRequestBody(ApiFormat::Anthropic, "m2", "SYS", "T", false)).object();
+        QVERIFY(!a2.contains("thinking"));
+    }
+
+    // ---- Translator 动作提示词（翻译 / 解释 / 总结 / 改写） ----
+    void translator_action_prompts()
+    {
+        // 翻译（OCR 来源）：保留 from→to 指令与 OCR 容错说明
+        const QString tr = translateActionPrompt(LlmAction::Translate, "en", "zh", true);
+        QVERIFY(tr.contains("Translate"));
+        QVERIFY(tr.contains("OCR"));
+        QVERIFY(tr.contains("Chinese"));
+        // 解释 / 总结：输出语言 = 目标语言
+        QVERIFY(translateActionPrompt(LlmAction::Explain, "auto", "zh", false).contains("Chinese"));
+        QVERIFY(translateActionPrompt(LlmAction::Summarize, "auto", "en", false).contains("English"));
+        // 改写：保持原文语言
+        QVERIFY(translateActionPrompt(LlmAction::Rewrite, "en", "zh", false)
+                    .contains("original language"));
+        // 动作键往返 + 未知键回退翻译 + 下拉项数量
+        QCOMPARE(llmActionKey(llmActionFromKey(QStringLiteral("rewrite"))),
+                 QStringLiteral("rewrite"));
+        QVERIFY(llmActionFromKey(QStringLiteral("bogus")) == LlmAction::Translate);
+        QCOMPARE(llmActionNames().size(), 4);
+    }
+
+    // ---- Settings：注入式实例读写与非法值回退 ----
+    void settings_injected_roundtrip()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Settings s(dir.filePath("test.ini"));
+
+        s.setCaptureHotKeyVk(0x71); // F2
+        QCOMPARE(s.captureHotKeyVk(), quint32(0x71));
+        // 非法值（0 / 越界）读取时回退默认 F1——否则 vk=0 会传进 RegisterHotKey
+        s.setCaptureHotKeyVk(0);
+        QCOMPARE(s.captureHotKeyVk(), quint32(0x70));
+        s.setCaptureHotKeyVk(0xFFFF);
+        QCOMPARE(s.captureHotKeyVk(), quint32(0x70));
+
+        // 划词热键同规则
+        s.setSelectionTranslateHotKey(0x59 /* Y */, 0x0007);
+        QCOMPARE(s.selectionTranslateHotKeyVk(), quint32(0x59));
+        s.setSelectionTranslateHotKey(0, 0x0007);
+        QCOMPARE(s.selectionTranslateHotKeyVk(), quint32(0x58));
+
+        // 持久化：同路径重新打开读到已保存值
+        s.setApiBaseUrl(QStringLiteral("https://example.com/v1"));
+        Settings s2(dir.filePath("test.ini"));
+        QCOMPARE(s2.apiBaseUrl(), QStringLiteral("https://example.com/v1"));
     }
 };
 

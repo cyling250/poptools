@@ -64,6 +64,16 @@ PinWindow::PinWindow(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
     // 支持多张贴图并存：每次 F3 创建新实例，关闭（清除/销毁/双击）即销毁
     setAttribute(Qt::WA_DeleteOnClose);
+
+    // 投影重算防抖：滚轮缩放每格都要 resize 顶层窗口（DWM 重分配），投影轮廓
+    // 再逐格全量重算会让连滚掉帧；50ms 停歇后重算（绘制暂用旧轮廓，视觉无感）
+    m_shadowDebounce.setSingleShot(true);
+    m_shadowDebounce.setInterval(50);
+    connect(&m_shadowDebounce, &QTimer::timeout, this, [this]
+    {
+        remakeShadow();
+        update();
+    });
 }
 
 void PinWindow::pin(const QPixmap &pixmap, const QPoint &globalTopLeft)
@@ -178,14 +188,23 @@ void PinWindow::mouseReleaseEvent(QMouseEvent *event)
 void PinWindow::wheelEvent(QWheelEvent *event)
 {
     // 滚轮缩放：每格 ±0.1（避免跨度太大），0.2x ~ 5x；
-    // 锚点 = 内容左上角（resize 保持 topLeft，内容区域左上角固定）
+    // 锚点 = 鼠标位置：光标下的内容点缩放前后保持不动（符合"对准哪里放大哪里"直觉）
+    const QPointF cursor = event->globalPosition().toPoint()
+                           - (frameGeometry().topLeft() + QPoint(kMargin, kMargin));
+    const qreal oldScale = m_scale;
     const qreal delta = (event->angleDelta().y() / 120.0) * 0.1;
     m_scale = qBound(0.2, m_scale + delta, 5.0);
+    if (qFuzzyCompare(m_scale, oldScale))
+        return; // 已到缩放边界
+
+    // 新内容左上角 = 光标 - 光标下内容点偏移 × 新旧比例（内容点随比例缩放）
+    const QPointF newContentTopLeft =
+        event->globalPosition().toPoint() - cursor * (m_scale / oldScale);
     const QSize target = contentSize() + QSize(kMargin * 2, kMargin * 2);
-    if (target != size()) {
+    if (target != size())
         resize(target);
-        remakeShadow(); // 内容尺寸变了 → 重算投影轮廓
-    }
+    move(newContentTopLeft.toPoint() - QPoint(kMargin, kMargin));
+    m_shadowDebounce.start(); // 投影轮廓停歇后重算（防抖）
     update();
 }
 
@@ -199,10 +218,28 @@ void PinWindow::mouseDoubleClickEvent(QMouseEvent *event)
 void PinWindow::contextMenuEvent(QContextMenuEvent *event)
 {
     QMenu menu(this);
+    // OCR/翻译：贴图内容直接识别（结果经 PinModule 走托盘气泡 + 剪贴板）
+    QAction *ocrAct = menu.addAction(QStringLiteral("识别文字"));
+    QAction *translateAct = menu.addAction(QStringLiteral("翻译"));
+    if (m_pixmap.isNull()) { // 无内容（理论不可达）时禁用
+        ocrAct->setEnabled(false);
+        translateAct->setEnabled(false);
+    }
+    menu.addSeparator();
     QAction *clearAct = menu.addAction("清除");   // 仅清除屏幕上的该截图
     QAction *destroyAct = menu.addAction("销毁"); // 清除屏幕和文件夹中的图
     QAction *chosen = menu.exec(event->globalPos());
+    if (!chosen)
+        return;
 
+    if (chosen == ocrAct) {
+        emit ocrRequested(m_pixmap);
+        return;
+    }
+    if (chosen == translateAct) {
+        emit translateRequested(m_pixmap);
+        return;
+    }
     if (chosen == destroyAct && !m_savedPath.isEmpty())
         QFile::remove(m_savedPath); // 删除默认文件夹中的文件
     if (chosen == clearAct || chosen == destroyAct)

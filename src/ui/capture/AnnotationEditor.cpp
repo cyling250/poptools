@@ -2,6 +2,8 @@
 
 #include "SelectionController.h"
 
+#include "ui/ThemeColors.h"
+
 namespace poptools {
 
 // 标注控制点方块（局部坐标）：线段类端点（P0/P1）经 handlePos 定位
@@ -167,14 +169,19 @@ void AnnotationEditor::paintSelected(QPainter &p) const
     if (!isSegment)
     {
         const QRectF b = AnnotationPainter::itemBounds(selIt);
-        p.setPen(QPen(QColor(0, 200, 120), 1, Qt::DashLine));
+        p.setPen(QPen(overlay::itemGreen(), 1, Qt::DashLine));
         p.setBrush(Qt::NoBrush);
         p.drawRect(b);
     }
-    p.setPen(QPen(QColor(0, 200, 120), 1));
-    p.setBrush(Qt::white);
+    // 控制点：圆点手柄（与选区手柄同一视觉语言，绿色系区分"标注选中"）
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(QColor(255, 255, 255, 240));
+    p.setPen(QPen(overlay::itemGreen(), 1.5));
     for (Handle h : itemHandles)
-        p.drawRect(handleRect(selIt, h));
+    {
+        const QPointF c = handleRect(selIt, h).center();
+        p.drawEllipse(c, kHandle + 1.0, kHandle + 1.0);
+    }
 }
 
 Qt::CursorShape AnnotationEditor::cursorAt(const QPointF &local) const

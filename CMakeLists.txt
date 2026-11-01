@@ -4,6 +4,12 @@ project(PopTools VERSION 0.3.2 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 源码/执行字符集统一 UTF-8：源文件为 UTF-8（无 BOM），MSVC 默认按系统 ACP
+# 解释裸中文字面量，在 GBK 代码页机器上编译期即乱码（枚举提示/工具栏文案等）
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -24,9 +30,10 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg)
 
 qt_standard_project_setup()
 
-# ---- 分层：core（核心域） + ui（界面层） + app（可执行） ----
+# ---- 分层：core（核心域） + ui（界面层） + app（基础设施 + 功能模块 + 可执行） ----
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
+add_subdirectory(src/app)
 
 # ---- 单元测试（可选，默认开启；ctest 运行） ----
 option(POPTOOLS_BUILD_TESTS "Build unit tests" ON)
@@ -39,23 +46,14 @@ qt_add_executable(PopTools WIN32
     src/main.cpp
     src/app/MainWindow.cpp
     src/app/MainWindow.h
-    src/app/AppServices.cpp
-    src/app/AppServices.h
-    src/app/FeatureRegistry.h
-    src/app/IFeatureModule.h
-    src/app/modules/CaptureModule.cpp
-    src/app/modules/CaptureModule.h
-    src/app/modules/PinModule.cpp
-    src/app/modules/PinModule.h
-    src/app/modules/SelectionTranslateModule.cpp
-    src/app/modules/SelectionTranslateModule.h
     src/app/app.rc
     src/resources/resources.qrc
 )
 
 target_link_libraries(PopTools PRIVATE
-    poptools_core
-    poptools_ui
+    poptools_modules      # 功能模块聚合（截图 / 贴图 / 划词翻译；拔插改此处一行）
+    poptools_ui_settings  # 设置界面（外壳自有，不属于任何模块）
+    poptools_app_infra    # 组合根基础设施（AppServices / FeatureRegistry）
 )
 
 # Qt 运行库：构建（make）完成后由本地 Qt 套件自带的 windeployqt 自动部署到

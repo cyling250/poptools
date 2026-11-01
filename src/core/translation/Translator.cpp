@@ -5,49 +5,15 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QUrl>
 
 namespace poptools {
 
 namespace {
 
-// 语言代码 → 提示词中的自然语言名称（模型更易理解）
-QString langName(const QString &code)
-{
-    if (code == "zh") return "Chinese";
-    if (code == "en") return "English";
-    if (code == "ja") return "Japanese";
-    if (code == "ko") return "Korean";
-    if (code == "fr") return "French";
-    if (code == "de") return "German";
-    if (code == "es") return "Spanish";
-    if (code == "ru") return "Russian";
-    if (code == "auto") return "the source language (detect it from the text)";
-    return code; // 用户自定义（如 "pt"）
-}
-
-// 专业翻译提示词：告知文本由 OCR 从截图提取（可能有错字/标点缺失/夹杂 UI 文案），
-// 要求按实际语境翻译且只输出翻译结果，不附带任何其他内容。
-// 翻译是轻量任务，明确禁止输出思考过程（配合请求体 thinking 禁用字段双保险）。
-QString buildBasePrompt(const QString &fromLang, const QString &toLang, bool isOcr)
-{
-    QString prompt;
-    if (isOcr) {
-        prompt = QStringLiteral(
-            "You are a professional translation engine. The text below was extracted from a "
-            "screenshot via OCR, so it may contain typos, missing or incorrect punctuation, or "
-            "stray content such as UI labels, numbers, or code. Translate the text from %1 to %2 "
-            "according to its actual context and meaning. Output ONLY the translated text — no "
-            "explanations, no notes, no reasoning, no <think> tags, no extra content.");
-    } else {
-        // 划词翻译：文本直接来自用户选中，无 OCR 噪声
-        prompt = QStringLiteral(
-            "You are a professional translation engine. Translate the text below from %1 to %2. "
-            "Output ONLY the translated text — no explanations, no notes, no reasoning, "
-            "no <think> tags, no extra content.");
-    }
-    return prompt.arg(langName(fromLang), langName(toLang));
-}
+// 专业翻译/解释/总结/改写提示词统一在 Translator.h 的纯函数
+// translateActionPrompt()（可测、双端共用），此处不再重复实现。
 
 // 用户在设置中配置的翻译领域与专有名词术语表 → 追加到系统提示词。
 // 两项均未配置时返回空串，提示词保持最简。
@@ -84,7 +50,8 @@ Translator::Translator(QObject *parent)
 {
 }
 
-void Translator::translate(const QString &text, const QString &fromLang, const QString &toLang, bool isOcr)
+void Translator::translate(const QString &text, const QString &fromLang, const QString &toLang,
+                           bool isOcr, LlmAction action)
 {
     if (m_busy || text.trimmed().isEmpty())
         return;
@@ -94,12 +61,13 @@ void Translator::translate(const QString &text, const QString &fromLang, const Q
     m_pendingFrom = fromLang;
     m_pendingTo = toLang;
     m_pendingIsOcr = isOcr;
+    m_pendingAction = action;
     m_tryDisableThinking = true;
-    translateByApi(text, fromLang, toLang, isOcr, true);
+    translateByApi(text, fromLang, toLang, isOcr, true, action);
 }
 
 void Translator::translateByApi(const QString &text, const QString &fromLang, const QString &toLang,
-                                bool isOcr, bool disableThinking)
+                                bool isOcr, bool disableThinking, LlmAction action)
 {
     const Settings &s = Settings::instance();
     const QString baseUrl = s.apiBaseUrl();
@@ -117,43 +85,21 @@ void Translator::translateByApi(const QString &text, const QString &fromLang, co
     QNetworkRequest req(QUrl(base + apiEndpointPath(format, base)));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     applyApiAuthHeaders(req, format, apiKey);
+    // 传输超时：服务端挂起时原先没有超时，m_busy 永真、后续请求被静默丢弃
+    // 且无任何报错——用户视角是"翻译永远转圈"。超时后 finished 触发，
+    // onReplyFinished 按 OperationCanceledError 报错复位
+    req.setTransferTimeout(15000);
 
-    const QString systemPrompt =
-        buildBasePrompt(fromLang, toLang, isOcr) + buildDomainAndTermsPrompt();
+    // 动作提示词（纯函数）；领域与术语表仅对翻译动作注入——术语映射指令
+    // （"必须使用指定译名"）对解释/总结/改写只会造成干扰
+    QString systemPrompt = translateActionPrompt(action, fromLang, toLang, isOcr);
+    if (action == LlmAction::Translate)
+        systemPrompt += buildDomainAndTermsPrompt();
 
-    QByteArray payload;
-    if (format == ApiFormat::Anthropic) {
-        // Anthropic /v1/messages：system 独立于 messages，max_tokens 必填。
-        // DeepSeek 兼容端点实测默认开思考（content 首块为 thinking），显式关闭；
-        // 官方 Anthropic 思考默认关闭，不识别 disabled 时按 400/422 降级重发
-        QJsonObject body{
-            {"model", model},
-            {"max_tokens", 8192},
-            {"temperature", 0.2},
-            {"system", systemPrompt},
-            {"messages", QJsonArray{QJsonObject{{"role", "user"}, {"content", text}}}},
-        };
-        if (disableThinking)
-            body.insert("thinking", QJsonObject{{"type", "disabled"}});
-        payload = QJsonDocument(body).toJson();
-    } else {
-        // 单问答形式（messages 只有 system + user 两条，无历史上下文）
-        QJsonObject body{
-            {"model", model},
-            {"messages", QJsonArray{
-                QJsonObject{{"role", "system"}, {"content", systemPrompt}},
-                QJsonObject{{"role", "user"}, {"content", text}},
-            }},
-            {"temperature", 0.2},
-        };
-        if (disableThinking) {
-            // 显式关闭思考模式（DeepSeek V4 实测：thinking.type 合法值为
-            // adaptive/enabled/disabled，翻译是短平快任务，思维链只会拖慢出字。
-            // 端点不识别该字段时按 400/422 降级重发）
-            body.insert("thinking", QJsonObject{{"type", "disabled"}});
-        }
-        payload = QJsonDocument(body).toJson();
-    }
+    // 请求体构造收敛为纯函数 buildTranslateRequestBody（Translator.h）：
+    // 双协议只此一处实现，ApiTester 与单元测试共用
+    const QByteArray payload =
+        buildTranslateRequestBody(format, model, systemPrompt, text, disableThinking);
 
     m_busy = true;
     m_reply = m_nam.post(req, payload);
@@ -169,19 +115,28 @@ void Translator::onReplyFinished()
     reply->deleteLater();
     m_reply = nullptr;
 
-    // 端点不认识 thinking 禁用字段（严格校验的服务返回 400/422，两种格式均可能）：
-    // 去掉该字段降级重发一次，仅损失"关思考"优化，不影响翻译可用性
+    const QByteArray raw = reply->readAll();
     const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    // 端点不认识 thinking 禁用字段（严格校验的服务返回 400/422，两种格式均可能）：
+    // 去掉该字段降级重发一次，仅损失"关思考"优化，不影响翻译可用性。
+    // 只对"字段不被识别"类拒绝重发——模型名错误等真 400 重发也不会成功，白发
     if (reply->error() != QNetworkReply::NoError && m_tryDisableThinking
         && (httpStatus == 400 || httpStatus == 422)) {
-        m_tryDisableThinking = false;
-        translateByApi(m_pendingText, m_pendingFrom, m_pendingTo, m_pendingIsOcr, false);
-        return; // 保持 m_busy，等待重发请求完成
+        const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
+        const QString serverMsg = errDoc.object().value("error").toObject().value("message").toString();
+        static const QRegularExpression fieldRejection(
+            QStringLiteral("thinking|unknown (field|parameter)|unrecognized|unexpected|unsupported"),
+            QRegularExpression::CaseInsensitiveOption);
+        if (serverMsg.isEmpty() || fieldRejection.match(serverMsg).hasMatch()) {
+            m_tryDisableThinking = false;
+            translateByApi(m_pendingText, m_pendingFrom, m_pendingTo, m_pendingIsOcr, false,
+                           m_pendingAction);
+            return; // 保持 m_busy，等待重发请求完成
+        }
     }
 
     m_busy = false;
-
-    const QByteArray raw = reply->readAll();
 
     if (reply->error() != QNetworkReply::NoError) {
         // 把晦涩的 Qt 错误串翻译成可读原因：优先透出服务端 JSON 的 error.message
@@ -193,7 +148,9 @@ void Translator::onReplyFinished()
             serverMsg = errDoc.object().value("error").toObject().value("message").toString();
 
         QString msg;
-        if (httpStatus == 401 || httpStatus == 403) {
+        if (reply->error() == QNetworkReply::OperationCanceledError) {
+            msg = QStringLiteral("连接超时（15 秒无响应），请检查网络或代理设置");
+        } else if (httpStatus == 401 || httpStatus == 403) {
             msg = QStringLiteral("API 认证失败（%1）：API Key 无效或未授权，"
                                  "请在设置中重新填写 Key 并用「测试连接」验证").arg(httpStatus);
         } else if (httpStatus == 400 || httpStatus == 422) {

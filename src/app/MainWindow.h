@@ -27,6 +27,7 @@ class MainWindow : public QObject
     Q_OBJECT
 public:
     explicit MainWindow(QObject *parent = nullptr);
+    ~MainWindow() override; // shutdownAll：模块撤销能力槽，先于成员逆序析构
 
 private slots:
     void onShowSettings();

@@ -12,7 +12,14 @@ namespace poptools {
 class Settings
 {
 public:
+    // 单例入口：exe 旁 PopTools.ini（随程序分发、便于查看与备份）
     static Settings &instance();
+
+    // 测试/工具注入用：以指定 ini 路径构造独立实例（不影响单例）
+    explicit Settings(const QString &iniPath)
+        : m_s(iniPath, QSettings::IniFormat)
+    {
+    }
 
     // 截图热键（默认 F1，注册为 VK_F1）
     quint32 captureHotKeyVk() const;
@@ -38,6 +45,11 @@ public:
     QString translateTargetLang() const;
     void setTranslateTargetLang(const QString &code);
 
+    // 记忆的 LLM 动作（划词卡片动作下拉："translate"/"explain"/"summarize"/"rewrite"，
+    // 见 Translator::llmActionKey）
+    QString translateAction() const;
+    void setTranslateAction(const QString &action);
+
     // 翻译领域（如"医学 / 法律"）与专有名词翻译对，注入 Translator 的系统提示词
     QStringList translateDomains() const;
     void setTranslateDomains(const QStringList &domains);
@@ -61,6 +73,8 @@ public:
 
 private:
     Settings();
+    // 落盘并检查可写性（安装到无写权限目录时 sync 静默失败，首次失败告警一次）
+    void syncChecked();
     QSettings m_s;
 };
 

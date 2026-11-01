@@ -2,6 +2,8 @@
 
 #include <QPainterPath>
 
+#include "ui/ThemeColors.h"
+
 namespace poptools {
 
 // ---- 几何（纯函数） ----
@@ -206,13 +208,15 @@ void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect
         mask.addRect(sel);
     if (!highlightRect.isEmpty())
         mask.addRect(highlightRect);
-    p.fillPath(mask, QColor(0, 0, 0, 105));
+    p.fillPath(mask, overlay::mask());
 
     if (selecting && !sel.isEmpty())
     {
-        // 框选过程中：浅蓝虚线框
-        p.setPen(QPen(QColor(0, 150, 255), 1, Qt::DashLine));
+        // 框选过程中：白 3px 底描边（对比层）+ 蓝 1.5px 虚线，任何画面上都可辨
+        p.setPen(QPen(QColor(255, 255, 255, 170), 3, Qt::SolidLine));
         p.setBrush(Qt::NoBrush);
+        p.drawRect(sel);
+        p.setPen(QPen(overlay::accent(), 1.5, Qt::DashLine));
         p.drawRect(sel);
     }
 }
@@ -220,25 +224,49 @@ void SelectionController::paintMaskAndFrame(QPainter &p, const QRect &windowRect
 void SelectionController::paintSelectionFrame(QPainter &p, const QRect &sel) const
 {
     // 蓝色 1.5pt 实线边框（使用主色 #2B6FF2）
-    p.setPen(QPen(QColor(0, 120, 255), 1.5, Qt::SolidLine));
+    p.setPen(QPen(overlay::accent(), 1.5, Qt::SolidLine));
     p.setBrush(Qt::NoBrush);
     p.drawRect(sel);
 
-    // 8 个控制点（白色方块 + 蓝色描边，半透明内填充）
+    // 8 个控制点：圆点手柄（白底蓝描边 + 1px 投影），替代旧直角方块
     const Handle handles[] = {
         Handle::TL, Handle::T, Handle::TR,
         Handle::R, Handle::BR, Handle::B,
         Handle::BL, Handle::L};
-    p.setBrush(QColor(255, 255, 255, 230));
-    p.setPen(QPen(QColor(0, 120, 255), 1));
+    p.setRenderHint(QPainter::Antialiasing);
+    const qreal hr = kHandle + 1.0; // 视觉半径略大于命中半径（kHandle），观感更好抓
     for (Handle h : handles)
-        p.drawRect(handleRect(h).translated(-m_ctx->cap->desktop.topLeft()));
+    {
+        const QPointF c = handleRect(h).translated(-m_ctx->cap->desktop.topLeft()).center();
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 70)); // 投影（向下 1px 偏移）
+        p.drawEllipse(c + QPointF(0.5, 1.0), hr, hr);
+        p.setPen(QPen(overlay::accent(), 1.5));
+        p.setBrush(QColor(255, 255, 255, 240));
+        p.drawEllipse(c, hr, hr);
+    }
 
-    // 尺寸提示（物理分辨率 = 最终输出尺寸）
-    p.setPen(Qt::white);
+    // 尺寸徽章（物理分辨率 = 最终输出尺寸）：主色蓝底白字胶囊，替代裸白字——
+    // 旧实现白字直接打在截图内容上，浅色画面不可读
     const QSize phys = ScreenCapturer::toPhysicalRect(m_ctx->selectionRect()).size();
-    p.drawText(sel.translated(4, -16),
-               QString("%1 × %2").arg(phys.width()).arg(phys.height()));
+    const QString label = QString("%1 × %2").arg(phys.width()).arg(phys.height());
+    QFont f = p.font();
+    f.setPixelSize(12);
+    f.setWeight(QFont::DemiBold);
+    p.setFont(f);
+    const QFontMetrics fm(f);
+    QRectF badge(0, 0, fm.horizontalAdvance(label) + 18, 19);
+    badge.moveLeft(sel.left() + 4);
+    badge.moveTop(sel.top() - 25); // 悬在选区上缘
+    if (badge.top() < 0)           // 选区贴近屏幕上缘 → 徽章移入选区内
+        badge.moveTop(sel.top() + 5);
+    const qreal maxX = m_ctx->cap->desktop.width() - badge.width() - 4;
+    badge.moveLeft(qBound<qreal>(4, badge.left(), qMax<qreal>(4, maxX)));
+    QPainterPath pill;
+    pill.addRoundedRect(badge, badge.height() / 2.0, badge.height() / 2.0);
+    p.fillPath(pill, overlay::accentBadge());
+    p.setPen(Qt::white);
+    p.drawText(badge, Qt::AlignCenter, label);
 }
 
 } // namespace poptools

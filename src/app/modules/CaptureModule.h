@@ -21,6 +21,7 @@ class CaptureModule : public IFeatureModule
 public:
     QString id() const override { return QStringLiteral("capture"); }
     void init(AppServices &services) override;
+    void shutdown() override; // 撤销发布的能力槽（防悬垂）
 
 private:
     AppServices *m_services = nullptr;

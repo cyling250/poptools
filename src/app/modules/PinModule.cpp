@@ -8,15 +8,29 @@
 #include <QPoint>
 #include <QRect>
 #include <QTimer>
+#include <algorithm>
 
 #include "../AppServices.h"
+#include "core/ocr/PaddleOcrService.h"
+#include "core/settings/Settings.h"
+#include "core/translation/Translator.h"
 #include "ui/pin/PinWindow.h"
 
 namespace poptools {
 
+PinModule::PinModule(QObject *parent)
+    : QObject(parent)
+{
+}
+
 void PinModule::init(AppServices &services)
 {
     m_services = &services;
+
+    // 贴图 OCR/翻译的专属翻译服务（单服务单消费者；设置直读，与划词卡片实例互不影响）
+    m_translator = new Translator(this);
+    connect(m_translator, &Translator::translateFinished, this,
+            &PinModule::onTranslateFinished);
 
     // F3：贴剪贴板最新图片。热键在原生事件过滤器中触发：UI 操作（窗口创建/激活）
     // 延迟到事件循环，避免时序问题
@@ -50,7 +64,101 @@ void PinModule::pinFromClipboard()
 
     // 多张贴图并存：每次 F3 创建新实例，互不影响；关闭时（WA_DeleteOnClose）自动销毁
     auto *pin = new PinWindow();
+    // 右键「识别文字 / 翻译」：context = pin，窗口销毁自动断连
+    connect(pin, &PinWindow::ocrRequested, this, &PinModule::onPinOcrRequested);
+    connect(pin, &PinWindow::translateRequested, this, &PinModule::onPinTranslateRequested);
     pin->pin(img, pos);
+}
+
+// ---- 贴图 OCR / 翻译（结果走托盘气泡 + 剪贴板，不弹交互窗） ----
+
+void PinModule::onPinOcrRequested(const QPixmap &img)
+{
+    m_ocrThenTranslate = false;
+    startPinOcr(img);
+}
+
+void PinModule::onPinTranslateRequested(const QPixmap &img)
+{
+    m_ocrThenTranslate = true;
+    startPinOcr(img);
+}
+
+void PinModule::startPinOcr(const QPixmap &img)
+{
+    PaddleOcrService *ocr = m_services->ocr;
+    if (!ocr || !ocr->available()) {
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("OCR 引擎不可用"));
+        return;
+    }
+    if (ocr->busy()) {
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图 OCR"),
+                               QStringLiteral("OCR 正忙（截图识别进行中），请稍后再试"));
+        return;
+    }
+    // 单次请求连接（SingleShotConnection：回包后自动断开，不与截图模块的常驻
+    // 连接互相干扰；结果归属防护另见 OcrController::onBoxes 的 m_ocrPending）
+    connect(ocr, &PaddleOcrService::ocrBoxesFinished, this, &PinModule::onPinOcrFinished,
+            Qt::SingleShotConnection);
+    ocr->recognizeBoxes(img.toImage());
+    if (m_services->notify)
+        m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("正在识别…"));
+}
+
+void PinModule::onPinOcrFinished(bool ok, const QVector<OcrBox> &boxes, const QString &error)
+{
+    if (!ok) {
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图 OCR"),
+                               error.isEmpty() ? QStringLiteral("未识别到文字") : error);
+        return;
+    }
+    // 行序重排（阅读顺序：先上后下、同行先左后右）后拼接
+    QVector<OcrBox> sorted = boxes;
+    std::sort(sorted.begin(), sorted.end(), [](const OcrBox &a, const OcrBox &b) {
+        if (qAbs(a.rect.top() - b.rect.top()) > qMax(a.rect.height(), b.rect.height()) / 2)
+            return a.rect.top() < b.rect.top();
+        return a.rect.left() < b.rect.left();
+    });
+    QString text;
+    for (const OcrBox &box : sorted) {
+        const QString t = box.text.trimmed();
+        if (t.isEmpty())
+            continue;
+        if (!text.isEmpty())
+            text += QLatin1Char('\n');
+        text += t;
+    }
+    if (text.isEmpty()) {
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("未识别到文字"));
+        return;
+    }
+
+    // 仅识别：文本进剪贴板；翻译：以记忆目标语言续翻，译文进剪贴板
+    if (!m_ocrThenTranslate) {
+        QGuiApplication::clipboard()->setText(text);
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("文字已复制到剪贴板"));
+        return;
+    }
+    m_translator->translate(text, QStringLiteral("auto"),
+                            Settings::instance().translateTargetLang(), false);
+}
+
+void PinModule::onTranslateFinished(bool ok, const QString &result, const QString &error)
+{
+    if (ok) {
+        QGuiApplication::clipboard()->setText(result);
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图翻译"), QStringLiteral("译文已复制到剪贴板"));
+    } else {
+        if (m_services->notify)
+            m_services->notify(QStringLiteral("贴图翻译"),
+                               QStringLiteral("翻译失败：%1").arg(error));
+    }
 }
 
 } // namespace poptools

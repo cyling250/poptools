@@ -19,6 +19,8 @@ MainWindow::MainWindow(QObject *parent)
     m_tray = new QSystemTrayIcon(QIcon(":/app_icon.svg"), this);
     m_tray->setToolTip("PopTools\n按 F1 截图");
 
+    // QMenu 的父对象只能是 QWidget（本类是纯 QObject），所有权在析构中显式处理；
+    // QSystemTrayIcon::setContextMenu 不接管所有权
     m_menu = new QMenu();
     m_menu->setObjectName("TrayMenu");
     m_menu->setTitle("PopTools");
@@ -29,12 +31,21 @@ MainWindow::MainWindow(QObject *parent)
     m_services->hotkey = &m_hotKey;
     m_services->ocr = m_ocr;
     m_services->trayMenu = m_menu;
+    // 托盘气泡通知（模块的非交互结果反馈，如贴图 OCR 完成/失败）
+    m_services->notify = [this](const QString &title, const QString &body) {
+        m_tray->showMessage(title, body, QSystemTrayIcon::Information);
+    };
 
     // ---- 注册功能模块（注册顺序 = 托盘菜单中功能项顺序；拔插功能改此处） ----
     m_registry.add(std::make_unique<CaptureModule>());
     m_registry.add(std::make_unique<PinModule>());
     m_registry.add(std::make_unique<SelectionTranslateModule>());
     m_registry.initAll(*m_services);
+
+    // 能力槽完整性自检：拔掉 CaptureModule 时贴图会静默退化为"剪贴板 + 鼠标位置"，
+    // 显式告警避免静默降级（模块间依赖在注册顺序上隐式成立，此处是唯一护栏）
+    if (!m_services->captureIntercept)
+        qWarning("CaptureModule 未提供 captureIntercept 能力槽，贴图定位退化为剪贴板模式");
 
     // ---- 外壳自有菜单项（排在模块贡献之后） ----
     m_menu->addSeparator();
@@ -57,15 +68,24 @@ MainWindow::MainWindow(QObject *parent)
     m_tray->setContextMenu(m_menu);
     m_tray->show();
 
-    // 热键注册失败的统一告知（模块 init 时记录；气泡须在托盘可见后弹出）
+    // 热键注册失败的统一告知（模块 init 时记录；气泡须在托盘可见后弹出）。
+    // 失败名已带具体原因（"F1：已被其他程序占用"/Win32 错误码），此处不再复述
     const QStringList failedHotKeys = m_services->takeFailedHotKeyNames();
     for (const QString &name : failedHotKeys) {
         m_tray->showMessage(QStringLiteral("热键注册失败"),
-            QStringLiteral("%1 已被其他程序占用（如其他截图工具），"
-                           "对应快捷键暂不可用，仍可通过托盘菜单使用相应功能。")
+            QStringLiteral("%1，对应快捷键暂不可用，仍可通过托盘菜单使用相应功能。")
                 .arg(name),
             QSystemTrayIcon::Warning);
     }
+}
+
+MainWindow::~MainWindow()
+{
+    // 退出前反装配：模块在其 shutdown 中撤销发布到 AppServices 的能力槽，
+    // 避免槽位/热键回调在成员析构窗口内访问悬垂的模块 this
+    m_registry.shutdownAll();
+    delete m_menu; // 托盘菜单无 QWidget 父对象，显式释放（action 随之销毁）
+    m_menu = nullptr;
 }
 
 void MainWindow::onShowSettings()

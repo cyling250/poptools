@@ -12,6 +12,8 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QDoubleValidator>
+#include <QGraphicsDropShadowEffect>
+#include <QHash>
 
 namespace poptools
 {
@@ -47,6 +49,15 @@ namespace poptools
     // 高分屏上图标只剩左上角），已由探针实测确认
     static QIcon svgIcon(const QString &name, const QColor &color, int size = 20)
     {
+        // 渲染缓存：4x 超采样位图较贵，而 setTool 每次点击都全量刷新按钮图标。
+        // 键 = 资源名 + 颜色 + 尺寸（当前仅两种颜色、一种尺寸在用）
+        static QHash<QString, QIcon> cache;
+        const QString key = name + QLatin1Char('/') + color.name()
+                            + QLatin1Char('/') + QString::number(size);
+        const auto it = cache.constFind(key);
+        if (it != cache.constEnd())
+            return it.value();
+
         QSvgRenderer renderer(QString(":/icons/%1.svg").arg(name));
         if (!renderer.isValid())
             return QIcon(); // 资源缺失时返回空图标（调用方应能处理）
@@ -60,7 +71,9 @@ namespace poptools
             p.setCompositionMode(QPainter::CompositionMode_SourceIn);
             p.fillRect(0, 0, pm.width(), pm.height(), color);
         }
-        return QIcon(pm);
+        const QIcon icon(pm);
+        cache.insert(key, icon);
+        return icon;
     }
 
     // 线宽图标：圆点大小按档位内相对值缩放（半径 2px..7px），档位之间清晰可辨
@@ -146,7 +159,7 @@ namespace poptools
     {
         auto *sep = new QFrame(this);
         sep->setFrameShape(QFrame::VLine);
-        sep->setStyleSheet(QString("QFrame { color: %1; margin: 3px 0; }").arg(m_dark ? "#484848" : "#E0E0E0"));
+        sep->setStyleSheet(QStringLiteral("QFrame { color: rgba(255,255,255,32); margin: 4px 0; }"));
         return sep;
     }
 
@@ -157,55 +170,61 @@ namespace poptools
         // 若不在本控件显式设置，Qt 会沿祖先链继承父窗口光标）
         setCursor(Qt::ArrowCursor);
 
-        // 跟随系统深浅色主题（Windows 深色模式下用深色面板，避免浅色面板刺眼）
-        m_dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+        // 跟随系统深浅色主题 → 改为常暗玻璃面板（2026-11 UI 现代化）：
+        // 截图覆盖层浮在任何画面上，深色面板在明暗截图内容中都稳定可读
+        // （Snipaste/PixPin 同款做法）；浅色系统下也避免大面积亮块刺眼。
+        // 内部所有 m_dark 分支因此恒取深色值，分支保留便于未来恢复跟随主题。
+        m_dark = true;
 
         setAttribute(Qt::WA_StyledBackground);
         // 注意：不能用类型选择器 "ToolBar { ... }" —— 类位于 poptools 命名空间，
         // QMetaObject::className() 返回 "poptools::ToolBar"，样式表类型选择器失配 → 底衬丢失。
         // 改用 objectName ID 选择器（#annotationToolBar）与命名空间解耦。
         setObjectName("annotationToolBar");
-        // 面板：浅色=灰白底+黑边；深色=深灰底+浅灰边；选中：蓝底白图标；悬停：跟随主题
-        const QString bg = m_dark ? "#2C2C2C" : "#F5F5F5";
-        const QString border = m_dark ? "#5E5E5E" : "#D0D0D0";
-        const QString hover = m_dark ? "#3A3A3C" : "#E8F0FE";
-        setStyleSheet(QString(
-                          "#annotationToolBar { background: %1; border: 1px solid %2;"
-                          "  border-radius: 4px; }"
-                          "QToolButton { border: none; border-radius: 3px;"
+        // 常暗玻璃面板：深底 + 白 9% 细描边 + 12px 圆角；悬停白 10%；
+        // 选中主色蓝 + 顶部内高光。qproperty-iconSize 统一 20px 图标（4x 超采样位图）
+        setStyleSheet(QStringLiteral(
+                          "#annotationToolBar { background: #1E2024; border: 1px solid rgba(255,255,255,23);"
+                          "  border-radius: 12px; }"
+                          "QToolButton { qproperty-iconSize: 20px 20px; border: none; border-radius: 7px;"
                           "  background: transparent; padding: 2px; }"
-                          "QToolButton:hover { background: %3; }"
-                          "QToolButton:checked { background: #2B6FF2; }")
-                          .arg(bg, border, hover));
+                          "QToolButton:hover { background: #33363B; }"
+                          "QToolButton:checked { background: #2B6FF2; }"));
+
+        // 浮起阴影（大模糊低透明度，近似双层观感）
+        auto *shadow = new QGraphicsDropShadowEffect(this);
+        shadow->setBlurRadius(28);
+        shadow->setOffset(0, 6);
+        shadow->setColor(QColor(0, 0, 0, 115));
+        setGraphicsEffect(shadow);
 
         // 两行各用一个 QHBoxLayout（增删按钮只影响所在行，无需跨行列号编排）
         auto *rows = new QVBoxLayout(this);
-        rows->setContentsMargins(4, 4, 4, 4);
-        rows->setSpacing(3);
+        rows->setContentsMargins(8, 8, 8, 8);
+        rows->setSpacing(6);
         auto *row1 = new QHBoxLayout;
-        row1->setSpacing(3);
+        row1->setSpacing(5);
         auto *row2 = new QHBoxLayout;
-        row2->setSpacing(3);
+        row2->setSpacing(5);
         rows->addLayout(row1);
         rows->addLayout(row2);
 
         // ---- 第一行：绘图工具（互斥，顺序即 kTools 表；【扫描】【译】插在文字与橡皮之间） ----
         // 文字识别按钮（扫描图标）：OCR 结果以文本框覆盖到画布（不打开面板）
         auto *ocrBtn = new QToolButton(this);
-        ocrBtn->setFixedSize(26, 26);
+        ocrBtn->setFixedSize(32, 32);
         ocrBtn->setIcon(svgIcon("scan", iconColor()));
         ocrBtn->setToolTip("文字识别（OCR）：识别选区文字，以文本框覆盖到画布");
         connect(ocrBtn, &QToolButton::clicked, this, &ToolBar::ocrRequested);
 
         // 文字识别并翻译按钮：识别后把原始文字与翻译结果一起显示到文字栏面板
         auto *translateBtn = new QToolButton(this);
-        translateBtn->setFixedSize(26, 26);
+        translateBtn->setFixedSize(32, 32);
         translateBtn->setText(QStringLiteral("译"));
-        translateBtn->setStyleSheet(QString(
-                                        "QToolButton { border: none; border-radius: 3px; background: transparent;"
-                                        "  color: %1; font-weight: bold; padding: 0; }"
-                                        "QToolButton:hover { background: %2; }")
-                                        .arg(iconColor().name(), hover));
+        translateBtn->setStyleSheet(QStringLiteral(
+                                        "QToolButton { border: none; border-radius: 7px; background: transparent;"
+                                        "  color: #E0E0E0; font-weight: bold; padding: 0; }"
+                                        "QToolButton:hover { background: #33363B; }"));
         translateBtn->setToolTip(QStringLiteral("识别并翻译：识别选区文字，自动打开面板并显示原文与翻译结果"));
         connect(translateBtn, &QToolButton::clicked, this, &ToolBar::translateRequested);
 
@@ -217,7 +236,7 @@ namespace poptools
                 row1->addWidget(translateBtn);
             }
             auto *btn = new QToolButton(this);
-            btn->setFixedSize(26, 26);
+            btn->setFixedSize(32, 32);
             btn->setCheckable(true);
             btn->setIcon(svgIcon(info.icon, iconColor()));
             btn->setProperty("tool", static_cast<int>(info.tool));
@@ -231,30 +250,30 @@ namespace poptools
 
         // 第一行操作按钮：撤销 重做 | 保存 复制
         m_undoBtn = new QToolButton(this);
-        m_undoBtn->setFixedSize(26, 26);
+        m_undoBtn->setFixedSize(32, 32);
         m_undoBtn->setIcon(svgIcon("undo", iconColor()));
-        m_undoBtn->setToolTip("撤销");
+        m_undoBtn->setToolTip(QStringLiteral("撤销（Ctrl+Z）"));
         connect(m_undoBtn, &QToolButton::clicked, this, &ToolBar::undoRequested);
         row1->addWidget(m_undoBtn);
 
         m_redoBtn = new QToolButton(this);
-        m_redoBtn->setFixedSize(26, 26);
+        m_redoBtn->setFixedSize(32, 32);
         m_redoBtn->setIcon(svgIcon("redo", iconColor()));
-        m_redoBtn->setToolTip("重做");
+        m_redoBtn->setToolTip(QStringLiteral("重做（Ctrl+Y）"));
         connect(m_redoBtn, &QToolButton::clicked, this, &ToolBar::redoRequested);
         row1->addWidget(m_redoBtn);
 
         row1->addWidget(makeSeparator());
 
         auto *saveBtn = new QToolButton(this);
-        saveBtn->setFixedSize(26, 26);
+        saveBtn->setFixedSize(32, 32);
         saveBtn->setIcon(svgIcon("save", iconColor()));
         saveBtn->setToolTip("保存");
         connect(saveBtn, &QToolButton::clicked, this, &ToolBar::saveRequested);
         row1->addWidget(saveBtn);
 
         auto *copyBtn = new QToolButton(this);
-        copyBtn->setFixedSize(26, 26);
+        copyBtn->setFixedSize(32, 32);
         copyBtn->setIcon(svgIcon("copy", iconColor()));
         copyBtn->setToolTip("复制");
         connect(copyBtn, &QToolButton::clicked, this, &ToolBar::copyRequested);
@@ -264,7 +283,7 @@ namespace poptools
         for (int i = 0; i < 3; ++i)
         {
             auto *btn = new QToolButton(this);
-            btn->setFixedSize(26, 26);
+            btn->setFixedSize(32, 32);
             btn->setCheckable(true);
             btn->setToolTip(i == 0 ? "小线宽" : i == 1 ? "中线宽"
                                                        : "大线宽");
@@ -275,7 +294,7 @@ namespace poptools
 
         // 填充/纯线（仅矩形/椭圆有效）
         m_fillBtn = new QToolButton(this);
-        m_fillBtn->setFixedSize(26, 26);
+        m_fillBtn->setFixedSize(32, 32);
         m_fillBtn->setCheckable(true);
         m_fillBtn->setIcon(fillIcon(false, 20, iconColor()));
         m_fillBtn->setToolTip("填充/纯线（仅矩形、椭圆）");
@@ -293,17 +312,14 @@ namespace poptools
         m_fontSizeBox->setEditable(true);
         m_fontSizeBox->setInsertPolicy(QComboBox::NoInsert); // 手动输入不自动加入下拉列表
         m_fontSizeBox->setMaxVisibleItems(12);
-        m_fontSizeBox->setFixedSize(56, 24);
-        m_fontSizeBox->setStyleSheet(QString(
-            "QComboBox { background: transparent; border: 1px solid %1; border-radius: 3px;"
-            "  color: %2; padding: 1px 4px; }"
+        m_fontSizeBox->setFixedSize(62, 28);
+        m_fontSizeBox->setStyleSheet(QStringLiteral(
+            "QComboBox { background: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,26); border-radius: 7px;"
+            "  color: #E8EAED; padding: 2px 6px; }"
             "QComboBox:hover { border-color: #2B6FF2; }"
             "QComboBox::drop-down { border: none; width: 14px; }"
-            "QComboBox QAbstractItemView { background: %3; color: %2;"
-            "  border: 1px solid %1; selection-background-color: #E8F0FE; }")
-            .arg(m_dark ? "#5E5E5E" : "#D0D0D0",
-                 iconColor().name(),
-                 m_dark ? "#2C2C2C" : "#F5F5F5"));
+            "QComboBox QAbstractItemView { background: #26282C; color: #E8EAED;"
+            "  border: 1px solid rgba(255,255,255,26); selection-background-color: #2B6FF2; }"));
         const int presets[] = {8, 9, 10, 12, 14, 16, 18, 24, 36, 48};
         for (int v : presets)
             m_fontSizeBox->addItem(QString::number(v));
@@ -322,41 +338,44 @@ namespace poptools
 
         row2->addWidget(makeSeparator());
 
-        // ---- 第二行：颜色板（2×8 迷你色板 + 当前色大色块，高度贴合 26px 行高） ----
+        // ---- 第二行：颜色板（2×8 迷你色板 + 当前色大色块，高度贴合 32px 行高） ----
         auto *colorPanel = new QWidget(this);
         colorPanel->setStyleSheet("QWidget { background: transparent; }");
         auto *colorGrid = new QGridLayout(colorPanel);
         colorGrid->setContentsMargins(0, 0, 0, 0);
-        colorGrid->setSpacing(2);
+        colorGrid->setSpacing(3);
 
+        // 现代调色板（2026-11 UI 现代化，替代 MS Paint 2007 经典 16 色）：
+        // 黑灰白三中性 + 红/橙/黄/绿/青/蓝/紫/粉 两排完整色相，标注常用色优先
         const QColor presetColors[] = {
-            QColor("#000000"),
-            QColor("#7f7f7f"),
-            QColor("#880015"),
-            QColor("#ed1c24"),
-            QColor("#ff7f27"),
-            QColor("#fff200"),
-            QColor("#22b14c"),
-            QColor("#00a2e8"),
-            QColor("#3f48cc"),
-            QColor("#a349a4"),
-            QColor("#ffffff"),
-            QColor("#ffc90e"),
-            QColor("#c8bfe7"),
-            QColor("#b5e61d"),
-            QColor("#99d9ea"),
-            QColor("#ffaec9"),
+            QColor("#1C1C1E"),
+            QColor("#64748B"),
+            QColor("#F97316"),
+            QColor("#EF4444"),
+            QColor("#EAB308"),
+            QColor("#A3E635"),
+            QColor("#22C55E"),
+            QColor("#14B8A6"),
+            QColor("#0EA5E9"),
+            QColor("#3B82F6"),
+            QColor("#6366F1"),
+            QColor("#A855F7"),
+            QColor("#EC4899"),
+            QColor("#94A3B8"),
+            QColor("#F5F5F4"),
+            QColor("#FFFFFF"),
         };
         for (int i = 0; i < 16; ++i)
         {
             auto *btn = new QToolButton(colorPanel);
-            btn->setFixedSize(12, 12); // 2×12 + 行距 2 = 26，正好行高
-            btn->setCheckable(true);   // 当前色带蓝框描边
+            btn->setFixedSize(14, 14); // 2×14 + 行距 3 = 31，贴合 32px 行高
+            btn->setCheckable(true);   // 当前色带主色描边
             btn->setProperty("color", presetColors[i].name());
             btn->setStyleSheet(QString(
-                                   "QToolButton { border: 1px solid %1; background: %2; padding: 0; }"
-                                   "QToolButton:hover, QToolButton:checked { border: 1px solid #2B6FF2; }")
-                                   .arg(m_dark ? "#5E5E5E" : "#C8C8C8", presetColors[i].name()));
+                                   "QToolButton { border: 1px solid rgba(255,255,255,45); border-radius: 7px; background: %1; padding: 0; }"
+                                   "QToolButton:hover { border: 1px solid rgba(255,255,255,90); }"
+                                   "QToolButton:checked { border: 2px solid #2B6FF2; }")
+                                   .arg(presetColors[i].name()));
             connect(btn, &QToolButton::clicked, this, &ToolBar::onColorClicked);
             colorGrid->addWidget(btn, i / 8, i % 8);
             m_colorButtons.append(btn);
@@ -365,11 +384,11 @@ namespace poptools
 
         // 当前颜色大色块（调色盘右侧）
         m_colorBig = new QToolButton(this);
-        m_colorBig->setFixedSize(22, 22);
+        m_colorBig->setFixedSize(26, 26);
         m_colorBig->setEnabled(false);
         m_colorBig->setStyleSheet(QString(
-                                      "QToolButton { border: 1px solid %1; background: %2; }")
-                                      .arg(m_dark ? "#5E5E5E" : "#C8C8C8", m_currentColor.name()));
+                                      "QToolButton { border: 1px solid rgba(255,255,255,50); border-radius: 8px; background: %1; }")
+                                      .arg(m_currentColor.name()));
         m_colorBig->setToolTip("当前颜色");
         row2->addWidget(m_colorBig);
 
@@ -398,8 +417,8 @@ namespace poptools
     {
         m_currentColor = c;
         m_colorBig->setStyleSheet(QString(
-                                      "QToolButton { border: 1px solid %1; background: %2; }")
-                                      .arg(m_dark ? "#5E5E5E" : "#C8C8C8", c.name()));
+                                      "QToolButton { border: 1px solid rgba(255,255,255,50); border-radius: 8px; background: %1; }")
+                                      .arg(c.name()));
         for (QToolButton *btn : m_colorButtons)
             btn->setChecked(btn->property("color").toString() == c.name());
     }

@@ -7,6 +7,7 @@
 #include <QVector>
 #include <QProcess>
 #include <QByteArray>
+#include <QTimer>
 
 namespace poptools {
 
@@ -23,16 +24,14 @@ struct OcrBox
 // 启动 PaddleOCR-json.exe 在管道模式运行（常驻进程），
 // 通过 stdin 发送图片路径，从 stdout 读取 JSON 结果。
 // 模型初始化约 0.6s，后续识别约 200ms/张。
-// 与旧 OcrService 保持相同接口（recognize, recognizeBoxes, signals）。
+// 请求带 20s 超时看门狗：引擎无响应时 kill 子进程并报错（下次请求自动重启），
+// 所有失败路径统一发 ocrBoxesFinished（此前文本模式死接口的失败会发错信号）。
 class PaddleOcrService : public QObject
 {
     Q_OBJECT
 public:
     explicit PaddleOcrService(QObject *parent = nullptr);
     ~PaddleOcrService() override;
-
-    // 识别图片中的文字（异步），完成后发 ocrFinished
-    void recognize(const QImage &image);
 
     // 识别图片中的文字并返回文本框（异步），完成后发 ocrBoxesFinished
     void recognizeBoxes(const QImage &image);
@@ -44,7 +43,6 @@ public:
     bool available() const;
 
 signals:
-    void ocrFinished(bool ok, const QString &text, const QString &error);
     void ocrBoxesFinished(bool ok, const QVector<OcrBox> &boxes, const QString &error);
 
 private:
@@ -57,6 +55,12 @@ private:
     // 处理 stdout 数据（按行分割 JSON）
     void onReadyRead();
 
+    // 请求收尾（不含 emit）：停超时看门狗、清临时文件、复位忙态
+    void finishRequest();
+
+    // 失败收尾：finishRequest + 发失败信号
+    void fail(const QString &msg);
+
     // 清理本次临时文件
     void cleanupTemp();
 
@@ -64,8 +68,8 @@ private:
     static QString paddleDir();
 
     QProcess *m_process = nullptr;
+    QTimer *m_timeoutTimer = nullptr; // 识别超时看门狗（引擎无响应 → kill + 报错）
     bool m_busy = false;
-    bool m_boxesMode = false; // 当前请求是否需要 boxes
     QByteArray m_buffer;      // stdout 累积缓冲区
     QString m_tempFile;       // 当前临时图片路径
 };

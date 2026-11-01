@@ -62,7 +62,8 @@ private:
     OcrHostCallbacks m_host; // 宿主回调（面板/动效，非拥有）
     QImage m_ocrImg; // 传给 OCR 的选区裁剪图（物理像素）
     bool m_translateMode = false; // 当前 OCR 请求是否为"识别并翻译"（【译】按钮）
-    QString m_lastText; // 最近一次识别文字（供【译】触发翻译）
+    bool m_ocrPending = false; // 有在途请求：共享 OCR 服务的回包归属防护（贴图模块
+                               // 也会发起识别，无防护时其回包会串入截图画布弹窗）
     QWidget *m_parent = nullptr; // 当前操作父窗口（供 QMessageBox 使用，避免被置顶窗口遮挡）
 };
 

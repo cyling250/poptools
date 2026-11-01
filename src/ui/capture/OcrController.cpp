@@ -16,15 +16,17 @@ OcrController::OcrController(CaptureContext *ctx, PaddleOcrService *ocr, OcrHost
     , m_host(std::move(host))
 {
     // 连接识别完成信号（context 对象用自身：共享 OCR 服务寿命长于本控制器，
-    // 必须随本控制器析构自动断连，避免悬垂 this）
-    QObject::connect(m_ocr, &PaddleOcrService::ocrBoxesFinished, this,
-                     [this](bool ok, const QVector<OcrBox> &boxes, const QString &error)
-                     {
-                         if (m_translateMode)
-                             onBoxesTranslate(ok, boxes, error);
-                         else
-                             onBoxes(ok, boxes, error);
-                     });
+    // 必须随本控制器析构自动断连，避免悬垂 this）。
+    // m_ocr 允许为空（组合根漏注入时 CaptureWindow 已告警，OCR 功能不可用但不崩溃）
+    if (m_ocr)
+        QObject::connect(m_ocr, &PaddleOcrService::ocrBoxesFinished, this,
+                         [this](bool ok, const QVector<OcrBox> &boxes, const QString &error)
+                         {
+                             if (m_translateMode)
+                                 onBoxesTranslate(ok, boxes, error);
+                             else
+                                 onBoxes(ok, boxes, error);
+                         });
 }
 
 OcrController::~OcrController() = default;
@@ -52,8 +54,8 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
     m_parent = parent; // 保存父窗口供 onBoxes/onBoxesTranslate 中 QMessageBox 使用，避免被置顶窗口遮挡
     if (m_ctx->selectionRect().isEmpty())
         return false;
-    if (m_ocr->busy())
-        return false; // 上次识别未结束，忽略重复点击
+    if (!m_ocr || m_ocr->busy())
+        return false; // 未注入共享引擎 / 上次识别未结束，忽略重复点击
     if (!m_ocr->available())
     {
         if (m_host.ocrBusy)
@@ -74,6 +76,7 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
         return false;
     m_ocrImg = m_ctx->cap->screen.copy(physCrop).toImage();
     m_ocr->recognizeBoxes(m_ocrImg);
+    m_ocrPending = true; // 回包归属标记：共享服务的其他消费者（贴图 OCR）回包不再串入
     return true;
 }
 
@@ -116,6 +119,9 @@ QFont OcrController::fitFontHeight(const QRectF &local, const QString &text)
 
 void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString &error)
 {
+    if (!m_ocrPending)
+        return; // 非本控制器发起的回包（如贴图 OCR），忽略
+    m_ocrPending = false;
     // 通知扫描动效结束
     if (m_host.ocrBusy)
         m_host.ocrBusy(false);
@@ -160,6 +166,9 @@ void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString
 // 【译】模式：把识别到的文字送入文字栏面板，并自动发起翻译
 void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, const QString &error)
 {
+    if (!m_ocrPending)
+        return; // 非本控制器发起的回包（如贴图 OCR），忽略
+    m_ocrPending = false;
     // 通知扫描动效结束
     if (m_host.ocrBusy)
         m_host.ocrBusy(false);
@@ -192,8 +201,6 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
             text += '\n';
         text += t;
     }
-    m_lastText = text;
-
     // 显示原文 + 自动翻译（目标语言取面板当前选择）
     if (m_host.showPanel)
         m_host.showPanel(text);

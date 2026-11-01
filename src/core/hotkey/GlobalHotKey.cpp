@@ -29,8 +29,15 @@ bool GlobalHotKey::registerKey(quint32 vk, int id, quint32 modifiers)
         return false; // 已注册
 #ifdef Q_OS_WIN
     const bool ok = RegisterHotKey(nullptr, id, modifiers, vk) != 0;
+    if (ok)
+        m_lastError.clear();
+    else if (GetLastError() == ERROR_HOTKEY_ALREADY_REGISTERED)
+        m_lastError = QStringLiteral("已被其他程序占用");
+    else
+        m_lastError = QStringLiteral("注册失败（Win32 错误码 %1）").arg(GetLastError());
 #else
     const bool ok = false; // 其它平台暂未实现
+    m_lastError = QStringLiteral("当前平台未实现热键");
 #endif
     m_keys[id] = {vk, modifiers, ok};
     return ok;

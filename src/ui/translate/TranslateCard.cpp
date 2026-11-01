@@ -129,9 +129,20 @@ TranslateCard::TranslateCard(QWidget *parent)
     });
     langRow->addWidget(m_toCombo, 1);
 
-    m_translateBtn = new QPushButton(QStringLiteral("翻译"), this);
+    // LLM 动作选择：翻译 / 解释 / 总结 / 改写（记忆上次选择，见 Translator::llmActionKey）
+    m_actionCombo = new QComboBox(this);
+    m_actionCombo->addItems(llmActionNames());
+    m_actionCombo->setCurrentIndex(static_cast<int>(
+        llmActionFromKey(Settings::instance().translateAction())));
+    connect(m_actionCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+        Settings::instance().setTranslateAction(llmActionKey(static_cast<LlmAction>(index)));
+        syncActionUi();
+    });
+    langRow->addWidget(m_actionCombo);
+
+    m_translateBtn = new QPushButton(llmActionNames().first(), this);
     m_translateBtn->setProperty("class", "translate-btn");
-    m_translateBtn->setToolTip(QStringLiteral("开始翻译"));
+    m_translateBtn->setToolTip(QStringLiteral("执行当前动作（左侧下拉可切换：翻译 / 解释 / 总结 / 改写）"));
     langRow->addWidget(m_translateBtn);
 
     layout->addLayout(langRow);
@@ -162,9 +173,9 @@ TranslateCard::TranslateCard(QWidget *parent)
     layout->addWidget(sep2);
 
     // === 翻译区域 ===
-    auto *trTitle = new QLabel(QStringLiteral("翻译"), this);
-    trTitle->setProperty("class", "section-title");
-    layout->addWidget(trTitle);
+    m_trTitle = new QLabel(llmActionNames().first(), this);
+    m_trTitle->setProperty("class", "section-title");
+    layout->addWidget(m_trTitle);
 
     m_translateText = makeTextEdit();
     layout->addWidget(m_translateText, 3);
@@ -386,7 +397,8 @@ void TranslateCard::translateNow()
     m_translateText->clear();
     m_copyBtn->setEnabled(false);
     emit translateRequested(m_originalText, displayToLangCode(m_fromCombo->currentText()),
-                            displayToLangCode(m_toCombo->currentText()));
+                            displayToLangCode(m_toCombo->currentText()),
+                            static_cast<int>(currentAction()));
 }
 
 void TranslateCard::onTranslateClicked()
@@ -472,6 +484,23 @@ void TranslateCard::hideEvent(QHideEvent *event)
     m_copyBtn->setEnabled(false);
     m_copyBtn->setText(QStringLiteral("复制译文"));
     QWidget::hideEvent(event);
+}
+
+
+// 动作下拉当前项（下标即 LlmAction 枚举值，llmActionNames 顺序对齐）
+LlmAction TranslateCard::currentAction() const
+{
+    return static_cast<LlmAction>(m_actionCombo->currentIndex());
+}
+
+// 动作切换后的界面同步：动作按钮文案 + 结果区小节标题（语言下拉保持不变——
+// 解释/总结仍按目标语言输出，改写保持原文语言，由提示词约束）
+void TranslateCard::syncActionUi()
+{
+    const QString name = llmActionNames().value(m_actionCombo->currentIndex(),
+                                                llmActionNames().first());
+    m_translateBtn->setText(name);
+    m_trTitle->setText(name);
 }
 
 } // namespace poptools

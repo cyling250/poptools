@@ -7,6 +7,7 @@
 #include "Translator.h"
 
 class QNetworkReply;
+class QTimer;
 
 namespace poptools {
 
@@ -38,6 +39,7 @@ signals:
 private:
     QNetworkAccessManager m_nam;
     QNetworkReply *m_reply = nullptr;
+    QTimer *m_timeout = nullptr; // 单次测试的超时看门狗（每次 test 重启，防旧定时器误杀新请求）
     bool m_busy = false;
 };
 

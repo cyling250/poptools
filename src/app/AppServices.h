@@ -49,10 +49,15 @@ public:
     // 故菜单顺序 = 模块注册顺序）
     QAction *addTrayAction(const QString &text, std::function<void()> triggered);
 
+    // 托盘气泡通知（组合根注入 tray->showMessage 实现）。
+    // 模块用于非交互结果反馈（如贴图 OCR 完成/失败），不打断用户当前操作
+    std::function<void(const QString &title, const QString &body)> notify;
+
     // 注册全局热键并绑定回调（热键 id 由本类内部分配并自动路由；
     // 回调在主线程经 activated 信号触发，GUI 操作请自行延迟到事件循环）。
-    // 返回注册是否成功；失败（通常是热键已被其他程序占用）时记录键名，
-    // 供组合根在托盘可见后经 takeFailedHotKeyNames() 弹气泡告知用户
+    // 返回注册是否成功；失败（通常是热键已被其他程序占用）时记录键名与原因，
+    // 供组合根在托盘可见后经 takeFailedHotKeyNames() 弹气泡告知用户。
+    // 注意：热键随 GlobalHotKey 析构统一注销，仅支持编译期拔插（无运行期注销 API）
     bool registerHotKey(quint32 vk, quint32 modifiers, std::function<void()> triggered);
 
     // 注册失败的热键显示名列表（如 "F1"），取走即清空

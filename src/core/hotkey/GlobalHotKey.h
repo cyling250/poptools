@@ -30,6 +30,8 @@ public:
     void unregisterKey(int id);
     // 指定 id 是否已注册
     bool isRegistered(int id) const;
+    // 最近一次注册失败的原因（"已被其他程序占用" / Win32 错误码），注册成功后清空
+    QString lastError() const { return m_lastError; }
 
 signals:
     // 热键被按下（id 与 registerKey 传入的一致）
@@ -45,6 +47,7 @@ private:
         bool registered = false;
     };
     QHash<int, Entry> m_keys;
+    QString m_lastError;
 };
 
 } // namespace poptools

@@ -23,6 +23,9 @@ class SettingsDialog : public QDialog
 public:
     explicit SettingsDialog(QWidget *parent = nullptr);
 
+private slots:
+    void applyTheme(); // 主题应用（构造末尾 + 系统明暗切换时重取 ThemeColors）
+
 private:
     void updateAutoStartButton();
     QStringList parseDomains() const;          // 逗号/顿号分隔的领域输入 → 列表

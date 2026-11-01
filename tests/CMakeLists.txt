@@ -1,15 +1,12 @@
 # 域逻辑单元测试（QtTest，无 GUI）：标注画板模型、语言映射、
-# 翻译 API 辅助函数、功能模块注册表。
+# 翻译 API 辅助与请求体构造、功能模块注册表、设置读写回退。
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 
-add_executable(poptools_domain_tests domain_tests.cpp
-    # AppServices（含 FeatureRegistry 依赖的 QObject 实现）随测试目标编译
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src/app/AppServices.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src/app/AppServices.h"
-)
+add_executable(poptools_domain_tests domain_tests.cpp)
 target_link_libraries(poptools_domain_tests PRIVATE
+    poptools_app_infra  # AppServices/FeatureRegistry（链接库目标，不再手抄源文件）
     poptools_core
     Qt6::Core
     Qt6::Gui

@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-09-04（T-033 v0.3.2 发布）
+> 最后更新：2026-11-01 22:50（T-037 A 组小工具第一批：贴图 OCR/翻译 + 划词 LLM 动作） · Agent_20261101184000
 
 ## 项目快照
 
@@ -9,6 +9,7 @@
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图，持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
 - **当前版本**：0.3.2。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
+  - 注：v0.3.2 发布后已完成 T-034~T-036 三批未发版改动（ESC 策略 / UI 现代化第一批 / 五批整体优化），下次发布需做版本判定（体感变更多，倾向 MINOR → 0.4.0）
 - **技术栈**：
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
@@ -27,10 +28,10 @@
   - 标注数据模型与渲染在 `core/annotation`（AnnotationCanvas / AnnotationItem / AnnotationPainter），UI 工具在 `ui/capture/tools`（ToolBase + ToolFactory + 各工具类）
 - **目录含义**：
   - `src/main.cpp` — 程序入口
-  - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施
+  - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施；CMake 目标：`poptools_app_infra`（基础设施，可执行与测试共链）+ `poptools_module_<id>`（每功能模块一个静态库，含其界面库）+ 聚合 `poptools_modules`（T-036 起「拔插=删一个目标」字面成立）
   - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译），各自自包含
-  - `src/core/` — 核心域静态库 `snipaste_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
-  - `src/ui/` — 界面层按功能分库：`snipaste_ui_capture`（截图画布+工具栏+OCR 面板）/ `snipaste_ui_pin`（贴图窗口）/ `snipaste_ui_translate`（划词翻译卡片）/ `snipaste_ui_settings`（设置对话框），聚合为 INTERFACE 目标 `snipaste_ui`
+  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
+  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框，跟随系统明暗主题），聚合为 INTERFACE 目标 `poptools_ui`
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
@@ -42,17 +43,59 @@
 - **常用命令**：
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
-  - 构建：`cmake --build build --config Release`（POST_BUILD 自动执行 windeployqt、剔除 D3D 着色器编译器三件、从 VS Redist 部署 VC 运行库、拷贝整个 paddleocr/ 目录，见 T-027）
-  - 测试：`cd build && ctest -C Release --output-on-failure`
+  - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 PaddleOCR-json.exe 两个进程**，见坑 P-008）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（12 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退）
   - 运行：`build/Release/PopTools.exe`
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
-  - Python 环境：项目根 `.venv`（Python 3.12.14，uv 管理）
+  - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
+  - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
 - **当前状态**：**v0.3.2 已发布**（2026-09-04，PATCH：T-032 截图交互纯缺陷修复；安装包文件名带构建时间戳，dist 仅保留最新）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-037 A 组小工具第一批：贴图 OCR/翻译 + 划词 LLM 动作
+- **完成日期**：2026-11-01
+- **执行智能体**：Agent_20261101184000
+- **背景**：用户要求头脑风暴新功能；按「热键即用/全局/复用现有服务/单模块」标准给出候选清单并分组，用户选定 A 组（复用 OCR+翻译服务线）。第一批落两个 S 级；批量图片 OCR（M）与二维码识别（M，需选解码依赖如 ZXing）留待后续。
+- **结果**：
+  1. **贴图 OCR / 翻译**：PinWindow 右键菜单加「识别文字 / 翻译」（携带贴图内容的信号），PinModule 经共享 OCR 服务识别 → 行序重排拼接 → 文本/译文进剪贴板 + 托盘气泡反馈（不弹交互窗）。配套三件：① AppServices 新增 `notify` 贡献点（组合根注入 tray->showMessage）；② **OcrController 加回包归属防护**（`m_ocrPending`——共享 OCR 服务接第二个消费者后，无防护时贴图的回包会串入截图画布弹 QMessageBox，属修复的潜在串扰缺陷）；③ PinModule 升级为 QObject 双继承（照 SelectionTranslateModule 先例，connect/parent 可用）。
+  2. **划词 LLM 动作**：Translator 新增 `LlmAction`（Translate/Explain/Summarize/Rewrite）+ 提示词纯函数 `translateActionPrompt`（langName 一并挪入头文件，可测）；领域/术语表仅对翻译动作注入（术语映射指令对其他动作是干扰）；TranslateCard 语言行加动作下拉（翻译/解释/总结/改写），动作按钮文案与结果区小节标题随动作同步，动作记忆持久化（`translate/action`）；划词请求信号带动作参数。解释/总结按目标语言输出，改写保持原文语言。
+- **关键改动**：`src/core/translation/Translator.{h,cpp}`、`src/core/settings/Settings.{h,cpp}`、`src/ui/translate/TranslateCard.{h,cpp}`、`src/ui/pin/PinWindow.{h,cpp}`、`src/app/AppServices.h`、`src/app/MainWindow.cpp`、`src/app/modules/PinModule.{h,cpp}`、`src/app/modules/SelectionTranslateModule.cpp`、`src/ui/capture/OcrController.{h,cpp}`、`tests/domain_tests.cpp`（13 用例）、`README.md`
+- **待用户**：真机回归——①贴图右键两项 + 气泡反馈 + 剪贴板内容；②划词卡片动作切换与记忆；③截图 OCR 不受影响（归属防护）
+- **遗留**：A 组剩余两项——批量图片 OCR（M）、二维码识别（M，需先定解码库引入方式：green 套件 tools/ 或源码合入）
+
+### T-036 项目整体优化五批（三路子代理审查驱动）
+- **完成日期**：2026-11-01
+- **执行智能体**：Agent_20261101184000
+- **背景**：用户要求「整体优化，做到工具使用顺畅舒服」。三个 Explore 子代理并行审查（架构接缝 / core 健壮性 / ui 层质量）产出 40+ 项发现，人工核实两处 P0；批准五批全做、分批验收。此前的待办（UI P2/P3）并入批次 E。
+- **结果**（全部构建通过 + ctest 通过 + 应用冒烟通过；真机回归待用户）：
+  1. **批次 A 正确性速赢**：SmartRectDetector Worker 带 parent 修复（UIA 检测线程此前从未生效，见 [P-025](#p-025-smartrectdetector-worker-带-parent-致-movetothread-静默失败)）+ 同文件 COM 引用契约三连修（双重 Release / 批量下行漏 Release / cleanup 在 CoUninitialize 后释放代理）；双击选区外重画秒退（`m_dblReselect` 吞尾随 release）；Enter 拖拽绘制中忽略（半截草稿不再合成进输出）；右键选区外退出与 ESC 保护对齐；Translator 15s 传输超时；OCR 20s 看门狗 + 失败信号统一走 boxes（删除零调用的死接口 `recognize()`）；`image.save` 返回值检查 + 管道命令 QJsonDocument 转义；ApiTester 超时定时器改成员防误杀。
+  2. **批次 B 渲染流畅度**：底图缩放缓存（原先每帧对整幅物理桌面图 SmoothPixmapTransform，4K 每帧数十 MB 光栅化）；取色卡片/OCR 扫描线/智能框选高亮改脏矩形局部重绘（取色卡几何抽 `colorPickerCardRect()` 供绘制与重绘共用）；PinWindow 滚轮改鼠标锚点 + 投影 50ms 防抖；ToolBar svgIcon 渲染缓存。
+  3. **批次 C 健壮性**：GlobalMouseHook 钩子回调改 `QMetaObject::invokeMethod(QueuedConnection)` 转发 + 重复实例断言；GlobalHotKey 注册失败透出 GetLastError（气泡文案区分"已被占用"/错误码，`AppServices` 失败名带原因）；Settings vk 非法值回退 + `syncChecked()` 不可写告警（INI 不迁移，保留 exe 旁可备份特性）；Translator 降级重发收窄（正则匹配"字段不识别"才重发，真 400 不白发）；ScreenCapturer `toPhysical` 半开区间（屏幕右/下边界 1px 错位）。
+  4. **批次 D 架构接缝**：CMake 模块目标化——`poptools_app_infra`（AppServices/FeatureRegistry/IFeatureModule，可执行与测试共链）+ `poptools_module_capture/pin/selectiontranslate`（模块源+其界面库）+ 聚合目标 `poptools_modules`，README「拔插=删一个目标」字面成立，测试目标停止手抄 AppServices 源文件；AppServices 生命周期——`~MainWindow` 调 `shutdownAll()`（模块析构早于服务的悬垂窗口消除）、CaptureModule shutdown 撤能力槽、SelectionTranslateModule shutdown 补 `removeEventFilter`、组合根 initAll 后能力槽缺失 qWarning、`registerHotKey` 注释明确仅编译期拔插；Settings 注入式构造（测试用）；Translator 请求体抽纯函数 `buildTranslateRequestBody`（双协议单一实现源）；CaptureWindow OCR 兜底实例删除（Q_ASSERT + OcrController 空防护，防静默拉起第二个 PaddleOCR 子进程）；**测试 10 → 12 用例**（新增请求体双协议、Settings 注入回退）。
+  5. **批次 E token 化与文案**：ThemeColors 扩展 `accent/accentHover/successText` + `overlay` 绘制语义色（4 种蓝归一为 #2B6FF2：选区框/虚线/手柄/徽章/扫描线/文字编辑框）；**SettingsDialog 全套主题化**（37 处浅色 hex 清零，跟随系统明暗切换，遵守 P-022 ID 选择器纪律）；CMake 加 `/utf-8`（源文件 UTF-8 无 BOM，MSVC 默认按 ACP 解释中文裸字面量，GBK 代码页机器上编译期乱码）；OcrPanel 目标语言下拉统一不可编辑（手输文本会直写 Settings）；OcrController 只写死变量 `m_lastText` 删除；取色快捷键 C 要求无修饰键（Ctrl+C 留给复制语义）。
+- **关键改动**：`src/core/capture/SmartRectDetector.cpp`、`src/core/{ocr,translation,hotkey,settings,capture}` 多文件、`src/ui/capture/` 多文件、`src/ui/ThemeColors.h`、`src/ui/settings/SettingsDialog.*`、`CMakeLists.txt` + `src/{app,ui,tests}/CMakeLists.txt`（新增 `src/app/CMakeLists.txt`）、`tests/domain_tests.cpp`
+- **相关坑**：[P-025](#p-025-smartrectdetector-worker-带-parent-致-movetothread-静默失败)、[P-026](#p-026-批量替换波及新函数自身syncchecked-无限递归)、[P-027](#p-027-qmenu-父对象只能是-widget纯-qobject-组合根不能-parenting)
+- **待用户**：全量真机回归（智能框选跟手性、截图全流程、贴图滚轮锚点、设置对话框明暗两套、翻译/OCR 超时行为、热键占用气泡文案）；五批改动未发版，下次发布需版本判定（体感变更多，建议 MINOR）
+
+### T-035 UI 现代化第一批（工具栏/选区/取色卡）与 UI 审查
+- **完成日期**：2026-11-01
+- **执行智能体**：Agent_20261101184000
+- **背景**：用户反馈 UI「不现代」。代码通读 + 运行实拍（F1 模拟脚本 `temp_scripts/script_ui_review_20261101.py`）+ HTML 对比稿（Gen UI）定位：MS Paint 2007 调色板、直角方块控制点、尺寸裸白字浅色画面不可见、取色卡假阴影、工具栏 Win7 面板感、全项目零阴影。方向定为 Fluent 化增量改造，用户选定深色玻璃工具栏。
+- **结果**：工具栏常暗玻璃面板（#1E2024 + 白 9% 描边 + 12px 圆角 + QGraphicsDropShadowEffect 真阴影；按钮 26→32px、圆角 7px、qproperty-iconSize 20px；现代 16 色调色板圆点 swatch；内部 m_dark 固定 true，分支保留便于恢复跟随主题）；选区控制点圆点化（白底蓝描边+投影，`AnnotationEditor` 标注选中手柄同步圆点化保留绿色身份色）；尺寸标注改蓝底白字徽章（`SelectionController::paintSelectionFrame`，贴屏幕上缘自动移入选区内）；取色卡 12px 圆角 + 双层柔影 + 圆角色块徽章 + 白底信息区；框选虚线加 3px 白色半透明底描边；默认画笔色改 #EF4444 对齐新调色板。
+- **关键改动**：`src/ui/capture/ToolBar.{h,cpp}`、`SelectionController.cpp`、`AnnotationEditor.cpp`、`CaptureWindow.{h,cpp}`、`src/core/annotation/AnnotationCanvas.h`、`README.md`
+- **待用户**：真机目检（会话期间两次撞上锁屏，自动截图只验证了蒙版渲染不崩）
+
+### T-034 ESC 退出策略重构（按风险分级）与撤销/重做快捷键
+- **完成日期**：2026-11-01
+- **执行智能体**：Agent_20261101184000
+- **背景**：用户反馈编辑态 ESC 逐层退出反馈弱、感觉卡住；审查发现旧防误触设计与实际风险错位（工具激活态一次 ESC 就丢草稿，选择模式反而要确认）。三个方案供选，用户选定「ESC=退出 + 有墨迹才二次确认」。
+- **结果**：ESC 语义按风险分级——无墨迹立即退出（零摩擦）、有墨迹首次武装并弹轻提示「再按一次 ESC 退出截图 · 标注将丢弃」（1 秒自动消失，按其他键/点鼠标解除且按原语义处理，如 Enter 仍确认）、拖拽绘制中仅取消当前笔画（`ToolDrawingController::abortDraft`，工具保留）、文字输入不变；工具取消不再经 ESC（工具栏再点切换，ToolBar 原生支持）。提示为工具栏上方深色胶囊（`WA_TransparentForMouseEvents` 不挡操作，贴屏幕上缘自动翻转到工具栏下方），退出/确认路径经 `exitCapture` 统一清理武装态。撤销/重做：Ctrl+Z / Ctrl+Y（兼容 Ctrl+Shift+Z），编辑态生效、文字输入不介入（QTextEdit 自理）、拖拽中不介入；按钮 tooltip 标注快捷键。
+- **关键改动**：`src/ui/capture/CaptureWindow.{h,cpp}`（armExitConfirm/disarmExitConfirm/positionEscToast + keyPressEvent 重排）、`ToolDrawingController.{h,cpp}`、`README.md`
+- **相关坑**：无（后续 T-036 批次 A 修掉了一个本任务引入的 bug：Ctrl+Z 分支未排除 Shift 导致 Ctrl+Shift+Z 不可达）
 
 ### T-033 v0.3.2 版本发布
 - **完成日期**：2026-09-04
@@ -395,11 +438,30 @@
 
 （暂无）
 
-> 备注：安装包瘦身第一阶段已结算为 [T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)，其中记录了两个未做的后续可选项（opencv 最小化重建 / 换 RapidOCR-json 引擎），若继续瘦身以该条目为起点。
+> 备注 1：安装包瘦身第一阶段已结算为 [T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)，其中记录了两个未做的后续可选项（opencv 最小化重建 / 换 RapidOCR-json 引擎），若继续瘦身以该条目为起点。
+> 备注 2：T-034~T-036（ESC 策略 / UI 现代化第一批 / 五批优化）代码已全部落码并通过构建与单元测试，**真机回归待用户**——重点：智能框选跟手性（T-036 批次 A 线程化修复）、双击选区外重画不秒退、右键退出确认、贴图滚轮鼠标锚点、设置对话框深浅两套主题、热键占用气泡文案。UI 现代化第二批（TranslateCard/OcrPanel 视觉 token、双通道钉色 helper 去重、「已复制」反馈去重）未做，见 T-035 背景。
 
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-025 SmartRectDetector Worker 带 parent 致 moveToThread 静默失败
+- **关联任务**：[T-036](#t-036-项目整体优化五批三路子代理审查驱动)
+- **现象**：智能框选在浏览器/Electron 大页面上悬停高亮卡顿（预算 800ms 的 UIA 下行直接阻塞覆盖层）；代码里有完整的工作线程设计却形同虚设，且引出连环 COM 引用错误长期潜伏（元素双重 Release、批量下行漏 Release、cleanup 在 CoUninitialize 后释放 marshaled 代理属 UB）
+- **原因**：`m_worker(new Worker(this))` 带 parent——Qt 规定 moveToThread 对有 parent 的对象**静默失败**（仅 qWarning），queued drain 全部落回 GUI 线程执行；线程化从未发生，也没有任何断言能暴露
+- **解决**：Worker 改无 parent 构造，析构 quit/wait 后显式 delete；四处 COM 引用契约修复。教训：**moveToThread 失败无断言**，线程化代码要验证"确实在别的线程跑"（如 QThread::currentThreadId 打点），不能只看代码结构
+
+### P-026 批量替换波及新函数自身（syncChecked 无限递归）
+- **关联任务**：[T-036](#t-036-项目整体优化五批三路子代理审查驱动)
+- **现象**：新增 `Settings::syncChecked()`（包装 `m_s.sync()` + 可写性告警）后 ctest 段错误，单跑该用例崩在函数入口后
+- **原因**：先写入含 `m_s.sync();` 的函数体，再执行「`m_s.sync();` → `syncChecked();`」的全文批量替换——把 syncChecked 自己体内的调用也替换了，无限递归栈溢出。批量替换与新代码交错的事故
+- **解决**：syncChecked 体内恢复 `m_s.sync()`；测试单用例隔离定位（QtTest 传用例名参数）。教训：批量替换前新落定的代码先盘点；替换后必须全量 review diff；用例级测试是定位段错误的最快路径
+
+### P-027 QMenu 父对象只能是 Widget，纯 QObject 组合根不能 parenting
+- **关联任务**：[T-036](#t-036-项目整体优化五批三路子代理审查驱动)
+- **现象**：修托盘菜单所有权时写 `new QMenu(this)`（this = 纯 QObject 的 MainWindow），编译错 C2665 无匹配重载
+- **原因**：QWidget 构造只接受 QWidget* 父对象，QObject 级父子所有权对 QWidget 类不适用；组合根 MainWindow 是纯 QObject（托盘应用无主窗）
+- **解决**：托盘菜单保持无父对象，`~MainWindow` 中 `shutdownAll()` 后显式 delete（action 随之销毁）。教训：纯 QObject 组合根的 QWidget 成员所有权必须显式管理，"加个 parent"不是万能解
 
 ### P-021 QToolButton 高分屏图标裁剪：DPR 元数据被绘制路径忽略
 - **关联任务**：[T-030](#t-030-故障机三问题f1fn-热键模式说明高分屏图标裁剪翻译浮窗主题适配)
@@ -551,3 +613,10 @@
 - **现象**：划词翻译偶尔翻译出上一次复制的内容
 - **原因**：模拟 Ctrl+C 后立即依赖 Qt 剪贴板缓存读取，信号/缓存时序不可靠，可能读到旧内容
 - **解决**：模拟 Ctrl+C 后轮询 Win32 `GetClipboardSequenceNumber`，序列号变化才用 Win32 API 直读文本；约 600ms 未生效重发一次 Ctrl+C，总超时报错（`src/core/translation/SelectionTranslator.h:10-20`）
+
+## 修改台账
+
+| 时间 | 智能体 | 板块 | 操作 | 摘要 |
+|---|---|---|---|---|
+| 2026-11-01 22:20 | Agent_20261101184000 | 历史任务 / 踩坑记录 / 项目快照 / 当前任务 | 新增 T-034、T-035、T-036；新增 P-025、P-026、P-027；快照刷新（模块化 CMake 目标名、常用命令、版本备注） | ESC 策略重构 + UI 现代化第一批 + 五批整体优化结算；真机回归待用户 |
+| 2026-11-01 22:50 | Agent_20261101184000 | 历史任务 | 新增 T-037 | A 组小工具第一批（贴图 OCR/翻译 + 划词 LLM 动作）结算；批量 OCR 与二维码遗留 |
