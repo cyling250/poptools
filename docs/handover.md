@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-11-01 23:30（T-039 性能治理：OCR 空闲回收 + 基线脚本 + 性能红线；本会话移交） · Agent_20261101184000
+> 最后更新：2026-11-01 23:50（T-040 OCR 引擎切换 RapidOCR-json，安装包 105.7→80.8MB；提交 2def450） · Agent_20261101184000
 
 ## 项目快照
 
@@ -14,7 +14,7 @@
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
   - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
-  - OCR：PaddleOCR-json v1.4.1（QProcess 常驻子进程管道模式：stdin 发图片路径，stdout 读 JSON；初始化约 0.6s，之后约 200ms/张；其自带 opencv_world4100.dll 随 paddleocr/ 目录部署）
+  - OCR：RapidOCR-json v1.1.0（onnxruntime 静态单文件 16.8MB，hiroi-sora；QProcess 常驻子进程管道模式：stdin 发图片路径 JSON，stdout 读结果；协议与原 PaddleOCR-json 同构；简中配置启动，6 语言 onnx 模型随包；引擎 92MB 见 tools/rapidocr，空闲 3 分钟自动回收）
   - 翻译：大模型 API 双协议（设置 `translate/apiFormat`）——OpenAI 兼容 `/chat/completions` + Bearer（默认 DeepSeek，可换 Ollama 等）与 Anthropic `/v1/messages` + `x-api-key`（DeepSeek 兼容端点 / 官方 Claude）；`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
   - 窗口/控件识别：Win32 窗口枚举（user32 + dwmapi）+ Windows UI Automation（UIA 控件树，系统组件无第三方依赖），实现见 `core/capture/SmartRectDetector`
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
@@ -35,7 +35,7 @@
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
-  - `tools/` — 第三方绿色套件（qt / paddleocr），不入库，由脚本生成
+  - `tools/` — 第三方绿色套件（qt / rapidocr / zxing），不入库，由脚本生成（install_qt.py / install_rapidocr.py / install_zxing.py；install_paddleocr.py 为旧引擎遗留备查）
   - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录（T-027 起排除 `poptools_domain_tests.exe`）；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
   - `dist/` — 安装包输出（已忽略；现存更名后 `PopTools-Setup-0.2.0.exe` 与旧名 Snipaste 的 0.1.3 / 0.2.0 Setup）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
@@ -48,7 +48,7 @@
   5. 重资源用完即释放：会话级大缓冲退出即清空（先例：m_baseScaled）；子进程类资源空闲自动回收（先例：PaddleOcrService 3 分钟回收）
   6. 模块 init 只装配：重资源懒加载，启动路径禁网络/磁盘重 IO
 - **常用命令**：
-  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_paddleocr.py`
+  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 PaddleOCR-json.exe 两个进程**，见坑 P-008）
   - 测试：`ctest -C Release --test-dir build --output-on-failure`（12 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退）
@@ -63,6 +63,22 @@
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-040 OCR 引擎切换 RapidOCR-json（安装包 105.7 → 80.8MB）
+- **完成日期**：2026-11-01
+- **执行智能体**：Agent_20261101184000
+- **背景**：用户要求安装包更小。部署 327MB 中 paddleocr/ 占 297MB（91%）。原定方案（T-027 遗留）为 RapidOCR-json，先做可行性终审再动服务层。
+- **可行性终审（实测）**：下载 RapidOCR-json v1.1.0（hiroi-sora，Umi-OCR 引擎）——静态单文件 16.8MB 零 DLL 依赖；6 语言 onnx 模型齐全（ch v3/v4、en、cht、japan、korean、cyrillic + 字典）；管道协议与 PaddleOCR-json **完全同构**（stdin `{"image_path"}` → `{code:100,data:[{box,score,text}]}`，101=无文字，中英文实测识别正确；204=JSON 解析失败、299=未知错误）。
+- **重要发现**：原 `PaddleOcrService` 空参数启动 PaddleOCR-json，**只加载简中模型——6 语言模型从未被引擎使用过**，换引擎无任何功能损失；「多语言保留」约束实际保护的是闲置文件。
+- **结果**：
+  1. `scripts/install_rapidocr.py`：下载 v1.1.0 发布包（70MB 7z）→ 7-Zip 便携版解压 → `tools/rapidocr`（92MB，green 套件不入库）。
+  2. 服务更名 `PaddleOcrService` → `RapidOcrService`（诚实命名），引擎目录 `rapidocr/`，启动参数固定简中配置（det v3/cls/rec v3 + dict_chinese，对齐原默认行为）；管道/看门狗/空闲回收逻辑不变。
+  3. POST_BUILD 部署 `rapidocr/` 并**清理旧 `paddleocr/` 残留**（防 297MB 混入安装包）。
+  4. 实测（ISCC 实装）：**部署 327 → 121MB，安装包 105.7 → 80.8MB（-24%）**。onnx 权重近不可压缩（T-027 已测 11%），进一步瘦身需裁语言模型——砍 cht/japan/korean/cyrillic 四套 rec 约再省 38MB（安装包 → ~43MB），**待用户拍板**（涉及多语言约束）。
+  5. 顺带：引擎切换后 stderr 启动零警告；OCR 回归（简中+英）通过真机冒烟。
+- **提交**：`2def450`
+- **待用户**：①真机 OCR 回归（截图扫描/译、贴图 OCR，简中与中英混排）；②语言裁剪决策（保留 6 语言 80.8MB vs 砍 4 语言 ~43MB）；③测速对比（onnxruntime 通常快于 Paddle CPU，未量化）。
+- **相关坑**：安装脚本勿用 `text=True` 读 tasklist 等中文 GBK 输出（P-020）；本任务无新坑。
 
 ### T-039 性能治理：OCR 空闲自动回收、基线脚本与性能红线
 - **完成日期**：2026-11-01
@@ -658,3 +674,4 @@
 | 2026-11-01 22:50 | Agent_20261101184000 | 历史任务 | 新增 T-037 | A 组小工具第一批（贴图 OCR/翻译 + 划词 LLM 动作）结算；批量 OCR 与二维码遗留 |
 | 2026-11-01 23:15 | Agent_20261101184000 | 历史任务 / 当前任务 | 新增 T-038；备注 2 更新（A 组遗留清空、提交号） | 二维码识别结算（zxing-cpp 套件）；T-034~T-038 已提交 |
 | 2026-11-01 23:30 | Agent_20261101184000 | 历史任务 / 项目快照 / 当前任务 | 新增 T-039；快照加性能红线小节与基线数字、常用命令补基线脚本；当前任务写移交说明 | 性能治理结算；会话收尾移交下一会话 |
+| 2026-11-01 23:50 | Agent_20261101184000 | 历史任务 / 项目快照 | 新增 T-040；技术栈/目录/常用命令刷新为 RapidOCR | 引擎切换结算：安装包 105.7→80.8MB（提交 2def450）；语言裁剪待用户拍板 |
