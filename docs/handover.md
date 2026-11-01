@@ -1,20 +1,19 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-11-01 23:55（功能候选清单入库；本会话移交下一 AI） · Agent_20261101184000
+> 最后更新：2026-11-02 00:05（T-041 多语言裁剪 + v0.4.0 发布；本会话移交下一 AI） · Agent_20261102000004
 
 ## 项目快照
 
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图，持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
-- **当前版本**：0.3.2。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
-  - 注：v0.3.2 发布后已完成 T-034~T-036 三批未发版改动（ESC 策略 / UI 现代化第一批 / 五批整体优化），下次发布需做版本判定（体感变更多，倾向 MINOR → 0.4.0）
+- **当前版本**：0.4.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
   - CMake + MSVC（VS 2022，VS 2026 亦可，见坑 P-001）
-  - OCR：RapidOCR-json v1.1.0（onnxruntime 静态单文件 16.8MB，hiroi-sora；QProcess 常驻子进程管道模式：stdin 发图片路径 JSON，stdout 读结果；协议与原 PaddleOCR-json 同构；简中配置启动，6 语言 onnx 模型随包；引擎 92MB 见 tools/rapidocr，空闲 3 分钟自动回收）
+  - OCR：RapidOCR-json v1.1.0（onnxruntime 静态单文件 16.8MB，hiroi-sora；QProcess 常驻子进程管道模式：stdin 发图片路径 JSON，stdout 读结果；协议与原 PaddleOCR-json 同构；简中 v3 配置启动（det/cls/rec v3 + dict_chinese）；中/英模型随包，cht/japan/korean/cyrillic 四套未使用的 rec 已由 install_rapidocr.py 幂等裁剪（T-041，恢复 = 移除 TRIM_REC_MODELS 表重跑）；引擎 53MB 见 tools/rapidocr，空闲 3 分钟自动回收）
   - 翻译：大模型 API 双协议（设置 `translate/apiFormat`）——OpenAI 兼容 `/chat/completions` + Bearer（默认 DeepSeek，可换 Ollama 等）与 Anthropic `/v1/messages` + `x-api-key`（DeepSeek 兼容端点 / 官方 Claude）；`QNetworkAccessManager` 实现；请求显式关闭思考模式（`thinking` 字段，端点不支持时 400/422 降级重发），响应做 `<think>` 兜底清洗；提示词注入用户配置的翻译领域与专有名词术语表
   - 窗口/控件识别：Win32 窗口枚举（user32 + dwmapi）+ Windows UI Automation（UIA 控件树，系统组件无第三方依赖），实现见 `core/capture/SmartRectDetector`
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
@@ -37,7 +36,7 @@
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
   - `tools/` — 第三方绿色套件（qt / rapidocr / zxing），不入库，由脚本生成（install_qt.py / install_rapidocr.py / install_zxing.py；install_paddleocr.py 为旧引擎遗留备查）
   - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录（T-027 起排除 `poptools_domain_tests.exe`）；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
-  - `dist/` — 安装包输出（已忽略；现存更名后 `PopTools-Setup-0.2.0.exe` 与旧名 Snipaste 的 0.1.3 / 0.2.0 Setup）
+  - `dist/` — 安装包输出（已忽略；仅保留最新 `PopTools-Setup-0.4.0-20261101_2359.exe`，发新包后删旧包）
   - `temp_scripts/` — 一次性脚本与中间产物（不入库）
   - `build/` — CMake 构建输出（已忽略；`build/Release/` 有完整可运行产物，含 Qt 运行库、paddleocr/ 引擎）
 - **性能红线（新增功能必查——本项目「卡」的根源是踩主线程红线，不是功能数量；基线实测：启动 54~66ms、主进程 ~35MB、OCR 子进程 ~775MB 懒启动 + 3 分钟空闲自动回收）**：
@@ -51,18 +50,33 @@
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 PaddleOCR-json.exe 两个进程**，见坑 P-008）
-  - 测试：`ctest -C Release --test-dir build --output-on-failure`（12 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（14 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退 / 二维码夹具）
   - 运行：`build/Release/PopTools.exe`
   - 性能基线：`python scripts/perf_baseline.py`（启动耗时+内存采样，追加 temp_scripts/out/perf_baseline.jsonl；发版前跑一次对照历史）
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.3.2 已发布**（2026-09-04，PATCH：T-032 截图交互纯缺陷修复；安装包文件名带构建时间戳，dist 仅保留最新）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.4.0 已发布**（2026-11-02，MINOR：T-034~T-041，含 QR 识别 / 贴图 OCR / 划词 LLM 动作 / 性能治理 / RapidOCR 引擎与多语言裁剪；GitHub Release 直发）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-041 OCR 多语言裁剪 + v0.4.0 版本发布
+- **完成日期**：2026-11-02
+- **执行智能体**：Agent_20261102000004
+- **背景**：T-040 遗留三项决策，用户一次拍板：①裁剪 4 套多语言 rec 模型；②立即走 0.4.0 发版（T-034~T-040 全部改动随版发出）；③UI 现代化第二批批准（后置，先出范围提案）。用户明确**跳过真机回归**，以自动化基线代替冒烟。
+- **前提核查**：RapidOcrService 启动参数固定简中 v3 配置（`src/core/ocr/RapidOcrService.cpp:147-150`），cht/japan/korean/cyrillic 四套 rec 从未被引擎加载，裁剪零功能损失；核查中发现 **ch v4 det/rec 模型对（约 15.5MB）同样未被引用**，未裁（待用户拍板）。
+- **结果**：
+  1. `scripts/install_rapidocr.py` 新增幂等裁剪步骤（TRIM_REC_MODELS 表，对已有安装同样生效）；`tools/rapidocr` 92 → 53MB。
+  2. 全量重建后部署目录 121 → 83MB；**安装包 80.8 → 46.9MB（`PopTools-Setup-0.4.0-20261101_2359.exe`，49,158,586 字节，-42%）**。
+  3. 版本三处同步 0.4.0（CMakeLists / PopTools.iss / 关于对话框；.iss 内两处 PaddleOCR 旧注释顺带更名 RapidOCR）；exe 二进制核验含 v0.4.0 无 0.3.2 残留。
+  4. ctest 1/1 通过；基线：启动 72ms / 主进程 35.4MB / OCR 子进程懒启动 0MB（性能红线守住）。
+  5. dist 删 0.3.2 包仅留最新；GitHub Release 直发（安装包资产）。
+- **提交**：`a1236fc`（perf 裁剪）、docs 与版本翻转提交见 git log（tag `v0.4.0`）
+- **相关坑**：无项目新坑（本会话 Git Bash PATH 无 cmake，实测改用 `D:\CMake\bin` 绝对路径——属本机环境技能待更新项，非项目问题）
+- **待用户**：①ch v4 模型对去留（裁掉安装包约再省 14MB → ~33MB）；②UI 第二批范围提案（待下一会话产出）；③T-034~T-040 交互项未真机回归（用户明示跳过），日常使用发现问题按普通缺陷报。
 
 ### T-040 OCR 引擎切换 RapidOCR-json（安装包 105.7 → 80.8MB）
 - **完成日期**：2026-11-01
@@ -484,11 +498,13 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-**本会话（2026-11-01，Agent_20261101184000）已收尾，无未完成代码任务。** 下一会话从这里接手：
+**本会话（2026-11-02，Agent_20261102000004）已收尾：T-041 多语言裁剪 + v0.4.0 发布完成。** 下一会话从这里接手：
 
-- **唯一待办：用户真机回归**（T-034~T-039 全部待验项汇总见各条目「待用户」字段；应用实例当前可能正在运行，重建前先杀 PopTools.exe + PaddleOCR-json.exe，见坑 P-008）
-- 回归通过后的下一步：走 **0.4.0 发版流程**（体感变多，MINOR；版本号三处同步 + 清空 build 全量重建 + 基线脚本对照 + ISCC 打包 + GitHub Release，gh CLI 便携版在 temp_scripts/gh-cli/bin/gh.exe 可复用）
-- 功能候选清单见下方「功能候选（未排期）」小节，选型标准与体量标注在内
+- **T-034~T-040 真机回归已被用户跳过**（明示决策，以 perf_baseline 自动化冒烟代替）：日常使用发现问题按普通缺陷处理
+- **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注）
+- **待办 2：ch v4 模型对去留**（det/rec v4 约 15.5MB 未被服务引用，裁掉安装包约再省 14MB → ~33MB；等用户拍板）
+- **待办 3：功能候选清单**见下方小节（用户指示下一步再挑）；批量图片 OCR 仍为已否决项
+- 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；gh CLI 便携版在 `temp_scripts/gh-cli/bin/gh.exe` 可复用
 
 
 ### 功能候选（未排期——下一会话可直接从表内挑活）
@@ -508,7 +524,7 @@
 | 7 | **截图历史面板** | 最近 N 张截图托盘面板，回看/重贴/复制；PinWindow 落盘 tempPopTools 已是天然素材 | PinWindow 落盘 | M |
 | 8 | **剪贴板历史** | 文字+图片统一历史、搜索后粘贴（Win+V 增强）；独立新面板 + 全局热键，体量最大 | GlobalHotKey + 新 UI | M/L |
 
-> 决策待用户：①语言模型裁剪（6 语言 80.8MB vs 简中英 ~43MB，见 T-040）；②0.4.0 发版时机（真机回归通过后走流程）；③UI 现代化第二批（样式债，见 T-035 备注）。
+> 决策待用户：①UI 现代化第二批范围提案（已批准做，见 T-041）；②ch v4 模型对去留（见 T-041）；其余已结算（语言裁剪、0.4.0 发版见 T-041）。
 
 > 备注 1：安装包瘦身第一阶段已结算为 [T-027](#t-027-安装包瘦身第一阶段剔除-d3d-着色器编译器并捆绑-vc-运行库)，其中记录了两个未做的后续可选项（opencv 最小化重建 / 换 RapidOCR-json 引擎），若继续瘦身以该条目为起点。
 > 备注 2：T-034~T-039 的全部改动已提交（221b966 / bbd9e83 / 92e6d3c 及 docs 提交），工作区干净。
@@ -696,3 +712,4 @@
 | 2026-11-01 23:30 | Agent_20261101184000 | 历史任务 / 项目快照 / 当前任务 | 新增 T-039；快照加性能红线小节与基线数字、常用命令补基线脚本；当前任务写移交说明 | 性能治理结算；会话收尾移交下一会话 |
 | 2026-11-01 23:50 | Agent_20261101184000 | 历史任务 / 项目快照 | 新增 T-040；技术栈/目录/常用命令刷新为 RapidOCR | 引擎切换结算：安装包 105.7→80.8MB（提交 2def450）；语言裁剪待用户拍板 |
 | 2026-11-01 23:55 | Agent_20261101184000 | 当前任务 | 新增「功能候选（未排期）」小节（8 项：体量/复用/要点/否决项） | 候选清单入库，移交下一 AI |
+| 2026-11-02 00:05 | Agent_20261102000004 | 历史任务 / 项目快照 / 当前任务 / 功能候选 | 新增 T-041；快照刷新（版本 0.4.0、OCR 中英模型 53MB、dist、ctest 14 用例、当前状态）；当前任务重写移交 | OCR 多语言裁剪（安装包 80.8→46.9MB）+ v0.4.0 发布（tag + GitHub Release） |
