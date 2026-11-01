@@ -11,7 +11,7 @@
 #include <algorithm>
 
 #include "../AppServices.h"
-#include "core/ocr/PaddleOcrService.h"
+#include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Translator.h"
 #include "ui/pin/PinWindow.h"
@@ -86,7 +86,7 @@ void PinModule::onPinTranslateRequested(const QPixmap &img)
 
 void PinModule::startPinOcr(const QPixmap &img)
 {
-    PaddleOcrService *ocr = m_services->ocr;
+    RapidOcrService *ocr = m_services->ocr;
     if (!ocr || !ocr->available()) {
         if (m_services->notify)
             m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("OCR 引擎不可用"));
@@ -100,7 +100,7 @@ void PinModule::startPinOcr(const QPixmap &img)
     }
     // 单次请求连接（SingleShotConnection：回包后自动断开，不与截图模块的常驻
     // 连接互相干扰；结果归属防护另见 OcrController::onBoxes 的 m_ocrPending）
-    connect(ocr, &PaddleOcrService::ocrBoxesFinished, this, &PinModule::onPinOcrFinished,
+    connect(ocr, &RapidOcrService::ocrBoxesFinished, this, &PinModule::onPinOcrFinished,
             Qt::SingleShotConnection);
     ocr->recognizeBoxes(img.toImage());
     if (m_services->notify)

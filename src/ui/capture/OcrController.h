@@ -6,7 +6,7 @@
 #include <QVector>
 #include <functional>
 
-#include "core/ocr/PaddleOcrService.h"
+#include "core/ocr/RapidOcrService.h"
 #include "CaptureContext.h"
 
 QT_BEGIN_NAMESPACE
@@ -33,7 +33,7 @@ struct OcrHostCallbacks
 };
 
 // ============================================================
-// OCR 控制器：把选区内图像（物理分辨率）交给 PaddleOCR，
+// OCR 控制器：把选区内图像（物理分辨率）交给 RapidOCR，
 // 结果文本框映射回选区局部坐标并作为文字标注添加到画板。
 // 继承 QObject 仅为了以 this 作信号连接的 context 对象
 // （OCR 服务为共享实例，寿命长于本控制器，必须随控制器析构自动断连）。
@@ -42,7 +42,7 @@ class OcrController : public QObject
 {
 public:
     // ocr：共享 OCR 引擎（应用级唯一，非拥有，寿命须覆盖本控制器）
-    OcrController(CaptureContext *ctx, PaddleOcrService *ocr, OcrHostCallbacks host);
+    OcrController(CaptureContext *ctx, RapidOcrService *ocr, OcrHostCallbacks host);
     ~OcrController() override;
 
     bool busy() const { return m_ocr->busy(); }
@@ -58,7 +58,7 @@ private:
     static QFont fitFontHeight(const QRectF &local, const QString &text); // 覆盖文字字号与原文字墨迹高度匹配（实测逼近）
 
     CaptureContext *m_ctx;
-    PaddleOcrService *m_ocr; // 共享 OCR 引擎（非拥有）
+    RapidOcrService *m_ocr; // 共享 OCR 引擎（非拥有）
     OcrHostCallbacks m_host; // 宿主回调（面板/动效，非拥有）
     QImage m_ocrImg; // 传给 OCR 的选区裁剪图（物理像素）
     bool m_translateMode = false; // 当前 OCR 请求是否为"识别并翻译"（【译】按钮）

@@ -107,17 +107,19 @@ else()
         "部署目录将缺 VC 运行库，请手动拷贝")
 endif()
 
-# 部署 PaddleOCR-json（离线 OCR 引擎，QProcess 子进程调用）
-# 整个 paddleocr 目录复制到可执行文件旁，包含 exe、模型、配置文件与
-# 引擎自带的 opencv_world4100.dll（子进程以 paddleocr/ 为工作目录启动，
-# Windows 加载器按 exe 所在目录 → CWD 找 DLL）
-set(PADDLEOCR_DIR "${CMAKE_SOURCE_DIR}/tools/paddleocr")
-if(EXISTS "${PADDLEOCR_DIR}/PaddleOCR-json.exe")
+# 部署 RapidOCR-json（离线 OCR 引擎，onnxruntime 静态单文件，QProcess 子进程调用；
+# 替代 PaddleOCR-json 全栈 297MB → 92MB，协议同构见 RapidOcrService）
+# 整个 rapidocr 目录复制到可执行文件旁（exe + models/，子进程以 rapidocr/ 为
+# 工作目录启动）；并清理旧引擎 paddleocr/ 残留，防其混入安装包
+set(RAPIDOCR_DIR "${CMAKE_SOURCE_DIR}/tools/rapidocr")
+if(EXISTS "${RAPIDOCR_DIR}/RapidOCR-json.exe")
     add_custom_command(TARGET PopTools POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${PADDLEOCR_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
             "$<TARGET_FILE_DIR:PopTools>/paddleocr"
-        COMMENT "Deploying PaddleOCR-json engine"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${RAPIDOCR_DIR}"
+            "$<TARGET_FILE_DIR:PopTools>/rapidocr"
+        COMMENT "Deploying RapidOCR-json engine"
     )
 endif()
 

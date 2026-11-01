@@ -7,7 +7,7 @@
 #include <QPixmap>
 #include <QVector>
 
-#include "core/ocr/PaddleOcrService.h"
+#include "core/ocr/RapidOcrService.h"
 
 namespace poptools {
 

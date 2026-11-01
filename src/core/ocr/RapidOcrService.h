@@ -19,19 +19,21 @@ struct OcrBox
     qreal conf = 0;  // 置信度 0-100
 };
 
-// 基于 PaddleOCR-json 的 OCR 服务（QProcess 子进程调用）。
+// 基于 RapidOCR-json（onnxruntime，hiroi-sora）的 OCR 服务（QProcess 子进程调用）。
 //
-// 启动 PaddleOCR-json.exe 在管道模式运行（常驻进程），
-// 通过 stdin 发送图片路径，从 stdout 读取 JSON 结果。
-// 模型初始化约 0.6s，后续识别约 200ms/张。
-// 请求带 20s 超时看门狗：引擎无响应时 kill 子进程并报错（下次请求自动重启），
-// 所有失败路径统一发 ocrBoxesFinished（此前文本模式死接口的失败会发错信号）。
-class PaddleOcrService : public QObject
+// 启动 RapidOCR-json.exe 在管道模式运行（常驻进程），启动参数固定简中配置
+// （det/cls/rec + 字典，与原 PaddleOCR-json 默认行为对齐）；
+// 通过 stdin 发送图片路径 JSON，从 stdout 读取结果（协议与 PaddleOCR-json 同构：
+// {code:100,data:[{box,score,text}]}，101=无文字）。
+// 静态单文件引擎（16.8MB，零 DLL 依赖）；请求带 20s 超时看门狗（引擎无响应时
+// kill 子进程并报错，下次请求自动重启），失败路径统一发 ocrBoxesFinished；
+// 空闲 3 分钟自动回收子进程（常驻内存大户，见 finishRequest）。
+class RapidOcrService : public QObject
 {
     Q_OBJECT
 public:
-    explicit PaddleOcrService(QObject *parent = nullptr);
-    ~PaddleOcrService() override;
+    explicit RapidOcrService(QObject *parent = nullptr);
+    ~RapidOcrService() override;
 
     // 识别图片中的文字并返回文本框（异步），完成后发 ocrBoxesFinished
     void recognizeBoxes(const QImage &image);
@@ -39,7 +41,7 @@ public:
     // 是否正忙（上一次识别未结束）
     bool busy() const { return m_busy; }
 
-    // 引擎是否可用（PaddleOCR-json.exe 是否存在）
+    // 引擎是否可用（RapidOCR-json.exe 是否存在）
     bool available() const;
 
 signals:
@@ -64,8 +66,8 @@ private:
     // 清理本次临时文件
     void cleanupTemp();
 
-    // PaddleOCR-json 目录（exe 同目录下的 paddleocr/）
-    static QString paddleDir();
+    // 引擎目录（exe 同目录下的 rapidocr/）
+    static QString engineDir();
 
     QProcess *m_process = nullptr;
     QTimer *m_timeoutTimer = nullptr; // 识别超时看门狗（引擎无响应 → kill + 报错）

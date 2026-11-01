@@ -28,7 +28,7 @@ class OutputController;
 class OcrPanel;
 class Translator;
 class SmartRectDetector;
-class PaddleOcrService;
+class RapidOcrService;
 
 // ============================================================
 // 截图画布窗口（全屏覆盖）—— 门面 + 事件路由
@@ -51,7 +51,7 @@ class CaptureWindow : public QWidget
     Q_OBJECT
 public:
     // ocrService：共享 OCR 引擎（应用级唯一，子进程昂贵）；为空时内部自建兜底实例
-    explicit CaptureWindow(PaddleOcrService *ocrService = nullptr,
+    explicit CaptureWindow(RapidOcrService *ocrService = nullptr,
                            QWidget *parent = nullptr);
 
     // 启动截图（捕获虚拟桌面画面并全屏显示）
@@ -121,7 +121,7 @@ private:
 
     // ---- 功能控制器（组合模式：构造时装配并注册） ----
     CaptureContext m_ctx;                                // 共享上下文（依赖注入）
-    PaddleOcrService *m_ocrService = nullptr;            // 共享 OCR 引擎（非拥有，必须注入）
+    RapidOcrService *m_ocrService = nullptr;            // 共享 OCR 引擎（非拥有，必须注入）
     std::unique_ptr<SelectionController> m_selectionCtrl;
     std::unique_ptr<AnnotationEditor> m_annotationEditor;
     std::unique_ptr<ToolDrawingController> m_toolDrawing;

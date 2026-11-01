@@ -9,7 +9,7 @@
 
 namespace poptools {
 
-OcrController::OcrController(CaptureContext *ctx, PaddleOcrService *ocr, OcrHostCallbacks host)
+OcrController::OcrController(CaptureContext *ctx, RapidOcrService *ocr, OcrHostCallbacks host)
     : QObject(nullptr) // 无 Qt 父子所有权：由 CaptureWindow 的 unique_ptr 独占管理
     , m_ctx(ctx)
     , m_ocr(ocr)
@@ -19,7 +19,7 @@ OcrController::OcrController(CaptureContext *ctx, PaddleOcrService *ocr, OcrHost
     // 必须随本控制器析构自动断连，避免悬垂 this）。
     // m_ocr 允许为空（组合根漏注入时 CaptureWindow 已告警，OCR 功能不可用但不崩溃）
     if (m_ocr)
-        QObject::connect(m_ocr, &PaddleOcrService::ocrBoxesFinished, this,
+        QObject::connect(m_ocr, &RapidOcrService::ocrBoxesFinished, this,
                          [this](bool ok, const QVector<OcrBox> &boxes, const QString &error)
                          {
                              if (m_translateMode)
@@ -61,7 +61,7 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
         if (m_host.ocrBusy)
             m_host.ocrBusy(false); // 确保结束态（防止 start 未调用）
         QMessageBox::warning(parent, "文字识别",
-                             "未找到 OCR 引擎（PaddleOCR-json.exe），请确认其位于程序目录的 paddleocr 文件夹中。");
+                             "未找到 OCR 引擎（RapidOCR-json.exe），请确认其位于程序目录的 rapidocr 文件夹中。");
         return false;
     }
 

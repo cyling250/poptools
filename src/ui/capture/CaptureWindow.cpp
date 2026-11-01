@@ -32,7 +32,7 @@
 namespace poptools
 {
 
-    CaptureWindow::CaptureWindow(PaddleOcrService *ocrService, QWidget *parent)
+    CaptureWindow::CaptureWindow(RapidOcrService *ocrService, QWidget *parent)
         : QWidget(parent)
     {
         // 全屏无边框置顶窗口
@@ -42,7 +42,7 @@ namespace poptools
 
         // OCR 引擎：应用级共享实例（子进程昂贵，全局唯一），由组合根注入。
         // 原先"未注入则自建兜底"已删除——它会绕过全局唯一假设，静默拉起
-        // 第二个 PaddleOCR 子进程；漏注入属组合根装配缺陷，断言在开发期暴露
+        // 第二个 OCR 引擎子进程；漏注入属组合根装配缺陷，断言在开发期暴露
         m_ocrService = ocrService;
         Q_ASSERT(m_ocrService);
         if (!m_ocrService)

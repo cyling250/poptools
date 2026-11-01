@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Qt 6.8](https://img.shields.io/badge/Qt-6.8.3-41CD52)
-![PaddleOCR](https://img.shields.io/badge/OCR-PaddleOCR%20v1.4-5C3EE8)
+![OCR](https://img.shields.io/badge/OCR-RapidOCR%20onnx-5C3EE8)
 
 PopTools 是一个常驻系统托盘的 Windows 全局实用小工具箱——热键一按，工具就「Pop」地弹出来。当前内置**全场景截图、贴图、本地离线 OCR 文字识别与大模型翻译**，后续会持续加入更多即按即用的小工具。
 
@@ -19,7 +19,7 @@ PopTools 是一个常驻系统托盘的 Windows 全局实用小工具箱——�
 |------|------|--------|
 | **区域截图** | 多屏拼接捕捉，支持标注工具栏（矩形/椭圆/箭头/文字/马赛克等） | `F1` |
 | **贴图** | 将截图钉到屏幕上，支持拖动/滚轮缩放/右键清除 | `F3` |
-| **OCR 文字识别** | 本地离线 PaddleOCR，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏 扫描/译 按钮 |
+| **OCR 文字识别** | 本地离线 RapidOCR，识别文字以文本框覆盖到画布，或打开文字栏面板 | 截图工具栏 扫描/译 按钮 |
 | **二维码识别** | 选区内二维码（支持一图多码），内容弹窗展示并复制到剪贴板 | 截图工具栏 码 按钮 |
 | **大模型翻译** | 支持 OpenAI 兼容（DeepSeek / Ollama 等）与 Anthropic（Claude）两种接口格式；截图翻译 + 划词翻译；自动关闭模型思考模式保证响应速度 | - |
 | **划词翻译** | 选中任意文字后弹出卡片，动作可切换：**翻译 / 解释 / 总结 / 改写**；支持语言切换（自动记忆上次目标语言）、拖拽调整卡片大小、一键复制 | `Ctrl+Alt+Shift+X` |
@@ -47,7 +47,7 @@ build/Release/PopTools.exe
 | 语言 | C++17 |
 | GUI | Qt 6.8.3 LTS（LGPL v3 动态链接，本地套件 `tools/qt`） |
 | 构建 | CMake + MSVC（Visual Studio 2022/2026） |
-| OCR | PaddleOCR（PaddleOCR-json.exe 子进程管道模式，本地离线） |
+| OCR | RapidOCR（RapidOCR-json.exe 子进程管道模式，onnxruntime 本地离线，静态单文件引擎） |
 | 翻译 | 大模型 API：OpenAI 兼容 `/chat/completions`（默认）与 Anthropic `/v1/messages` 双协议（DeepSeek / Ollama / Claude 等） |
 | 窗口/控件识别 | Win32 窗口枚举 + Windows UI Automation（系统组件，无第三方依赖） |
 | 热键 | Windows `RegisterHotKey`（user32） |
@@ -64,7 +64,7 @@ build/Release/PopTools.exe
 │   │   ├── annotation/         #   标注模型 + 渲染（AnnotationCanvas/Painter）
 │   │   ├── capture/            #   多屏捕获 + DPI 映射 + 窗口检测
 │   │   ├── hotkey/             #   全局热键（GlobalHotKey）
-│   │   ├── ocr/                #   OCR 服务（PaddleOCR-json 子进程调用）
+│   │   ├── ocr/                #   OCR 服务（RapidOCR-json 子进程调用）
 │   │   ├── settings/           #   设置持久化（INI）
 │   │   └── translation/        #   翻译服务 + 划词翻译
 │   ├── ui/                     # 界面层（按功能分库，聚合为 poptools_ui）
@@ -78,7 +78,8 @@ build/Release/PopTools.exe
 ├── temp_scripts/               # 临时脚本与中间产物（不推送）
 ├── tools/                      # 第三方二进制（不推送，由脚本生成）
 │   ├── qt/6.8.3/msvc2022_64/   #   Qt 套件
-│   └── paddleocr/              #   OCR 引擎（PaddleOCR-json.exe + models）
+│   ├── rapidocr/               #   OCR 引擎（RapidOCR-json.exe + onnx 模型）
+│   └── zxing/                  #   二维码识别库（zxing-cpp 源码）
 ├── packaging/                  # 安装脚本
 │   └── PopTools.iss
 └── build/                      # 构建输出（CMake 生成，忽略）
@@ -96,13 +97,13 @@ python scripts/install_qt.py
 
 经 `127.0.0.1:7897` 代理访问 Qt 官方仓库，仅下载 `qtbase` / `qtsvg` / `qttools` 模块。构建后 `windeployqt` 自动部署 DLL 到 exe 旁。
 
-### 2. PaddleOCR → `tools/paddleocr`
+### 2. RapidOCR → `tools/rapidocr`
 
 ```powershell
-python scripts/install_paddleocr.py
+python scripts/install_rapidocr.py
 ```
 
-免安装，下载 PaddleOCR-json v1.4.1 发布包 + 7-Zip 解压，附带简中/繁中/英/日/韩/俄模型。运行时由 PaddleOcrService 通过 QProcess 子进程管道模式调用。
+下载 RapidOCR-json（onnxruntime 静态单文件引擎 + 6 语言 onnx 模型，解包约 92MB），运行时由 RapidOcrService 通过 QProcess 子进程管道模式调用（协议与原 PaddleOCR-json 同构）。`scripts/install_paddleocr.py` 为旧引擎遗留脚本（PaddleOCR-json，297MB），保留备查，新部署勿用。
 
 ### 3. zxing-cpp → `tools/zxing`（可选，二维码识别）
 

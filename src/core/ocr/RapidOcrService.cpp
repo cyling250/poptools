@@ -1,4 +1,4 @@
-#include "PaddleOcrService.h"
+#include "RapidOcrService.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -19,12 +19,6 @@ namespace {
 // 冷启动实测约 0.6s，回收后下次请求自动重启，代价可接受
 constexpr int kOcrIdleRecycleMs = 3 * 60 * 1000;
 } // namespace
-
-// ---- OcrBox 兼容：PaddleOcrBox 转 OcrBox ----
-// 外部使用 OcrBox（定义在 OcrService.h），这里用 PaddleOcrBox 内部处理，
-// 最终 emit 时转换为 QVector<OcrBox>。但为了简化，外部直接使用 OcrBox，
-// 保持与 OcrController 兼容。
-// 注意：PaddleOcrBox 只在此文件内使用，外部信号用 OcrBox 对齐旧接口。
 
 // ---- 辅助函数 ----
 
@@ -49,9 +43,9 @@ static QRect quadToRect(const QJsonArray &box)
     return QRect(minX, minY, maxX - minX, maxY - minY);
 }
 
-// ---- PaddleOcrService ----
+// ---- RapidOcrService ----
 
-PaddleOcrService::PaddleOcrService(QObject *parent)
+RapidOcrService::RapidOcrService(QObject *parent)
     : QObject(parent)
 {
     // 识别超时看门狗：子进程活着但不响应时 m_busy 原先永真，后续请求被静默
@@ -83,7 +77,7 @@ PaddleOcrService::PaddleOcrService(QObject *parent)
 
 // 请求收尾（不含 emit）：停超时看门狗、清临时文件、复位忙态，
 // 并启动空闲自动回收倒计时（3 分钟无新请求则结束子进程省内存）
-void PaddleOcrService::finishRequest()
+void RapidOcrService::finishRequest()
 {
     m_timeoutTimer->stop();
     m_busy = false;
@@ -91,13 +85,13 @@ void PaddleOcrService::finishRequest()
     m_idleTimer->start();
 }
 
-void PaddleOcrService::fail(const QString &msg)
+void RapidOcrService::fail(const QString &msg)
 {
     finishRequest();
     emit ocrBoxesFinished(false, QVector<OcrBox>(), msg);
 }
 
-PaddleOcrService::~PaddleOcrService()
+RapidOcrService::~RapidOcrService()
 {
     cleanupTemp();
     if (m_process)
@@ -107,18 +101,18 @@ PaddleOcrService::~PaddleOcrService()
     }
 }
 
-QString PaddleOcrService::paddleDir()
+QString RapidOcrService::engineDir()
 {
-    return QCoreApplication::applicationDirPath() + QStringLiteral("/paddleocr");
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/rapidocr");
 }
 
-bool PaddleOcrService::available() const
+bool RapidOcrService::available() const
 {
-    const QString exe = paddleDir() + QStringLiteral("/PaddleOCR-json.exe");
+    const QString exe = engineDir() + QStringLiteral("/RapidOCR-json.exe");
     return QFileInfo::exists(exe);
 }
 
-void PaddleOcrService::ensureProcess()
+void RapidOcrService::ensureProcess()
 {
     if (m_process && m_process->state() == QProcess::Running)
         return;
@@ -127,7 +121,7 @@ void PaddleOcrService::ensureProcess()
     {
         m_process = new QProcess(this);
         QObject::connect(m_process, &QProcess::readyReadStandardOutput,
-                         this, &PaddleOcrService::onReadyRead);
+                         this, &RapidOcrService::onReadyRead);
         // 进程异常退出时自动重启（下次请求时）
         QObject::connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
                          this, [this](int /*exitCode*/, QProcess::ExitStatus status)
@@ -142,11 +136,19 @@ void PaddleOcrService::ensureProcess()
         });
     }
 
-    const QString exePath = paddleDir() + QStringLiteral("/PaddleOCR-json.exe");
-    const QString workDir = paddleDir();
+    const QString exePath = engineDir() + QStringLiteral("/RapidOCR-json.exe");
+    const QString workDir = engineDir();
 
     m_process->setWorkingDirectory(workDir);
-    m_process->start(exePath, QStringList(), QProcess::ReadWrite);
+    // 固定简中配置（det/cls/rec/字典）——与原 PaddleOCR-json 空参数默认行为对齐；
+    // 6 语言 rec 模型随包分发，语言切换为后续可选项（引擎按启动参数加载单套）
+    m_process->start(exePath, QStringList{
+                         QStringLiteral("--models=models"),
+                         QStringLiteral("--det=ch_PP-OCRv3_det_infer.onnx"),
+                         QStringLiteral("--cls=ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+                         QStringLiteral("--rec=ch_PP-OCRv3_rec_infer.onnx"),
+                         QStringLiteral("--keys=dict_chinese.txt"),
+                     }, QProcess::ReadWrite);
     // 等待进程启动（不等待初始化完成，模型加载在后台进行）
     if (!m_process->waitForStarted(5000))
     {
@@ -155,7 +157,7 @@ void PaddleOcrService::ensureProcess()
     }
 }
 
-void PaddleOcrService::recognizeBoxes(const QImage &image)
+void RapidOcrService::recognizeBoxes(const QImage &image)
 {
     if (m_busy || image.isNull())
         return;
@@ -163,7 +165,7 @@ void PaddleOcrService::recognizeBoxes(const QImage &image)
     sendImage(image);
 }
 
-void PaddleOcrService::sendImage(const QImage &image)
+void RapidOcrService::sendImage(const QImage &image)
 {
     // 保存图片到临时文件
     cleanupTemp();
@@ -197,7 +199,7 @@ void PaddleOcrService::sendImage(const QImage &image)
     m_idleTimer->stop();     // 有活跃请求：暂停空闲回收倒计时
 }
 
-void PaddleOcrService::onReadyRead()
+void RapidOcrService::onReadyRead()
 {
     m_buffer.append(m_process->readAllStandardOutput());
 
@@ -272,7 +274,7 @@ void PaddleOcrService::onReadyRead()
     }
 }
 
-void PaddleOcrService::cleanupTemp()
+void RapidOcrService::cleanupTemp()
 {
     if (!m_tempFile.isEmpty())
     {

@@ -26,8 +26,8 @@ add_library(poptools_core STATIC
     hotkey/HotKeyNames.h
     hotkey/GlobalMouseHook.cpp
     hotkey/GlobalMouseHook.h
-    ocr/PaddleOcrService.cpp
-    ocr/PaddleOcrService.h
+    ocr/RapidOcrService.cpp
+    ocr/RapidOcrService.h
     settings/Settings.cpp
     settings/Settings.h
     translation/Translator.cpp

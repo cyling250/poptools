@@ -4,7 +4,7 @@
 #include <QMessageBox>
 
 #include "AppServices.h"
-#include "core/ocr/PaddleOcrService.h"
+#include "core/ocr/RapidOcrService.h"
 #include "modules/CaptureModule.h"
 #include "modules/PinModule.h"
 #include "modules/SelectionTranslateModule.h"
@@ -26,7 +26,7 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->setTitle("PopTools");
 
     // ---- 共享服务（组合根持有所有权，注入各功能模块） ----
-    m_ocr = new PaddleOcrService(this);
+    m_ocr = new RapidOcrService(this);
     m_services = new AppServices(this);
     m_services->hotkey = &m_hotKey;
     m_services->ocr = m_ocr;
@@ -57,7 +57,7 @@ MainWindow::MainWindow(QObject *parent)
             QStringLiteral("PopTools v0.3.2\n\n"
                            "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
                            "快捷键：F1 截图\n"
-                           "OCR 引擎：PaddleOCR（本地离线）\n"
+                           "OCR 引擎：RapidOCR（本地离线）\n"
                            "翻译：OpenAI 兼容大模型 API（可配置）\n\n"
                            "构建时间：%1 %2")
                 .arg(QLatin1String(__DATE__), QLatin1String(__TIME__)));

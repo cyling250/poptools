@@ -13,7 +13,7 @@ class QMenu;
 namespace poptools {
 
 class GlobalHotKey;
-class PaddleOcrService;
+class RapidOcrService;
 
 // ============================================================
 // 应用级共享服务与贡献点（组合根装配，注入各功能模块）。
@@ -32,7 +32,7 @@ public:
 
     // ---- 共享服务（组合根在 initAll 前注入并持有所有权） ----
     GlobalHotKey *hotkey = nullptr;   // 全局热键注册器
-    PaddleOcrService *ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
+    RapidOcrService *ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
     QMenu *trayMenu = nullptr;        // 托盘菜单（模块经 addTrayAction 贡献菜单项）
 
     // ---- 跨模块能力槽与共享态（提供方：CaptureModule） ----
