@@ -1,9 +1,9 @@
 ; PopTools 安装程序脚本（Inno Setup 6）
-; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + PaddleOCR 引擎）
+; 打包源：build/Release（完整运行环境：exe + Qt 运行库 + 插件 + RapidOCR 引擎）
 ; 编译：ISCC.exe packaging\PopTools.iss
 
 #define MyAppName "PopTools"
-#define MyAppVersion "0.3.2"
+#define MyAppVersion "0.4.0"
 ; 构建时间戳进文件名：修复期间版本号未变，同名包易新旧混淆
 #define BuildStamp GetDateTimeString("yyyymmdd_hhnn", "", "")
 #define MyAppPublisher "PopTools"
@@ -37,7 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
-; build/Release 即完整运行目录（含 PaddleOCR 引擎与 Qt 插件），整体递归复制；
+; build/Release 即完整运行目录（含 RapidOCR 引擎与 Qt 插件），整体递归复制；
 ; 排除误入的单元测试程序（Excludes 模式对递归子目录同样生效）
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "poptools_domain_tests.exe"; Flags: ignoreversion recursesubdirs createallsubdirs

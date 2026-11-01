@@ -54,7 +54,7 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addAction("关于", [] {
         // 构建时间用于辨别安装的是哪一版包（多轮修复期间包名相同易混淆）
         QMessageBox::about(nullptr, "PopTools",
-            QStringLiteral("PopTools v0.3.2\n\n"
+            QStringLiteral("PopTools v0.4.0\n\n"
                            "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
                            "快捷键：F1 截图\n"
                            "OCR 引擎：RapidOCR（本地离线）\n"

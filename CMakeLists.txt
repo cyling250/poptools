@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PopTools VERSION 0.3.2 LANGUAGES CXX)
+project(PopTools VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,7 +108,8 @@ else()
 endif()
 
 # 部署 RapidOCR-json（离线 OCR 引擎，onnxruntime 静态单文件，QProcess 子进程调用；
-# 替代 PaddleOCR-json 全栈 297MB → 92MB，协议同构见 RapidOcrService）
+# 替代 PaddleOCR-json 全栈 297MB → 55MB：中/英模型，四套未使用的多语言 rec 已由
+# install_rapidocr.py 裁剪，协议同构见 RapidOcrService）
 # 整个 rapidocr 目录复制到可执行文件旁（exe + models/，子进程以 rapidocr/ 为
 # 工作目录启动）；并清理旧引擎 paddleocr/ 残留，防其混入安装包
 set(RAPIDOCR_DIR "${CMAKE_SOURCE_DIR}/tools/rapidocr")
