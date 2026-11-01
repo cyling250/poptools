@@ -103,7 +103,7 @@ python scripts/install_qt.py
 python scripts/install_rapidocr.py
 ```
 
-下载 RapidOCR-json（onnxruntime 静态单文件引擎 + 6 语言 onnx 模型，解包约 92MB），运行时由 RapidOcrService 通过 QProcess 子进程管道模式调用（协议与原 PaddleOCR-json 同构）。`scripts/install_paddleocr.py` 为旧引擎遗留脚本（PaddleOCR-json，297MB），保留备查，新部署勿用。
+下载 RapidOCR-json（onnxruntime 静态单文件引擎 + 中/英 onnx 模型，解包约 55MB；服务启动固定简中配置，cht/japan/korean/cyrillic 四套未使用的多语言 rec 模型由脚本自动裁剪），运行时由 RapidOcrService 通过 QProcess 子进程管道模式调用（协议与原 PaddleOCR-json 同构）。`scripts/install_paddleocr.py` 为旧引擎遗留脚本（PaddleOCR-json，297MB），保留备查，新部署勿用。
 
 ### 3. zxing-cpp → `tools/zxing`（可选，二维码识别）
 
