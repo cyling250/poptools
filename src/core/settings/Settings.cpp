@@ -212,4 +212,101 @@ void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
     syncChecked();
 }
 
+// ---- 桌面日历 ----
+
+bool Settings::calendarAlwaysOnTop() const
+{
+    return m_s.value("calendar/alwaysOnTop", true).toBool();
+}
+
+void Settings::setCalendarAlwaysOnTop(bool on)
+{
+    m_s.setValue("calendar/alwaysOnTop", on);
+    syncChecked();
+}
+
+bool Settings::calendarEdgeSnap() const
+{
+    return m_s.value("calendar/edgeSnap", true).toBool();
+}
+
+void Settings::setCalendarEdgeSnap(bool on)
+{
+    m_s.setValue("calendar/edgeSnap", on);
+    syncChecked();
+}
+
+bool Settings::calendarShowOnStartup() const
+{
+    return m_s.value("calendar/showOnStartup", false).toBool();
+}
+
+void Settings::setCalendarShowOnStartup(bool on)
+{
+    m_s.setValue("calendar/showOnStartup", on);
+    syncChecked();
+}
+
+int Settings::calendarOpacity() const
+{
+    // 钳制在 20-100：过小则窗口不可见，用户会以为程序坏了
+    const int v = m_s.value("calendar/opacity", 95).toInt();
+    return qBound(20, v, 100);
+}
+
+void Settings::setCalendarOpacity(int percent)
+{
+    m_s.setValue("calendar/opacity", qBound(20, percent, 100));
+    syncChecked();
+}
+
+QColor Settings::calendarBgColor() const
+{
+    const QColor c(m_s.value("calendar/bgColor", "#FFFFFF").toString());
+    return c.isValid() ? c : QColor("#FFFFFF");
+}
+
+void Settings::setCalendarBgColor(const QColor &color)
+{
+    m_s.setValue("calendar/bgColor", color.isValid() ? color.name(QColor::HexRgb)
+                                                     : QColor("#FFFFFF").name(QColor::HexRgb));
+    syncChecked();
+}
+
+QColor Settings::calendarAccentColor() const
+{
+    const QColor c(m_s.value("calendar/accentColor", "#2B6FF2").toString());
+    return c.isValid() ? c : QColor("#2B6FF2");
+}
+
+void Settings::setCalendarAccentColor(const QColor &color)
+{
+    m_s.setValue("calendar/accentColor",
+                 color.isValid() ? color.name(QColor::HexRgb)
+                                 : QColor("#2B6FF2").name(QColor::HexRgb));
+    syncChecked();
+}
+
+QByteArray Settings::calendarGeometry() const
+{
+    return m_s.value("calendar/geometry").toByteArray();
+}
+
+void Settings::setCalendarGeometry(const QByteArray &state)
+{
+    m_s.setValue("calendar/geometry", state);
+    syncChecked();
+}
+
+QByteArray Settings::calendarSplitter() const
+{
+    return m_s.value("calendar/splitter").toByteArray();
+}
+
+void Settings::setCalendarSplitter(const QByteArray &state)
+{
+    m_s.setValue("calendar/splitter", state);
+    syncChecked();
+}
+
 } // namespace poptools

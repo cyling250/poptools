@@ -53,6 +53,11 @@ QStringList AppServices::takeFailedHotKeyNames()
     return std::move(m_failedHotKeyNames);
 }
 
+void AppServices::notifySettingsChanged()
+{
+    emit settingsChanged();
+}
+
 void AppServices::onHotKeyActivated(int id)
 {
     if (const auto cb = m_hotkeyCallbacks.value(id))

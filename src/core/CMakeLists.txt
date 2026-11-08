@@ -15,6 +15,10 @@ add_library(poptools_core STATIC
     annotation/AnnotationPainter.cpp
     annotation/AnnotationPainter.h
     annotation/AnnotationTypes.h
+    calendar/LunarCalendar.cpp
+    calendar/LunarCalendar.h
+    calendar/CalendarStore.cpp
+    calendar/CalendarStore.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp

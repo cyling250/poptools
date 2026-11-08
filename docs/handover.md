@@ -1,12 +1,12 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。任务完成后写入「历史任务」，未完成任务见「当前任务」。
-> 最后更新：2026-11-02 00:05（T-041 多语言裁剪 + v0.4.0 发布；本会话移交下一 AI） · Agent_20261102000004
+> 最后更新：2026-11-08 21:00（T-042 桌面日历 + 设置菜单分页重构；本会话移交下一 AI） · Agent_20261108204000
 
 ## 项目快照
 
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
-- **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（PaddleOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图，持续新增小工具
+- **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（RapidOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图 + 桌面日历（月历农历/日程/待办），持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
 - **当前版本**：0.4.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
@@ -19,18 +19,19 @@
   - 热键：Win32 `RegisterHotKey`（user32），经 `core/hotkey/GlobalHotKey` 封装（nativeEventFilter）
   - 设置持久化：QSettings 写 exe 同目录 `PopTools.ini`，单例 `core/settings/Settings`
 - **架构概览**（分层 + 功能模块化：core 与 ui 各为静态库（ui 内按功能分库），依赖方向 ui → core；app 可执行承载组合根与功能模块）：
-  - **功能模块**（`app/IFeatureModule` + `FeatureRegistry` + `AppServices`）：截图 CaptureModule / 贴图 PinModule / 划词翻译 SelectionTranslateModule 三个自包含模块（`app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口/钩子/事件过滤器；MainWindow 是组合根（托盘 + 服务装配 + 模块注册 + 设置/关于/退出）。模块间互不 include，跨模块交互经 AppServices 能力槽（`captureActive`/`captureIntercept`/`lastCaptureRect`）。**拔插功能 = 组合根删一处 add() + CMake 删一个目标**
+  - **功能模块**（`app/IFeatureModule` + `FeatureRegistry` + `AppServices`）：截图 CaptureModule / 贴图 PinModule / 划词翻译 SelectionTranslateModule / 桌面日历 CalendarModule 四个自包含模块（`app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口/钩子/事件过滤器；MainWindow 是组合根（托盘 + 服务装配 + 模块注册 + 设置/关于/退出）。模块间互不 include，跨模块交互经 AppServices 能力槽（`captureActive`/`captureIntercept`/`lastCaptureRect`）与共享服务槽（`ocr`/`calendarStore`）；设置保存后组合根经 `AppServices::settingsChanged` 信号广播，有缓存外观的模块各自重应用。**拔插功能 = 组合根删一处 add() + CMake 删一个目标**
   - `app/MainWindow`（QObject，非窗体）＝应用控制器：系统托盘 + 模块装配
   - 截图主流程：`CaptureWindow`（全屏画布式编辑，内部按控制器拆分：SelectionController / AnnotationEditor / ToolDrawingController / TextEditingController / OcrController / OutputController）→ OutputController 产出到剪贴板 → PinWindow 贴图（构造注入应用级共享 `PaddleOcrService`，OCR 子进程全局唯一；OCR 面板/动效经 `OcrHostCallbacks` 窄接口注入 OcrController，CaptureContext 保持纯画布/选区共享态）
   - OCR 流程：OcrController → `PaddleOcrService`（子进程）→ 识别文本以文本框覆盖画布，或打开 `OcrPanel` 文字栏
   - 翻译流程：`Translator`（大模型 API，提示词=基础指令+领域/术语表；CaptureWindow 内嵌一例服务截图翻译，SelectionTranslateModule 内一例服务划词卡片，各自单消费者）→ OcrPanel（截图翻译）或 `TranslateCard`（划词翻译卡片，全局仅一张）；`SelectionTranslator` 负责模拟 Ctrl+C 抓取选中文本；目标语言在两处入口共享并持久化（`translate/targetLang`），切换即记忆；源语言不记忆，每次新任务重置为自动检测；语言显示名↔代码映射统一在 `core/translation/Languages.h`
+  - 桌面日历流程（T-042）：`CalendarStore`（core/calendar，JSON 持久化 `%LOCALAPPDATA%/PopTools/PopTools/calendar.json`，QSaveFile 原子写，改动即存）→ `CalendarWindow`（无边框窗口：自绘标题栏 HTCAPTION 拖动 + NCHITTEST 边缘缩放；左 MonthView 自绘月历（公历+农历小字+节日色+事项圆点）| 右垂直分栏日程/待办列表（ItemDelegate 自绘：分类圆点/勾选圈/★加粗/删除线，ReorderList 拖拽重排回写））；置顶（WindowStaysOnTopHint）、贴边收起（moveEvent 距边 18px → EdgeTab 贴边小条，悬停/点击展开 + 1.5s 防回吸冷却）、收起右上角 `CalendarMiniWidget`（今日待办，60s 定时跨天刷新）、透明度/背景色/强调色（设置页保存后经 settingsChanged 重应用）；农历换算 `core/calendar/LunarCalendar`（1900-2100 压缩表算法 + 农历/公历节日）
   - 标注数据模型与渲染在 `core/annotation`（AnnotationCanvas / AnnotationItem / AnnotationPainter），UI 工具在 `ui/capture/tools`（ToolBase + ToolFactory + 各工具类）
 - **目录含义**：
   - `src/main.cpp` — 程序入口
   - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施；CMake 目标：`poptools_app_infra`（基础设施，可执行与测试共链）+ `poptools_module_<id>`（每功能模块一个静态库，含其界面库）+ 聚合 `poptools_modules`（T-036 起「拔插=删一个目标」字面成立）
-  - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译），各自自包含
-  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
-  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框，跟随系统明暗主题），聚合为 INTERFACE 目标 `poptools_ui`
+  - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译 / calendar 桌面日历），各自自包含
+  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、calendar 农历换算与日历数据仓库、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、ocr OCR 服务、settings 设置、translation 翻译与划词翻译）
+  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_calendar`（日历主窗口+月历+迷你条）/ `poptools_ui_settings`（设置对话框：左侧导航分页 + 分类管理，跟随系统明暗主题），聚合为 INTERFACE 目标 `poptools_ui`
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
@@ -50,18 +51,36 @@
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 PaddleOCR-json.exe 两个进程**，见坑 P-008）
-  - 测试：`ctest -C Release --test-dir build --output-on-failure`（14 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退 / 二维码夹具）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（17 用例：标注画板 / 语言映射 / 热键名 / 主题色 / API 辅助与请求体 / 注册表 / 设置回退 / 二维码夹具 / 农历换算与标签 / 日历数据仓库往返）
   - 运行：`build/Release/PopTools.exe`
   - 性能基线：`python scripts/perf_baseline.py`（启动耗时+内存采样，追加 temp_scripts/out/perf_baseline.jsonl；发版前跑一次对照历史）
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.4.0 已发布**（2026-11-02，MINOR：T-034~T-041，含 QR 识别 / 贴图 OCR / 划词 LLM 动作 / 性能治理 / RapidOCR 引擎与多语言裁剪；GitHub Release 直发）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.4.0 已发布**（2026-11-02，MINOR：T-034~T-041，含 QR 识别 / 贴图 OCR / 划词 LLM 动作 / 性能治理 / RapidOCR 引擎与多语言裁剪；GitHub Release 直发）；**v0.4.0 之后未发版改动**：T-042 桌面日历 + 设置菜单分页重构（下次发版需版本判定，含新功能建议 MINOR）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-042 桌面日历功能模块 + 设置菜单分页重构
+- **完成日期**：2026-11-08
+- **执行智能体**：Agent_20261108204000
+- **背景**：用户给出一篇小红书笔记（「howto｜用AI手搓桌面日程小组件」，作者用 Codex 做的 Windows 桌面日程工具，功能清单齐全），要求：①用本项目框架把该日历小组件实现为软件的一个功能；②设置菜单改为规范化的大型软件设置（通用 + 各功能分页）；③先实现、不搞太复杂，但笔记的功能要能实现。笔记功能清单：月历自带中文农历 / 日程待办增删改与调整顺序 / 待办一键安排到不同日期 / 分类+自定义颜色+重要高亮加粗 / 完成自动删除线 / 窗口及各栏尺寸拖动调整 / 背景色强调色透明度 / 置顶+贴边自动收起+系统托盘 / 最小化收进右上角只显示待办 / 开机启动 / 数据纯本地不联网。
+- **结果**：
+  1. **第 4 个功能模块 calendar**（照模块化 checklist 接入：core 域 + ui 分库 + app 模块 + 三处 CMake + 组合根注册）：托盘菜单「桌面日历」开关窗口；窗口懒创建（模块 init 只装配）。
+  2. **core/calendar**：`LunarCalendar`（1900-2100 经典压缩表农历换算 + 节日标注：春节/元宵/端午/七夕/中秋/重阳/腊八/除夕 + 元旦/五一/国庆；初一显示月名）+ `CalendarStore`（条目=日程/待办/分类，数组顺序即同组显示顺序，无显式 order 字段；JSON 经 QSaveFile 原子写，改动即存；测试可注入路径构造）。
+  3. **ui/calendar**：`CalendarWindow`（无边框：HTCAPTION 标题栏拖动 + NCHITTEST 六向边缘缩放；水平分栏 月历|列表、垂直分栏 日程|待办，双 QSplitter 状态持久化；📌置顶 / —收起 / ✕关闭；贴边收起：moveEvent 距屏幕边 18px 内 → `EdgeTab` 贴边小条，悬停 280ms 或点击展开，展开后 1.5s 冷却防回吸）+ `MonthView`（自绘月历：选中强调色实底、今天描边圈、农历小字节日色、事项圆点≤3）+ `CalendarMiniWidget`（右上角今日待办条：未完成在前完成垫底、点击勾选、双击展开）+ `ItemDelegate`（分类圆点 / 勾选圈 / ★加粗 / 完成删除线）+ `ItemEditDialog`（增改+删除）；拖拽重排经 ReorderList::dropEvent 回写 store。
+  4. **设置对话框重构**：左侧导航（通用/截图与贴图/翻译/桌面日历）+ QStackedWidget 四页，全部原有配置项迁入对应页；桌面日历页 = 置顶/贴边/开机显示三开关 + 透明度滑条 + 背景/强调色拾色器 + 「管理分类…」（`CategoryManagerDialog`，改动即时写 store）；`AppServices` 新增 `calendarStore` 共享槽与 `settingsChanged` 信号（组合根在设置 OK 后广播）。
+  5. **数据纯本地**：`%LOCALAPPDATA%/PopTools/PopTools/calendar.json`（标准可写目录——Program Files 安装形态 exe 旁不可写，刻意不走 PopTools.ini 的 exe 旁约定）；开机启动复用应用级注册表项，新增 `calendar/showOnStartup` 配合。
+  6. **测试 14 → 17 用例**：农历锚点（2024/2025/2026 春节、2025/2026 中秋、2023 闰二月初一）、dayLabel（节日/除夕/朔日月名/平日）、CalendarStore 往返（增删改/上下移/安排到/重排/分类删除重挂/JSON 重载）。
+  7. **冒烟**：临时 ini 开 showOnStartup → 启动自动弹日历 → 截图验证月历农历（11-08=九月三十、11-09=十月初一，与推算一致）、列表渲染（分类圆点/★加粗/完成划线全部正确）；冒烟痕迹（ini/测试 json/临时脚本）已清理。
+- **关键改动**：`src/core/calendar/`（新增 5 文件）、`src/ui/calendar/`（新增 10 文件）、`src/app/modules/CalendarModule.{h,cpp}`（新增）、`src/ui/settings/SettingsDialog.{h,cpp}`（重写为分页）+ `CategoryManagerDialog.{h,cpp}`（新增）、`src/app/AppServices.{h,cpp}`、`src/app/MainWindow.{h,cpp}`、`src/core/settings/Settings.{h,cpp}`（calendar/* 键）、CMake 三处、`tests/domain_tests.cpp`（+3 用例）、`README.md`
+- **相关坑**：[P-028](#p-028-农历表算法两处坑位循环漏十二月位与表转录错误)、[P-029](#p-029-匿名命名空间自由函数裸调-connect-编译失败)
+- **待用户**：①真机回归交互项（增删改/拖拽排序/右键菜单/安排到/贴边收起与展开/迷你条/设置页外观即时生效/分类管理）；②显示窗口时主进程内存 ~104MB（基线 35MB，窗口栈+双缓冲所致，隐藏后回落，未量化——关注是否需优化）；③发版决策（新功能建议 MINOR，可与 UI 第二批一起发）。
+
+### T-041 OCR 多语言裁剪 + v0.4.0 版本发布
 
 ### T-041 OCR 多语言裁剪 + v0.4.0 版本发布
 - **完成日期**：2026-11-02
@@ -498,13 +517,15 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-**本会话（2026-11-02，Agent_20261102000004）已收尾：T-041 多语言裁剪 + v0.4.0 发布完成。** 下一会话从这里接手：
+**本会话（2026-11-08，Agent_20261108204000）已收尾：T-042 桌面日历功能模块 + 设置菜单分页重构完成（已构建、ctest 17/17、冒烟通过、代码已提交）。** 下一会话从这里接手：
 
+- **T-042 真机回归待用户**：交互项（增删改/拖拽排序/右键菜单/安排到/贴边收起与展开/迷你条/设置页外观/分类管理）——自动化冒烟只覆盖了渲染与数据链路
 - **T-034~T-040 真机回归已被用户跳过**（明示决策，以 perf_baseline 自动化冒烟代替）：日常使用发现问题按普通缺陷处理
-- **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注）
+- **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注。注意 T-042 的新窗口已是新风格，第二批范围提案时勿重复覆盖）
 - **待办 2：ch v4 模型对去留**（det/rec v4 约 15.5MB 未被服务引用，裁掉安装包约再省 14MB → ~33MB；等用户拍板）
 - **待办 3：功能候选清单**见下方小节（用户指示下一步再挑）；批量图片 OCR 仍为已否决项
-- 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；发版工具链已恢复：gh CLI 便携版 `temp_scripts/gh-cli/bin/gh.exe`（2.103.3，本会话重装），gh 自身未登录——用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-041 实操可复制）
+- **发版提示**：T-042 是新功能 + 设置界面重构，下次发版建议 MINOR；发版前跑 `python scripts/perf_baseline.py` 对照基线
+- 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；gh CLI 便携版 `temp_scripts/gh-cli/bin/gh.exe`，认证用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-041 实操可复制）
 
 
 ### 功能候选（未排期——下一会话可直接从表内挑活）
@@ -532,6 +553,21 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-028 农历表算法两处坑：位循环漏十二月位、表转录错误靠权威源 diff 定位
+- **关联任务**：[T-042](#t-042-桌面日历功能模块--设置菜单分页重构)
+- **现象**：农历换算首测 2024-02-10（春节）得到「三月」——整体漂移约 2 个月；单用例测试当场抓住
+- **原因**（两处独立，叠加放大）：
+  1. **位循环边界**：压缩表编码中十二月的大月位是 bit4（`0x10000 >> 12 = 0x10`），而 `lunarYearDays` 的累加循环写成 `for (bit = 0x8000; bit > 0x10; bit >>= 1)`——`>` 把 0x10 位排除在外，每年少算 0/1 天，124 年累计漂移约 60 天 ≈ 2 个农历月。边界值 `bit >= 0x10` 才对
+  2. **表转录错误**：手敲 201 项压缩表有 5 处笔误（1933/1996/2057/2060/2100），靠单项值看不出对错
+- **解决**：① 循环改 `bit >= 0x10`；② 从 GitHub 拉取社区权威表（jjonline/calendar.js 的 lunarInfo），写一次性 node 脚本逐项 diff 手敲表（`temp_scripts/diff_lunar_table.js`，5 处差异全部定位后修正至完全一致）。教训：**大体量数字常量表必须脚本 diff 权威源，肉眼校对不可行**；已知锚点日期（各年春节/中秋/闰月）的单测是算法类代码的第一道闸
+- **附**：验证锚点（写测试可直接复用）：春节 2024-02-10 / 2025-01-29 / 2026-02-17；中秋 2025-10-06 / 2026-09-25；2023-03-22 = 闰二月初一
+
+### P-029 匿名命名空间自由函数裸调 connect 编译失败
+- **关联任务**：[T-042](#t-042-桌面日历功能模块--设置菜单分页重构)
+- **现象**：cpp 匿名命名空间里的自由函数（构造临时 QDialog 的 pickDate 助手）内写 `connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept)`，MSVC 报 C2660 "connect: 函数不接受 4 个参数"
+- **原因**：非限定名 `connect` 在 QObject 派生类的**成员函数**里能命中基类静态成员，但在**自由函数**里只能靠 ADL——而 `QObject::connect` 是类静态成员而非自由函数，ADL 查不到，编译器只能找到别的重载集报参数不匹配。同类隐患：file-local 嵌套类（无 Q_OBJECT）里不能声明 `signals:`（moc 不处理，connect 运行期失败），回调要用 `std::function` 成员
+- **解决**：自由函数中显式 `QObject::connect(...)`；嵌套 helper 类的对外通知一律 std::function 回调（先例：CalendarWindow::EdgeTab）
 
 ### P-025 SmartRectDetector Worker 带 parent 致 moveToThread 静默失败
 - **关联任务**：[T-036](#t-036-项目整体优化五批三路子代理审查驱动)
@@ -713,3 +749,4 @@
 | 2026-11-01 23:50 | Agent_20261101184000 | 历史任务 / 项目快照 | 新增 T-040；技术栈/目录/常用命令刷新为 RapidOCR | 引擎切换结算：安装包 105.7→80.8MB（提交 2def450）；语言裁剪待用户拍板 |
 | 2026-11-01 23:55 | Agent_20261101184000 | 当前任务 | 新增「功能候选（未排期）」小节（8 项：体量/复用/要点/否决项） | 候选清单入库，移交下一 AI |
 | 2026-11-02 00:05 | Agent_20261102000004 | 历史任务 / 项目快照 / 当前任务 / 功能候选 | 新增 T-041；快照刷新（版本 0.4.0、OCR 中英模型 53MB、dist、ctest 14 用例、当前状态）；当前任务重写移交 | OCR 多语言裁剪（安装包 80.8→46.9MB）+ v0.4.0 发布（tag + GitHub Release） |
+| 2026-11-08 21:00 | Agent_20261108204000 | 历史任务 / 项目快照 / 当前任务 / 踩坑记录 | 新增 T-042；快照刷新（一句话描述、架构概览加日历流程与 settingsChanged、目录含义、ctest 17 用例、当前状态）；当前任务重写移交；新增 P-028、P-029 | 桌面日历功能模块 + 设置菜单分页重构（ctest 14→17 用例，冒烟通过） |

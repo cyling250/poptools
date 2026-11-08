@@ -26,6 +26,7 @@ PopTools 是一个常驻系统托盘的 Windows 全局实用小工具箱——�
 | **贴图 OCR / 翻译** | 贴图右键「识别文字 / 翻译」：识别钉在屏幕上的图片文字，文本/译文直接进剪贴板并气泡提示 | 贴图右键菜单 |
 | **领域与术语表** | 设置中自定义翻译领域与专有名词翻译对，自动注入翻译提示词 | - |
 | **窗口智能识别** | 自动识别鼠标下的窗口/控件级矩形（输入框、按钮、局部面板），辅助精确框选 | 截图时自动 |
+| **桌面日历** | 月历（自带中文农历与节日）＋日程＋待办三合一桌面小组件：增删改/拖拽排序/一键安排到其他日期、分类与颜色、重要事项加粗、完成划线；窗口与分栏尺寸可拖动、置顶/透明度/背景与强调色可调、拖到屏幕边缘自动收起、收起到右上角迷你待办条；数据纯本地 JSON，不联网 | 托盘菜单 桌面日历 |
 | **系统托盘常驻** | 后台运行，托盘菜单快捷操作，开机自启可选 | - |
 
 ## 快速开始
@@ -59,18 +60,20 @@ build/Release/PopTools.exe
 ├── src/
 │   ├── main.cpp                # 程序入口
 │   ├── app/                    # 应用外壳（组合根）：托盘 + 服务装配 + 功能模块
-│   │   └── modules/            #   功能模块（截图 / 贴图 / 划词翻译，可拔插）
+│   │   └── modules/            #   功能模块（截图 / 贴图 / 划词翻译 / 桌面日历，可拔插）
 │   ├── core/                   # 核心域（静态库 poptools_core）
 │   │   ├── annotation/         #   标注模型 + 渲染（AnnotationCanvas/Painter）
+│   │   ├── calendar/           #   桌面日历：农历换算（LunarCalendar）+ 数据仓库（CalendarStore）
 │   │   ├── capture/            #   多屏捕获 + DPI 映射 + 窗口检测
 │   │   ├── hotkey/             #   全局热键（GlobalHotKey）
 │   │   ├── ocr/                #   OCR 服务（RapidOCR-json 子进程调用）
 │   │   ├── settings/           #   设置持久化（INI）
 │   │   └── translation/        #   翻译服务 + 划词翻译
 │   ├── ui/                     # 界面层（按功能分库，聚合为 poptools_ui）
+│   │   ├── calendar/           #   桌面日历（月历视图 / 主窗口 / 迷你待办条）
 │   │   ├── capture/            #   截图画布 + 标注工具栏 + OCR 面板
 │   │   ├── pin/                #   贴图窗口
-│   │   ├── settings/           #   设置对话框
+│   │   ├── settings/           #   设置对话框（左侧导航 + 分页）+ 分类管理
 │   │   └── translate/          #   划词翻译卡片
 │   └── resources/              # 资源（qrc / 图标）
 ├── tests/                      # 域逻辑单元测试（QtTest，ctest 运行）
@@ -179,43 +182,49 @@ build/Release/PopTools.exe
 
 ## 设置
 
-托盘右键 → 设置：
+托盘右键 → 设置：左侧导航分页（**通用 / 截图与贴图 / 翻译 / 桌面日历**），跟随系统明暗主题。
 
-> 「翻译 API」区提供**测试连接**按钮：用表单当前值（保存前也可）发一次真实翻译请求，成功/Key 无效/模型名错误均会给出中文原因；API Key 支持「显示」切换，便于核对粘贴内容。
+> 「翻译」页提供**测试连接**按钮：用表单当前值（保存前也可）发一次真实翻译请求，成功/Key 无效/模型名错误均会给出中文原因；API Key 支持「显示」切换，便于核对粘贴内容。
 
-| 配置项 | 说明 | 默认值 |
-|---|---|---|
-| 开机启动 | 登录时自动运行 | 关闭 |
-| 接口格式 | 翻译 API 协议：OpenAI 兼容 / Anthropic | OpenAI 兼容 |
-| API Base URL | OpenAI 兼容端点；选 Anthropic 格式时填其端点（如 DeepSeek `https://api.deepseek.com/anthropic`、官方 `https://api.anthropic.com`） | `https://api.deepseek.com/v1` |
-| API Key | 密钥（自行填入） | 空 |
-| Model | 模型名 | `deepseek-v4-flash` |
-| 翻译领域与术语 | 自定义领域（逗号分隔）与专有名词翻译对（`原文=译文` 每行一条） | 空 |
-| 划词翻译热键 | 虚拟键码 + 修饰符 | `Ctrl+Alt+Shift+X` |
-| 贴图保存目录 | 贴图自动保存路径 | `exe目录/tempPopTools/` |
+| 页 | 配置项 | 说明 | 默认值 |
+|---|---|---|---|
+| 通用 | 开机启动 | 登录时自动运行 | 关闭 |
+| 截图与贴图 | 贴图保存目录 | 贴图自动保存路径 | `exe目录/tempPopTools/` |
+| 翻译 | 接口格式 | 翻译 API 协议：OpenAI 兼容 / Anthropic | OpenAI 兼容 |
+| 翻译 | API Base URL | OpenAI 兼容端点；选 Anthropic 格式时填其端点（如 DeepSeek `https://api.deepseek.com/anthropic`、官方 `https://api.anthropic.com`） | `https://api.deepseek.com/v1` |
+| 翻译 | API Key | 密钥（自行填入） | 空 |
+| 翻译 | Model | 模型名 | `deepseek-v4-flash` |
+| 翻译 | 领域与术语表 | 自定义领域（逗号分隔）与专有名词翻译对（`原文=译文` 每行一条） | 空 |
+| 桌面日历 | 窗口置顶 | 始终显示在其他窗口上方 | 开启 |
+| 桌面日历 | 贴边自动收起 | 拖到屏幕边缘收成小条，悬停/点击展开 | 开启 |
+| 桌面日历 | 开机自启后自动显示 | 配合「开机启动」使用 | 关闭 |
+| 桌面日历 | 透明度 / 背景色 / 强调色 | 整窗外观（强调色同时用于选中、勾选、★） | 95% / 白 / `#2B6FF2` |
+| 桌面日历 | 管理分类 | 分类增删改与颜色（改动即时保存） | 4 个默认分类 |
 
-> 设置持久化到 `exe目录/PopTools.ini`，便于查看与备份。
+> 应用设置持久化到 `exe目录/PopTools.ini`，便于查看与备份；**日历数据**（日程/待办/分类）存本地 `%LOCALAPPDATA%/PopTools/PopTools/calendar.json`，纯本地不联网。
 > 翻译 API 可换成任意 OpenAI 兼容服务，如 Ollama 本地：`http://localhost:11434/v1`
 
 ## 项目架构
 
-采用**分层 + 功能模块化**架构：core 与 ui 各为静态库（ui 内按功能分库），app 可执行承载组合根与功能模块，模块间通过 `poptools` 命名空间解耦。截图 / 贴图 / 划词翻译是三个自包含的功能模块（`src/app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口；**拔插一个功能 = 组合根删一处 `add()` + CMake 删一个目标**，后续新增小工具即照此模式接入。
+采用**分层 + 功能模块化**架构：core 与 ui 各为静态库（ui 内按功能分库），app 可执行承载组合根与功能模块，模块间通过 `poptools` 命名空间解耦。截图 / 贴图 / 划词翻译 / 桌面日历是四个自包含的功能模块（`src/app/modules/`），各自注册热键、贡献托盘菜单、管理自己的窗口；**拔插一个功能 = 组合根删一处 `add()` + CMake 删一个目标**，后续新增小工具即照此模式接入。
 
 ```
 app/         应用层（可执行入口）
   ├─ MainWindow  组合根：托盘 + 服务装配 + 模块注册
-  └─ modules     功能模块（capture / pin / selectionTranslate，可拔插）
+  └─ modules     功能模块（capture / pin / selectionTranslate / calendar，可拔插）
 core/        核心域（静态库，与 UI 解耦）
   ├─ annotation   标注模型与渲染
+  ├─ calendar     农历换算 + 日历数据仓库
   ├─ capture      多屏捕获与窗口检测
   ├─ hotkey       全局热键
   ├─ ocr          OCR 服务
   ├─ settings     设置持久化
   └─ translation  翻译与划词翻译
 ui/          界面层（静态库，依赖 core）
+  ├─ calendar     月历视图 + 日历主窗口 + 迷你待办条
   ├─ capture      截图窗口 + 工具栏 + OCR 面板
   ├─ pin          贴图窗口
-  ├─ settings     设置对话框
+  ├─ settings     设置对话框 + 分类管理
   └─ translate    划词翻译卡片
 ```
 

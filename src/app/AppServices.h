@@ -12,6 +12,7 @@ class QMenu;
 
 namespace poptools {
 
+class CalendarStore;
 class GlobalHotKey;
 class RapidOcrService;
 
@@ -33,6 +34,7 @@ public:
     // ---- 共享服务（组合根在 initAll 前注入并持有所有权） ----
     GlobalHotKey *hotkey = nullptr;   // 全局热键注册器
     RapidOcrService *ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
+    CalendarStore *calendarStore = nullptr; // 桌面日历数据仓库（全局唯一）
     QMenu *trayMenu = nullptr;        // 托盘菜单（模块经 addTrayAction 贡献菜单项）
 
     // ---- 跨模块能力槽与共享态（提供方：CaptureModule） ----
@@ -62,6 +64,12 @@ public:
 
     // 注册失败的热键显示名列表（如 "F1"），取走即清空
     QStringList takeFailedHotKeyNames();
+
+    // 设置对话框保存后的全局通知：有缓存配置/外观需要刷新的模块连接此信号
+    void notifySettingsChanged();
+
+signals:
+    void settingsChanged();
 
 private slots:
     void onHotKeyActivated(int id);

@@ -80,10 +80,33 @@ target_link_libraries(poptools_ui_translate PUBLIC
 )
 target_include_directories(poptools_ui_translate PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# ---- 桌面日历功能 ----
+add_library(poptools_ui_calendar STATIC
+    calendar/CalendarWindow.cpp
+    calendar/CalendarWindow.h
+    calendar/CalendarMiniWidget.cpp
+    calendar/CalendarMiniWidget.h
+    calendar/MonthView.cpp
+    calendar/MonthView.h
+    calendar/ItemDelegate.cpp
+    calendar/ItemDelegate.h
+    calendar/ItemEditDialog.cpp
+    calendar/ItemEditDialog.h
+)
+target_link_libraries(poptools_ui_calendar PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
 add_library(poptools_ui_settings STATIC
     settings/SettingsDialog.cpp
     settings/SettingsDialog.h
+    settings/CategoryManagerDialog.cpp
+    settings/CategoryManagerDialog.h
 )
 target_link_libraries(poptools_ui_settings PUBLIC
     poptools_core
@@ -99,5 +122,6 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_capture
     poptools_ui_pin
     poptools_ui_translate
+    poptools_ui_calendar
     poptools_ui_settings
 )

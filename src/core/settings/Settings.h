@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QByteArray>
+#include <QColor>
 #include <QString>
 #include <QStringList>
 #include <QSettings>
@@ -70,6 +72,30 @@ public:
     quint32 selectionTranslateHotKeyVk() const;
     quint32 selectionTranslateHotKeyModifiers() const;
     void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);
+
+    // ---- 桌面日历 ----
+    // 窗口置顶（默认开：桌面常驻小组件的核心体验，用户可关）
+    bool calendarAlwaysOnTop() const;
+    void setCalendarAlwaysOnTop(bool on);
+    // 贴边自动收起（拖到屏幕边缘收成小条，悬停/点击展开；默认开）
+    bool calendarEdgeSnap() const;
+    void setCalendarEdgeSnap(bool on);
+    // 开机自启后自动显示日历（配合应用级开机启动；默认关）
+    bool calendarShowOnStartup() const;
+    void setCalendarShowOnStartup(bool on);
+    // 整窗不透明度 20-100（%，默认 95）
+    int calendarOpacity() const;
+    void setCalendarOpacity(int percent);
+    // 背景色 / 强调色（默认白底 + 应用主色 #2B6FF2）
+    QColor calendarBgColor() const;
+    void setCalendarBgColor(const QColor &color);
+    QColor calendarAccentColor() const;
+    void setCalendarAccentColor(const QColor &color);
+    // 窗口几何与分栏状态（base64 序列化；空串 = 未记忆）
+    QByteArray calendarGeometry() const;
+    void setCalendarGeometry(const QByteArray &state);
+    QByteArray calendarSplitter() const;
+    void setCalendarSplitter(const QByteArray &state);
 
 private:
     Settings();

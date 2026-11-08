@@ -9,6 +9,8 @@
 #include "app/FeatureRegistry.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
+#include "core/calendar/CalendarStore.h"
+#include "core/calendar/LunarCalendar.h"
 #include "core/capture/QrScanner.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
@@ -314,6 +316,158 @@ private slots:
         s.setApiBaseUrl(QStringLiteral("https://example.com/v1"));
         Settings s2(dir.filePath("test.ini"));
         QCOMPARE(s2.apiBaseUrl(), QStringLiteral("https://example.com/v1"));
+    }
+
+    // ---- 桌面日历：农历换算（已知锚点日期） ----
+    void lunar_known_dates()
+    {
+        // 春节锚点（正月初一）：2024/2025/2026 三年的公历日期为公开事实
+        const LunarDate cny2024 = lunar::fromSolar(QDate(2024, 2, 10));
+        QVERIFY(cny2024.isValid());
+        QCOMPARE(cny2024.year, 2024);
+        QCOMPARE(cny2024.month, 1);
+        QCOMPARE(cny2024.day, 1);
+        QVERIFY(!cny2024.leap);
+
+        const LunarDate cny2025 = lunar::fromSolar(QDate(2025, 1, 29));
+        QCOMPARE(cny2025.year, 2025);
+        QCOMPARE(cny2025.month, 1);
+
+        const LunarDate cny2026 = lunar::fromSolar(QDate(2026, 2, 17));
+        QCOMPARE(cny2026.year, 2026);
+        QCOMPARE(cny2026.month, 1);
+        QCOMPARE(cny2026.day, 1);
+
+        // 中秋：2025-10-06 与 2026-09-25 均为八月十五
+        const LunarDate midAutumn2025 = lunar::fromSolar(QDate(2025, 10, 6));
+        QCOMPARE(midAutumn2025.month, 8);
+        QCOMPARE(midAutumn2025.day, 15);
+        const LunarDate midAutumn2026 = lunar::fromSolar(QDate(2026, 9, 25));
+        QCOMPARE(midAutumn2026.month, 8);
+        QCOMPARE(midAutumn2026.day, 15);
+
+        // 闰月：2023 年闰二月，3 月 22 日为闰二月初一（二月为 30 天大月）
+        const LunarDate leap = lunar::fromSolar(QDate(2023, 3, 22));
+        QCOMPARE(leap.year, 2023);
+        QCOMPARE(leap.month, 2);
+        QCOMPARE(leap.day, 1);
+        QVERIFY(leap.leap);
+        QCOMPARE(leap.monthName(), QStringLiteral("闰二月"));
+
+        // 月名/日名
+        QCOMPARE(cny2026.monthName(), QStringLiteral("正月"));
+        QCOMPARE(cny2026.dayName(), QStringLiteral("初一"));
+        QCOMPARE(lunar::fromSolar(QDate(2026, 2, 26)).dayName(), QStringLiteral("初十"));
+        QCOMPARE(lunar::fromSolar(QDate(2026, 2, 28)).dayName(), QStringLiteral("十二"));
+
+        // 范围护栏
+        QVERIFY(!lunar::fromSolar(QDate(1899, 1, 1)).isValid());
+        QVERIFY(!lunar::fromSolar(QDate(2110, 1, 1)).isValid());
+    }
+
+    // ---- 桌面日历：月历格小字（节日 / 朔日月名 / 平日日名） ----
+    void lunar_day_label()
+    {
+        bool festival = false;
+        QCOMPARE(lunar::dayLabel(QDate(2026, 2, 17), &festival), QStringLiteral("春节"));
+        QVERIFY(festival);
+        QCOMPARE(lunar::dayLabel(QDate(2026, 9, 25), &festival), QStringLiteral("中秋节"));
+        QVERIFY(festival);
+        QCOMPARE(lunar::dayLabel(QDate(2026, 10, 1), &festival), QStringLiteral("国庆节"));
+        QVERIFY(festival);
+
+        // 除夕 = 春节前一天
+        QCOMPARE(lunar::dayLabel(QDate(2026, 2, 16), &festival), QStringLiteral("除夕"));
+        QVERIFY(festival);
+
+        // 初一显示月名（非节日）；平日显示日名
+        QCOMPARE(lunar::dayLabel(QDate(2026, 3, 19), &festival), QStringLiteral("二月"));
+        QVERIFY(!festival);
+        QCOMPARE(lunar::dayLabel(QDate(2026, 3, 21), &festival), QStringLiteral("初三"));
+        QVERIFY(!festival);
+    }
+
+    // ---- 桌面日历：CalendarStore 增删改/排序/分类 JSON 往返 ----
+    void calendar_store_roundtrip()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("calendar.json");
+
+        CalendarStore store(path);
+        store.load();
+        // 播种默认分类
+        QVERIFY(store.categories().size() >= 2);
+        const QString workId = [&] {
+            for (const CalendarCategory &c : store.categories())
+                if (c.name == QStringLiteral("工作"))
+                    return c.id;
+            return QString();
+        }();
+        QVERIFY(!workId.isEmpty());
+
+        const QDate day(2026, 11, 8);
+        const QString todo1 = store.addTodo(day, workId, QStringLiteral("写周报"), true);
+        const QString todo2 = store.addTodo(day, workId, QStringLiteral("买咖啡"), false);
+        const QString sched1 = store.addSchedule(day, QString(), QStringLiteral("开题会"), false);
+        QVERIFY(!todo1.isEmpty() && !todo2.isEmpty() && !sched1.isEmpty());
+
+        QCOMPARE(store.itemsForDate(day, true).size(), 2);
+        QCOMPARE(store.itemsForDate(day, false).size(), 1);
+
+        // 完成切换
+        QVERIFY(store.setDone(todo1, true));
+        QVERIFY(!store.setDone(todo1, true)); // 幂等
+        QCOMPARE(store.itemsForDate(day, true).at(0).done, true);
+
+        // 上移/下移：moveItem(-1) 把 todo2 提到 todo1 前
+        QVERIFY(store.moveItem(todo2, -1));
+        QCOMPARE(store.itemsForDate(day, true).at(0).id, todo2);
+        QVERIFY(!store.moveItem(todo2, -1)); // 已在顶
+        QVERIFY(store.moveItem(todo2, 1));
+        QCOMPARE(store.itemsForDate(day, true).at(0).id, todo1);
+
+        // 安排到其他日期
+        QVERIFY(store.moveItemToDate(todo2, day.addDays(1)));
+        QCOMPARE(store.itemsForDate(day, true).size(), 1);
+        QCOMPARE(store.itemsForDate(day.addDays(1), true).size(), 1);
+
+        // 拖拽重排回写（先补第三项，取到 2 项再做重排）
+        store.addTodo(day, workId, QStringLiteral("第三项"), false);
+        const QList<CalendarItem> todos = store.itemsForDate(day, true);
+        QVERIFY(todos.size() == 2);
+        QStringList newOrder{ todos.at(1).id, todos.at(0).id };
+        store.reorderItems(day, true, newOrder);
+        QCOMPARE(store.itemsForDate(day, true).at(0).id, newOrder.at(0));
+        QCOMPARE(store.itemsForDate(day, true).at(1).id, newOrder.at(1));
+
+        // 分类增改删（删除后条目改挂默认分类）
+        const QString tempCat = store.addCategory(QStringLiteral("临时"), QColor("#123456"));
+        QVERIFY(!tempCat.isEmpty());
+        QVERIFY(store.updateCategory(tempCat, QStringLiteral("临时改"), QColor("#654321")));
+        store.addSchedule(day, tempCat, QStringLiteral("带临时分类"), false);
+        QVERIFY(store.removeCategory(tempCat));
+        QVERIFY(!store.removeCategory(tempCat)); // 再删无效
+        QVERIFY(!store.removeCategory(CalendarStore::defaultCategoryId())); // 默认分类不可删
+        for (const CalendarItem &it : store.itemsForDate(day, false))
+            QVERIFY(it.categoryId != tempCat);
+
+        // JSON 往返：重新加载同一路径，条目与属性一致
+        const QList<CalendarItem> before = store.items();
+        const QList<CalendarCategory> catsBefore = store.categories();
+        CalendarStore reloaded(path);
+        reloaded.load();
+        QCOMPARE(reloaded.items().size(), before.size());
+        QCOMPARE(reloaded.categories().size(), catsBefore.size());
+        QCOMPARE(reloaded.itemsForDate(day, true).size(), 2);
+        QCOMPARE(reloaded.itemsForDate(day.addDays(1), true).size(), 1);
+        // 待办完成态与重要标记均持久化
+        for (const CalendarItem &it : reloaded.itemsForDate(day, true)) {
+            if (it.id == todo1)
+                QVERIFY(it.done);
+            if (it.id == todos.at(0).id)
+                QCOMPARE(it.important, true);
+        }
     }
 };
 

@@ -58,10 +58,21 @@ target_link_libraries(poptools_module_selectiontranslate PUBLIC
     poptools_ui_translate
 )
 
+# ---- 功能模块：桌面日历 ----
+add_library(poptools_module_calendar STATIC
+    modules/CalendarModule.cpp
+    modules/CalendarModule.h
+)
+target_link_libraries(poptools_module_calendar PUBLIC
+    poptools_app_infra
+    poptools_ui_calendar
+)
+
 # ---- 聚合目标：可执行只链接 poptools_modules ----
 add_library(poptools_modules INTERFACE)
 target_link_libraries(poptools_modules INTERFACE
     poptools_module_capture
     poptools_module_pin
     poptools_module_selectiontranslate
+    poptools_module_calendar
 )

@@ -1,48 +1,85 @@
 #pragma once
 
+#include <QColor>
 #include <QDialog>
 
-class QLineEdit;
-class QComboBox;
-class QPushButton;
 class QCheckBox;
-class QPlainTextEdit;
+class QComboBox;
 class QLabel;
+class QLineEdit;
+class QListWidget;
+class QPlainTextEdit;
+class QPushButton;
+class QSlider;
+class QStackedWidget;
 class QToolButton;
 
 namespace poptools {
 
 class ApiTester;
+class CalendarStore;
 
-// 设置对话框：大模型 API 配置（含「测试连接」）/ 翻译领域与术语表 / 贴图默认保存
-// 文件夹 / 开机自启 / 智能框选图像识别。构造函数读取当前设置填充表单，点击 OK 时
-// 写入 Settings；「测试连接」用表单当前值（未保存前也能测）发一次真实请求。
+// ============================================================
+// 设置对话框（左侧导航 + 分页，通用 / 截图与贴图 / 翻译 / 桌面日历）。
+//
+// 构造函数读取当前设置填充表单，点击 OK 时写入 Settings；
+// 「测试连接」用表单当前值（未保存前也能测）发一次真实请求。
+// 分类管理（CategoryManagerDialog）改动即时生效，与 OK/Cancel 无关。
+// ============================================================
 class SettingsDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit SettingsDialog(QWidget *parent = nullptr);
+    explicit SettingsDialog(CalendarStore *calendarStore, QWidget *parent = nullptr);
 
 private slots:
     void applyTheme(); // 主题应用（构造末尾 + 系统明暗切换时重取 ThemeColors）
 
 private:
+    QWidget *buildGeneralPage();
+    QWidget *buildCapturePage();
+    QWidget *buildTranslatePage();
+    QWidget *buildCalendarPage();
     void updateAutoStartButton();
-    QStringList parseDomains() const;          // 逗号/顿号分隔的领域输入 → 列表
+    void updateCalendarColorButtons();
+    QStringList parseDomains() const;                  // 逗号/顿号分隔的领域输入 → 列表
     QList<QPair<QString, QString>> parseTerms() const; // "原文=译文" 逐行 → 翻译对
 
-    QLineEdit *m_urlEdit;
-    QComboBox *m_formatCombo;      // API 接口格式（OpenAI 兼容 / Anthropic）
-    QLineEdit *m_keyEdit;
-    QToolButton *m_keyToggle;      // 显示/隐藏 API Key（密码框看不见内容，防粘贴错）
-    QLineEdit *m_modelEdit;
-    QPushButton *m_testBtn;        // 测试连接
-    QLabel *m_testStatus;          // 测试结果（绿/红文字）
-    ApiTester *m_tester;
-    QLineEdit *m_domainEdit;       // 翻译领域（逗号分隔）
-    QPlainTextEdit *m_termsEdit;   // 专有名词翻译对（每行 "原文=译文"）
-    QLineEdit *m_dirEdit;     // 贴图默认保存文件夹
-    QPushButton *m_autoStart; // 开机启动开关（加入/取消）
+    // 导航
+    QListWidget *m_nav = nullptr;
+    QStackedWidget *m_pages = nullptr;
+
+    // 通用
+    QPushButton *m_autoStart = nullptr; // 开机启动开关（加入/取消）
+
+    // 翻译
+    QComboBox *m_formatCombo = nullptr; // API 接口格式（OpenAI 兼容 / Anthropic）
+    QLineEdit *m_urlEdit = nullptr;
+    QLineEdit *m_keyEdit = nullptr;
+    QToolButton *m_keyToggle = nullptr; // 显示/隐藏 API Key（防密码框粘贴错）
+    QLineEdit *m_modelEdit = nullptr;
+    QPushButton *m_testBtn = nullptr; // 测试连接
+    QLabel *m_testStatus = nullptr;   // 测试结果（绿/红文字）
+    ApiTester *m_tester = nullptr;
+    QLineEdit *m_domainEdit = nullptr; // 翻译领域（逗号分隔）
+    QPlainTextEdit *m_termsEdit = nullptr; // 专有名词翻译对（每行 "原文=译文"）
+
+    // 截图与贴图
+    QLineEdit *m_dirEdit = nullptr; // 贴图默认保存文件夹
+
+    // 桌面日历
+    QCheckBox *m_calTopCheck = nullptr;
+    QCheckBox *m_calSnapCheck = nullptr;
+    QCheckBox *m_calShowCheck = nullptr;
+    QSlider *m_calOpacity = nullptr;
+    QLabel *m_calOpacityValue = nullptr;
+    QPushButton *m_calBgBtn = nullptr;
+    QPushButton *m_calAccentBtn = nullptr;
+    QLabel *m_calBgSwatch = nullptr;
+    QLabel *m_calAccentSwatch = nullptr;
+    QColor m_calBg;
+    QColor m_calAccent;
+    CalendarStore *m_calendarStore = nullptr;
 };
 
 } // namespace poptools
