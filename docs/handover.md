@@ -24,7 +24,7 @@
   - 截图主流程：`CaptureWindow`（全屏画布式编辑，内部按控制器拆分：SelectionController / AnnotationEditor / ToolDrawingController / TextEditingController / OcrController / OutputController）→ OutputController 产出到剪贴板 → PinWindow 贴图（构造注入应用级共享 `PaddleOcrService`，OCR 子进程全局唯一；OCR 面板/动效经 `OcrHostCallbacks` 窄接口注入 OcrController，CaptureContext 保持纯画布/选区共享态）
   - OCR 流程：OcrController → `PaddleOcrService`（子进程）→ 识别文本以文本框覆盖画布，或打开 `OcrPanel` 文字栏
   - 翻译流程：`Translator`（大模型 API，提示词=基础指令+领域/术语表；CaptureWindow 内嵌一例服务截图翻译，SelectionTranslateModule 内一例服务划词卡片，各自单消费者）→ OcrPanel（截图翻译）或 `TranslateCard`（划词翻译卡片，全局仅一张）；`SelectionTranslator` 负责模拟 Ctrl+C 抓取选中文本；目标语言在两处入口共享并持久化（`translate/targetLang`），切换即记忆；源语言不记忆，每次新任务重置为自动检测；语言显示名↔代码映射统一在 `core/translation/Languages.h`
-  - 桌面日历流程（T-042）：`CalendarStore`（core/calendar，JSON 持久化 `%LOCALAPPDATA%/PopTools/PopTools/calendar.json`，QSaveFile 原子写，改动即存）→ `CalendarWindow`（无边框窗口：自绘标题栏 HTCAPTION 拖动 + NCHITTEST 边缘缩放；左 MonthView 自绘月历（公历+农历小字+节日色+事项圆点）| 右垂直分栏日程/待办列表（ItemDelegate 自绘：分类圆点/勾选圈/★加粗/删除线，ReorderList 拖拽重排回写））；置顶（WindowStaysOnTopHint）、贴边收起（moveEvent 距边 18px → EdgeTab 贴边小条，悬停/点击展开 + 1.5s 防回吸冷却）、收起右上角 `CalendarMiniWidget`（今日待办，60s 定时跨天刷新）、透明度/背景色/强调色（设置页保存后经 settingsChanged 重应用）；农历换算 `core/calendar/LunarCalendar`（1900-2100 压缩表算法 + 农历/公历节日）
+  - 桌面日历流程（T-042/T-043）：`CalendarStore`（core/calendar，JSON 持久化 `%LOCALAPPDATA%/PopTools/PopTools/calendar.json`，QSaveFile 原子写，改动即存；日程=待办单列表）→ `CalendarWindow`（顶层无边框窗口，**Z 序贴底**：desktoppin::glueToDesktop 紧贴 Progman 正上方 + 1s 守护，固定模式吞 WM_MOUSEACTIVATE 防抬窗、右键空白透传桌面菜单；编辑模式 ✏️ 置顶浮动拖缩、✅ 贴回；左 MonthView 自绘月历（公历+农历小字+节日色+事项圆点，双击格子原位内联添加）| 右单一日程列表（ItemDelegate：勾选圈=分类色/★加粗/删除线，拖拽重排回写））；显隐由设置 `calendar/enabled` 驱动（无托盘菜单项）；收起右上角 `CalendarMiniWidget`（今日未完成，60s 定时跨天刷新，同样贴底）；透明度/背景色/强调色经 settingsChanged 重应用；农历换算 `core/calendar/LunarCalendar`（1900-2100 压缩表算法 + 农历/公历节日）
   - 标注数据模型与渲染在 `core/annotation`（AnnotationCanvas / AnnotationItem / AnnotationPainter），UI 工具在 `ui/capture/tools`（ToolBase + ToolFactory + 各工具类）
 - **目录含义**：
   - `src/main.cpp` — 程序入口
@@ -57,12 +57,27 @@
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.4.0 已发布**（2026-11-02，MINOR：T-034~T-041，含 QR 识别 / 贴图 OCR / 划词 LLM 动作 / 性能治理 / RapidOCR 引擎与多语言裁剪；GitHub Release 直发）；**v0.4.0 之后未发版改动**：T-042 桌面日历 + 设置菜单分页重构（下次发版需版本判定，含新功能建议 MINOR）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.4.0 已发布**（2026-11-02，MINOR：T-034~T-041，含 QR 识别 / 贴图 OCR / 划词 LLM 动作 / 性能治理 / RapidOCR 引擎与多语言裁剪；GitHub Release 直发）；**v0.4.0 之后未发版改动**：T-042 桌面日历 + 设置菜单分页重构、T-043 贴桌面/双模式/列表合并（下次发版需版本判定，含新功能建议 MINOR）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
+
+### T-043 桌面日历体验重构：真贴桌面 + 双模式 + 日程待办合并 + 设置驱动
+- **完成日期**：2026-11-08
+- **执行智能体**：Agent_20261108204000
+- **背景**：T-042 交付后用户真机验收提出五项要求：①日历必须贴在桌面、任何时候不能遮挡应用窗口；②显示开关移到设置页（撤托盘菜单项）；③编辑/固定双模式（编辑可拖缩，固定锁死如贴纸）；④双击月历格子原位添加日程；⑤日程=待办合并为单列表。
+- **结果**（全部落地，用户验收通过）：
+  1. **真贴桌面（三轮方案迭代，见 P-031）**：最终方案 = 顶层窗口 + Z 序贴底（`desktoppin::glueToDesktop`：紧贴 Progman 正上方，1s 守护定时器在 Z 序被搅动时归位、就位时零开销）+ 固定模式吞掉点击激活（`WM_MOUSEACTIVATE → MA_NOACTIVATE`，点击不再抬窗）+ 需要打字时（双击格子/点输入行）显式 `activateWindow()` 临时唤起、输入完自动归位；模块层全部 `raise()` 移除。
+  2. **双模式**：固定（默认，锁死、右键空白处透传系统桌面菜单——向 DefView 转发 `WM_CONTEXTMENU`）/ 编辑（✏️ 置顶浮动 + 虚线框 + 拖动缩放，✅ 贴回）。置顶/贴边收起功能随双模式移除（EdgeTab 删除）。
+  3. **日程=待办合并**：`CalendarStore::addItem` 单一列表（去 todo 字段，旧 JSON 读时忽略）；UI 单列表 + 全员勾选圈（圈色=分类色）；迷你条显示今日未完成。
+  4. **设置驱动显隐**：`calendar/enabled` 单开关（显示=启动自动出现）；托盘「桌面日历」菜单项删除；日历 ✕ 按钮等同关闭该开关。设置页桌面日历页 = 显示开关 + 外观（透明度/背景色/强调色）+ 分类管理。
+  5. **双击格子原位添加**：`MonthView::cellRectFor` 定位格子，窗口内弹内联输入框（Enter 添加/Esc 取消/失焦关闭）。
+  6. 测试更新合并语义（17 用例保持通过）；README 重写桌面日历章节。
+- **关键改动**：`src/ui/calendar/DesktopPin.h`（重写为 Z 序贴底）、`CalendarWindow.{h,cpp}`、`CalendarMiniWidget.{h,cpp}`、`ItemDelegate.{h,cpp}`、`ItemEditDialog.{h,cpp}`、`MonthView.{h,cpp}`、`src/core/calendar/CalendarStore.{h,cpp}`、`src/core/settings/Settings.{h,cpp}`、`src/app/modules/CalendarModule.{h,cpp}`、`src/ui/settings/SettingsDialog.{h,cpp}`、`tests/domain_tests.cpp`、`README.md`
+- **相关坑**：[P-031](#p-031-桌面层嵌窗两条弯路setparent-不被合成与点击激活横跳)
+- **待用户**：日常使用观察（多显示器场景贴底 Z 序行为未验证；Win+D 对贴底窗口的影响未验证）。
 
 ### T-042 桌面日历功能模块 + 设置菜单分页重构
 - **完成日期**：2026-11-08
@@ -517,14 +532,14 @@
 
 <!-- 当前任务完成后：整理为历史任务条目移入上方，然后恢复此占位 -->
 
-**本会话（2026-11-08，Agent_20261108204000）已收尾：T-042 桌面日历功能模块 + 设置菜单分页重构完成（已构建、ctest 17/17、冒烟通过、代码已提交）。** 下一会话从这里接手：
+**本会话（2026-11-08，Agent_20261108204000）已收尾：T-042 桌面日历 + T-043 贴桌面重构完成，用户验收通过。** 下一会话从这里接手：
 
-- **T-042 真机回归待用户**：交互项（增删改/拖拽排序/右键菜单/安排到/贴边收起与展开/迷你条/设置页外观/分类管理）——自动化冒烟只覆盖了渲染与数据链路
+- **协作纪律（用户 2026-11-08 明确）**：AI 不做自主验收——构建 + ctest 可自动执行，**渲染/交互效果一律由用户目测验收**，AI 不得以截图/探针结果代替验收结论（只读探针可用于缺陷诊断）
 - **T-034~T-040 真机回归已被用户跳过**（明示决策，以 perf_baseline 自动化冒烟代替）：日常使用发现问题按普通缺陷处理
-- **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注。注意 T-042 的新窗口已是新风格，第二批范围提案时勿重复覆盖）
+- **待办 1：UI 现代化第二批**（用户已批准，先向用户提交范围提案再动工；样式债起点见 T-035 备注。注意 T-042/T-043 的新窗口已是新风格，第二批范围提案时勿重复覆盖）
 - **待办 2：ch v4 模型对去留**（det/rec v4 约 15.5MB 未被服务引用，裁掉安装包约再省 14MB → ~33MB；等用户拍板）
 - **待办 3：功能候选清单**见下方小节（用户指示下一步再挑）；批量图片 OCR 仍为已否决项
-- **发版提示**：T-042 是新功能 + 设置界面重构，下次发版建议 MINOR；发版前跑 `python scripts/perf_baseline.py` 对照基线
+- **发版提示**：T-042/T-043 是新功能 + 设置界面重构，下次发版建议 MINOR；发版前跑 `python scripts/perf_baseline.py` 对照基线
 - 重建前仍先杀 PopTools.exe + RapidOCR-json.exe（坑 P-008）；gh CLI 便携版 `temp_scripts/gh-cli/bin/gh.exe`，认证用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-041 实操可复制）
 
 
@@ -553,6 +568,15 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
+
+### P-031 桌面层嵌窗两条弯路：SetParent 不被合成与点击激活横跳
+- **关联任务**：[T-043](#t-043-桌面日历体验重构真贴桌面--双模式--日程待办合并--设置驱动)
+- **现象**：实现「贴桌面小组件」时——①把窗口 SetParent 进 Progman/WorkerW（Wallpaper Engine / Rainmeter 经典技法）：窗口存在、可见标志为真、鼠标交互正常（右键能弹菜单），但**内容永远不被 DWM 合成**（完全透明不可见）；②改用顶层窗口 Z 序贴底后，又出现「盖住应用 ↔ 被应用盖住」每秒横跳
+- **原因**：
+  1. **本机（Win11 24H2+ 26300 + Wallpaper Engine）外来 GDI 子窗口在桌面层不被合成**。逐层排查：Progman 直接子级、WorkerW 子级、不透明化（摘 WA_TranslucentBackground）、摘 WS_EX_LAYERED、清 QWindow alpha surface format——全部交互正常但渲染失败。对照实验：WE 自己的壁纸窗口走 `WS_EX_NOREDIRECTIONBITMAP + DirectComposition`（独立合成路径，能显示），普通/分层 GDI 子窗口的重定向表面在该层均不出图。且 WE 会周期性重建/占用壁纸层窗口（网络资料证实），SetParent 路线与其结构性冲突。另注意：`setWindowFlags(原值)` 是空操作（flags 相同不重建窗口），强制重建需 `QWindow::destroy()` 后 show
+  2. **Windows 默认点击激活**：鼠标点任何背景窗口都会把它提到前面（WM_MOUSEACTIVATE → MA_ACTIVATE），贴底窗口每被点一次就浮到应用之上，1s 守护又压回去——横跳
+- **解决**：放弃 SetParent，改**顶层窗口 + Z 序贴底**（`glueToDesktop`：Z 序紧贴 Progman 正上方，一切普通窗口天然在其上；1s 守护归位、就位时零开销）+ 固定模式 `WM_MOUSEACTIVATE → MA_NOACTIVATE`（点击不抬窗）+ 打字场景显式 activateWindow 临时唤起。探针脚本（`temp_scripts/probe_desktop_windows.py`、`check_layer_owner.py`、`check_calendar_pin.py`）在本机排查中价值极高，建议保留复用
+- **教训**：桌面层嵌窗在 24H2 + 壁纸引擎环境下不可依赖 SetParent；「贴桌面」用顶层 + Z 序锚定 Progman 是稳定解。用户 2026-11-08 明确规矩：**AI 不做自主验收**——本坑前两轮修复都因 AI 自行截图判断"应该好了"而多绕一圈，最终靠用户目测一次定位
 
 ### P-028 农历表算法两处坑：位循环漏十二月位、表转录错误靠权威源 diff 定位
 - **关联任务**：[T-042](#t-042-桌面日历功能模块--设置菜单分页重构)
@@ -750,3 +774,4 @@
 | 2026-11-01 23:55 | Agent_20261101184000 | 当前任务 | 新增「功能候选（未排期）」小节（8 项：体量/复用/要点/否决项） | 候选清单入库，移交下一 AI |
 | 2026-11-02 00:05 | Agent_20261102000004 | 历史任务 / 项目快照 / 当前任务 / 功能候选 | 新增 T-041；快照刷新（版本 0.4.0、OCR 中英模型 53MB、dist、ctest 14 用例、当前状态）；当前任务重写移交 | OCR 多语言裁剪（安装包 80.8→46.9MB）+ v0.4.0 发布（tag + GitHub Release） |
 | 2026-11-08 21:00 | Agent_20261108204000 | 历史任务 / 项目快照 / 当前任务 / 踩坑记录 | 新增 T-042；快照刷新（一句话描述、架构概览加日历流程与 settingsChanged、目录含义、ctest 17 用例、当前状态）；当前任务重写移交；新增 P-028、P-029 | 桌面日历功能模块 + 设置菜单分页重构（ctest 14→17 用例，冒烟通过） |
+| 2026-11-08 22:40 | Agent_20261108204000 | 历史任务 / 项目快照 / 当前任务 / 踩坑记录 / README | 新增 T-043；快照日历流程改贴底方案；当前任务重写移交（含 AI 不自主验收纪律）；新增 P-031 | 贴桌面重构（Z 序贴底+双模式+列表合并+设置驱动），用户验收通过 |

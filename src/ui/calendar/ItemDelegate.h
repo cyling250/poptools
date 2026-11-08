@@ -7,16 +7,14 @@ namespace poptools {
 
 // 列表项自定义数据角色（QListWidgetItem::setData 使用）
 namespace itemroles {
-inline constexpr int CategoryColor = Qt::UserRole + 11; // QColor
+inline constexpr int CategoryColor = Qt::UserRole + 11; // QColor（勾选圈颜色）
 inline constexpr int Important     = Qt::UserRole + 12; // bool
-inline constexpr int Todo          = Qt::UserRole + 13; // bool（待办画勾选圆圈，日程画分类色点）
-inline constexpr int ItemId        = Qt::UserRole + 14; // QString
+inline constexpr int ItemId        = Qt::UserRole + 13; // QString
 } // namespace itemroles
 
 // ============================================================
-// 日程/待办列表项绘制：
-//   * 待办 —— 左侧圆形勾选框（完成=强调色实底+白勾），文字加删除线
-//   * 日程 —— 左侧分类色圆点
+// 日程列表项绘制（T-043 起日程=待办单一列表，全部带勾选圈）：
+//   * 左侧圆形勾选框 —— 圈色 = 分类色（完成=分类色实底+白勾），文字加删除线
 //   * 重要 —— 文字加粗 + 强调色 ★ 前缀
 //   * 选中 —— 强调色圆角底 + 反白文字
 // ============================================================

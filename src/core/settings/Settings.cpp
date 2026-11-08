@@ -214,36 +214,14 @@ void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
 
 // ---- 桌面日历 ----
 
-bool Settings::calendarAlwaysOnTop() const
+bool Settings::calendarEnabled() const
 {
-    return m_s.value("calendar/alwaysOnTop", true).toBool();
+    return m_s.value("calendar/enabled", false).toBool();
 }
 
-void Settings::setCalendarAlwaysOnTop(bool on)
+void Settings::setCalendarEnabled(bool on)
 {
-    m_s.setValue("calendar/alwaysOnTop", on);
-    syncChecked();
-}
-
-bool Settings::calendarEdgeSnap() const
-{
-    return m_s.value("calendar/edgeSnap", true).toBool();
-}
-
-void Settings::setCalendarEdgeSnap(bool on)
-{
-    m_s.setValue("calendar/edgeSnap", on);
-    syncChecked();
-}
-
-bool Settings::calendarShowOnStartup() const
-{
-    return m_s.value("calendar/showOnStartup", false).toBool();
-}
-
-void Settings::setCalendarShowOnStartup(bool on)
-{
-    m_s.setValue("calendar/showOnStartup", on);
+    m_s.setValue("calendar/enabled", on);
     syncChecked();
 }
 

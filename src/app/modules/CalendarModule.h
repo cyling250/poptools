@@ -12,12 +12,12 @@ class CalendarStore;
 class CalendarWindow;
 
 // ============================================================
-// 桌面日历功能模块：月历 + 日程 + 待办的桌面常驻小组件。
+// 桌面日历功能模块：贴在桌面层的月历+日程小组件。
 //
-// 数据只存本地（CalendarStore JSON），托盘菜单「桌面日历」开关窗口；
-// 窗口支持置顶 / 贴边自动收起 / 透明度 / 收起到右上角迷你待办条
-// （CalendarMiniWidget）。设置页保存后经 AppServices::settingsChanged
-// 全量重应用外观。
+// 显示/隐藏完全由设置页「显示桌面日历」开关驱动（无托盘菜单项）：
+// 勾选即显示并随应用启动自动出现，取消即隐藏。数据只存本地
+// （CalendarStore JSON）。窗口默认固定模式（钉在桌面 WorkerW 层，
+// 被普通窗口遮挡），标题栏 ✏️ 进入编辑模式可移动/缩放。
 // ============================================================
 class CalendarModule : public QObject, public IFeatureModule
 {
@@ -29,11 +29,11 @@ public:
     void shutdown() override;
 
 private slots:
-    void toggleWindow();
     void showMini();
     void showFullFromMini();
     void onSettingsChanged();
     void refreshMini();
+    void applyVisibility(); // 按设置开关显示/隐藏
 
 private:
     CalendarWindow *ensureWindow(); // 懒创建（模块 init 只装配，重 UI 首用再建）

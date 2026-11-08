@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QDate>
 #include <QWidget>
 
 class QLabel;
@@ -8,6 +9,7 @@ class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
 class QSplitter;
+class QTimer;
 class QToolButton;
 
 namespace poptools {
@@ -17,16 +19,23 @@ class CalendarStore;
 class MonthView;
 
 // ============================================================
-// 桌面日历主窗口（无边框、可置顶、贴边收起、透明度可调）。
+// 桌面日历主窗口：贴在桌面上的日程小组件。
 //
-// 布局：自绘标题栏（拖动移动/置顶/收起/关闭）
-//       + 水平分栏（左：月历；右：垂直分栏的日程与待办列表）
-//       ，两处分栏都可拖动调整（对齐小红书原版「窗口及各栏尺寸
-//       都能拖动调整」）。
+// 两种模式（T-043）：
+//   * 固定模式（默认）——顶层窗口 Z 序贴底（紧贴系统桌面 Progman
+//     正上方），一切普通窗口都在其上，像贴在桌面上一样；窗口
+//     不可移动/缩放，右键空白处透传系统桌面菜单；
+//   * 编辑模式——置顶浮动，可拖动标题栏移动、拖边缘缩放（虚线
+//     高亮提示），「完成」回到固定模式。
 //
-// 边缘收起：拖动到屏幕左/右/上边缘 18px 内自动收成贴边小条
-//（EdgeTab，悬停或点击展开），展开后 1.5s 内不再重复吸附。
-// 收起/展开的窗口几何记忆在本类内部，不落设置。
+// 贴底实现：desktoppin::glueToDesktop（顶层 + Z 序，不做 SetParent，
+// 见 P-031——SetParent 进桌面层的外来子窗口内容不被 DWM 合成），
+// 1s 守护定时器在 Z 序被搅动时归位。
+//
+// 布局：自绘标题栏（模式切换 / 收起 / 关闭）
+//       + 水平分栏（左：月历；右：日程列表），分栏可拖动。
+//       双击月历格子 → 格子原位弹出内联输入框添加日程。
+// 显示/隐藏由设置页「显示桌面日历」开关驱动（无托盘菜单项）。
 // ============================================================
 class CalendarWindow : public QWidget
 {
@@ -34,29 +43,30 @@ class CalendarWindow : public QWidget
 public:
     explicit CalendarWindow(CalendarStore *store, QWidget *parent = nullptr);
 
-    // 设置页保存后调用：置顶/贴边/透明度/颜色全量重应用
+    // 设置页保存后调用：外观（透明度/颜色）重应用；显示/隐藏由模块驱动
     void applySettings();
 
     void storeChanged(); // CalendarStore::changed 的窗口侧刷新入口
 
+    bool isEditMode() const { return m_editMode; }
+
 signals:
-    void miniRequested();  // 用户点击「收起」（模块切到右上角迷你条）
-    void dockChanged(bool docked); // 贴边收起状态（模块联动迷你条展示）
+    void miniRequested(); // 用户点击「收起」（模块切到右上角迷你条）
 
 protected:
     void paintEvent(QPaintEvent *event) override;
-    void moveEvent(QMoveEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message,
                      qintptr *result) override;
 
 private:
-    enum class Edge { None, Left, Right, Top };
-
     // ---- UI 构建 ----
     void buildUi();
-    void applyTheme();       // 由 bg/accent 推导的全套配色应用
-    void refreshTitle();     // 月份标签
+    void applyTheme();   // 由 bg/accent 推导的全套配色应用
+    void refreshTitle(); // 月份标签
 
     // ---- 数据刷新 ----
     void refreshLists();
@@ -64,55 +74,53 @@ private:
     void loadItemRow(QListWidget *list, const CalendarItem &item);
 
     // ---- 交互 ----
-    void addFromInput(QLineEdit *input, bool todo);
-    void editItem(QListWidget *list, QListWidgetItem *row);
-    void removeItem(QListWidget *list, QListWidgetItem *row);
-    void toggleDone(QListWidget *list, QListWidgetItem *row);
-    void toggleImportant(QListWidget *list, QListWidgetItem *row);
-    void moveItemRelative(QListWidget *list, QListWidgetItem *row, int delta);
-    void showContextMenu(QListWidget *list, bool todo, const QPoint &globalPos);
-    void syncReorder(QListWidget *list, bool todo); // 拖拽落点后回写顺序
+    void addFromInput(const QString &text);
+    void editItem(QListWidgetItem *row);
+    void removeItem(QListWidgetItem *row);
+    void toggleDone(QListWidgetItem *row);
+    void toggleImportant(QListWidgetItem *row);
+    void moveItemRelative(QListWidgetItem *row, int delta);
+    void showContextMenu(const QPoint &globalPos);
+    void syncReorder(); // 拖拽落点后回写顺序
+    void showInlineAdd(const QDate &date); // 双击格子：原位内联添加
+    void hideInlineAdd();
 
-    // ---- 贴边收起 ----
-    void maybeSnapToEdge();
-    void dockToEdge(Edge edge);
-    void expandFromEdge();
-    Edge currentEdge() const;
-
-    // ---- 几何/标志 ----
-    void updateWindowFlags(); // 置顶开关（需要重新 show）
+    // ---- 模式切换（编辑=置顶浮动 / 固定=贴底） ----
+    void setEditMode(bool on);
+    void applyWindowFlags();
+    void glueIfFixed(); // 固定模式下显示时贴底（含 1s 守护）
+    void updateModeUi();
 
     CalendarStore *m_store;
 
     // 标题栏
-    QToolButton *m_pinBtn = nullptr;
+    QToolButton *m_modeBtn = nullptr;
     QToolButton *m_miniBtn = nullptr;
     QToolButton *m_closeBtn = nullptr;
+    QLabel *m_modeHint = nullptr;
 
     // 月历列
     MonthView *m_monthView = nullptr;
     QLabel *m_monthLabel = nullptr;
 
-    // 列表列
-    QListWidget *m_scheduleList = nullptr;
-    QListWidget *m_todoList = nullptr;
-    QLineEdit *m_scheduleInput = nullptr;
-    QLineEdit *m_todoInput = nullptr;
-    QLabel *m_scheduleLabel = nullptr;
-    QLabel *m_todoLabel = nullptr;
+    // 日程列表列（日程=待办单一列表）
+    QListWidget *m_itemList = nullptr;
+    QLineEdit *m_input = nullptr;
+    QLabel *m_itemLabel = nullptr;
     QSplitter *m_hSplit = nullptr; // 左月历 | 右列表
-    QSplitter *m_vSplit = nullptr; // 日程 / 待办
+
+    // 双击原位添加
+    QLineEdit *m_inlineAdd = nullptr;
+    QDate m_inlineDate;
 
     // 主题
     QColor m_bg = QColor("#FFFFFF");
     QColor m_accent = QColor(0x2B, 0x6F, 0xF2);
     bool m_darkText = false;
 
-    // 贴边收起
-    class EdgeTab;
-    EdgeTab *m_edgeTab = nullptr;
-    QByteArray m_preDockGeometry;
-    qint64 m_snapCooldownUntil = 0; // ms since epoch；展开后冷却防立即回吸
+    // 模式状态
+    bool m_editMode = false;    // true = 编辑模式（置顶浮动，可拖缩）
+    QTimer *m_zGuard = nullptr; // 贴底守护（Z 序被搅动时归位）
 };
 
 } // namespace poptools

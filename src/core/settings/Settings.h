@@ -74,15 +74,9 @@ public:
     void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);
 
     // ---- 桌面日历 ----
-    // 窗口置顶（默认开：桌面常驻小组件的核心体验，用户可关）
-    bool calendarAlwaysOnTop() const;
-    void setCalendarAlwaysOnTop(bool on);
-    // 贴边自动收起（拖到屏幕边缘收成小条，悬停/点击展开；默认开）
-    bool calendarEdgeSnap() const;
-    void setCalendarEdgeSnap(bool on);
-    // 开机自启后自动显示日历（配合应用级开机启动；默认关）
-    bool calendarShowOnStartup() const;
-    void setCalendarShowOnStartup(bool on);
+    // 是否显示桌面日历（设置页开关；勾选即启动时自动显示，取消即隐藏）
+    bool calendarEnabled() const;
+    void setCalendarEnabled(bool on);
     // 整窗不透明度 20-100（%，默认 95）
     int calendarOpacity() const;
     void setCalendarOpacity(int percent);

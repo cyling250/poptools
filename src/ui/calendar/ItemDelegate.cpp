@@ -27,10 +27,11 @@ void ItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option,
     painter->setRenderHint(QPainter::Antialiasing);
 
     const bool selected = option.state & QStyle::State_Selected;
-    const bool todo = index.data(itemroles::Todo).toBool();
     const bool important = index.data(itemroles::Important).toBool();
-    const bool done = todo && index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
-    const QColor categoryColor = index.data(itemroles::CategoryColor).value<QColor>();
+    const bool done = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
+    QColor categoryColor = index.data(itemroles::CategoryColor).value<QColor>();
+    if (!categoryColor.isValid())
+        categoryColor = m_pal.subText;
     const QString text = index.data(Qt::DisplayRole).toString();
 
     const QRect r = option.rect.adjusted(4, 1, -4, -1);
@@ -48,14 +49,14 @@ void ItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option,
         painter->drawRoundedRect(r, 6, 6);
     }
 
-    // 左侧指示区：待办 = 勾选圆圈；日程 = 分类色圆点
+    // 左侧勾选圈（圈色 = 分类色；完成 = 分类色实底 + 白勾）
     const int cy = r.center().y();
     const int cx = r.left() + 14;
-    if (todo) {
+    {
         QRect circle(cx - 7, cy - 7, 14, 14);
         if (done) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(m_pal.accent);
+            painter->setBrush(categoryColor);
             painter->drawEllipse(circle);
             // 白色对勾
             QPen checkPen(QColor("#FFFFFF"));
@@ -70,16 +71,12 @@ void ItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option,
             path.lineTo(circle.right() - 3.5, circle.top() + 4);
             painter->drawPath(path);
         } else {
-            QPen pen(selected ? QColor(255, 255, 255, 210) : m_pal.subText);
+            QPen pen(selected ? QColor(255, 255, 255, 210) : categoryColor);
             pen.setWidthF(1.5);
             painter->setPen(pen);
             painter->setBrush(Qt::NoBrush);
             painter->drawEllipse(circle);
         }
-    } else {
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(categoryColor);
-        painter->drawEllipse(QPoint(cx, cy), 4, 4);
     }
 
     // 文字（重要加粗 + ★ 前缀；完成加删除线；选中反白）

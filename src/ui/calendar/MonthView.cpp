@@ -48,6 +48,15 @@ int MonthView::firstDayColumn(const QDate &firstOfMonth)
     return firstOfMonth.dayOfWeek() - 1;
 }
 
+QRect MonthView::cellRectFor(const QDate &date) const
+{
+    const QDate first(m_selected.year(), m_selected.month(), 1);
+    if (!date.isValid() || date < first || date > first.addMonths(1).addDays(-1))
+        return QRect();
+    const int pos = firstDayColumn(first) + first.daysTo(date);
+    return cellRect(pos / colCount(), pos % colCount());
+}
+
 QRect MonthView::cellRect(int row, int col) const
 {
     const int headerH = 26; // 星期表头行高

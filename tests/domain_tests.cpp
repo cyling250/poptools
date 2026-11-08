@@ -387,7 +387,7 @@ private slots:
         QVERIFY(!festival);
     }
 
-    // ---- 桌面日历：CalendarStore 增删改/排序/分类 JSON 往返 ----
+    // ---- 桌面日历：CalendarStore 增删改/排序/分类 JSON 往返（T-043 合并列表语义） ----
     void calendar_store_roundtrip()
     {
         QTemporaryDir dir;
@@ -407,49 +407,46 @@ private slots:
         QVERIFY(!workId.isEmpty());
 
         const QDate day(2026, 11, 8);
-        const QString todo1 = store.addTodo(day, workId, QStringLiteral("写周报"), true);
-        const QString todo2 = store.addTodo(day, workId, QStringLiteral("买咖啡"), false);
-        const QString sched1 = store.addSchedule(day, QString(), QStringLiteral("开题会"), false);
-        QVERIFY(!todo1.isEmpty() && !todo2.isEmpty() && !sched1.isEmpty());
-
-        QCOMPARE(store.itemsForDate(day, true).size(), 2);
-        QCOMPARE(store.itemsForDate(day, false).size(), 1);
+        const QString item1 = store.addItem(day, workId, QStringLiteral("写周报"), true);
+        const QString item2 = store.addItem(day, workId, QStringLiteral("买咖啡"), false);
+        QVERIFY(!item1.isEmpty() && !item2.isEmpty());
+        QCOMPARE(store.itemsForDate(day).size(), 2);
 
         // 完成切换
-        QVERIFY(store.setDone(todo1, true));
-        QVERIFY(!store.setDone(todo1, true)); // 幂等
-        QCOMPARE(store.itemsForDate(day, true).at(0).done, true);
+        QVERIFY(store.setDone(item1, true));
+        QVERIFY(!store.setDone(item1, true)); // 幂等
+        QCOMPARE(store.itemsForDate(day).at(0).done, true);
 
-        // 上移/下移：moveItem(-1) 把 todo2 提到 todo1 前
-        QVERIFY(store.moveItem(todo2, -1));
-        QCOMPARE(store.itemsForDate(day, true).at(0).id, todo2);
-        QVERIFY(!store.moveItem(todo2, -1)); // 已在顶
-        QVERIFY(store.moveItem(todo2, 1));
-        QCOMPARE(store.itemsForDate(day, true).at(0).id, todo1);
+        // 上移/下移：moveItem(-1) 把 item2 提到 item1 前
+        QVERIFY(store.moveItem(item2, -1));
+        QCOMPARE(store.itemsForDate(day).at(0).id, item2);
+        QVERIFY(!store.moveItem(item2, -1)); // 已在顶
+        QVERIFY(store.moveItem(item2, 1));
+        QCOMPARE(store.itemsForDate(day).at(0).id, item1);
 
-        // 安排到其他日期
-        QVERIFY(store.moveItemToDate(todo2, day.addDays(1)));
-        QCOMPARE(store.itemsForDate(day, true).size(), 1);
-        QCOMPARE(store.itemsForDate(day.addDays(1), true).size(), 1);
+        // 一键安排到其他日期
+        QVERIFY(store.moveItemToDate(item2, day.addDays(1)));
+        QCOMPARE(store.itemsForDate(day).size(), 1);
+        QCOMPARE(store.itemsForDate(day.addDays(1)).size(), 1);
 
-        // 拖拽重排回写（先补第三项，取到 2 项再做重排）
-        store.addTodo(day, workId, QStringLiteral("第三项"), false);
-        const QList<CalendarItem> todos = store.itemsForDate(day, true);
-        QVERIFY(todos.size() == 2);
-        QStringList newOrder{ todos.at(1).id, todos.at(0).id };
-        store.reorderItems(day, true, newOrder);
-        QCOMPARE(store.itemsForDate(day, true).at(0).id, newOrder.at(0));
-        QCOMPARE(store.itemsForDate(day, true).at(1).id, newOrder.at(1));
+        // 拖拽重排回写（先补第二项，取到 2 项再做重排）
+        store.addItem(day, workId, QStringLiteral("第三项"), false);
+        const QList<CalendarItem> dayItems = store.itemsForDate(day);
+        QVERIFY(dayItems.size() == 2);
+        QStringList newOrder{ dayItems.at(1).id, dayItems.at(0).id };
+        store.reorderItems(day, newOrder);
+        QCOMPARE(store.itemsForDate(day).at(0).id, newOrder.at(0));
+        QCOMPARE(store.itemsForDate(day).at(1).id, newOrder.at(1));
 
         // 分类增改删（删除后条目改挂默认分类）
         const QString tempCat = store.addCategory(QStringLiteral("临时"), QColor("#123456"));
         QVERIFY(!tempCat.isEmpty());
         QVERIFY(store.updateCategory(tempCat, QStringLiteral("临时改"), QColor("#654321")));
-        store.addSchedule(day, tempCat, QStringLiteral("带临时分类"), false);
+        store.addItem(day, tempCat, QStringLiteral("带临时分类"), false);
         QVERIFY(store.removeCategory(tempCat));
         QVERIFY(!store.removeCategory(tempCat)); // 再删无效
         QVERIFY(!store.removeCategory(CalendarStore::defaultCategoryId())); // 默认分类不可删
-        for (const CalendarItem &it : store.itemsForDate(day, false))
+        for (const CalendarItem &it : store.itemsForDate(day))
             QVERIFY(it.categoryId != tempCat);
 
         // JSON 往返：重新加载同一路径，条目与属性一致
@@ -459,13 +456,13 @@ private slots:
         reloaded.load();
         QCOMPARE(reloaded.items().size(), before.size());
         QCOMPARE(reloaded.categories().size(), catsBefore.size());
-        QCOMPARE(reloaded.itemsForDate(day, true).size(), 2);
-        QCOMPARE(reloaded.itemsForDate(day.addDays(1), true).size(), 1);
-        // 待办完成态与重要标记均持久化
-        for (const CalendarItem &it : reloaded.itemsForDate(day, true)) {
-            if (it.id == todo1)
+        QCOMPARE(reloaded.itemsForDate(day).size(), 3);
+        QCOMPARE(reloaded.itemsForDate(day.addDays(1)).size(), 1);
+        // 完成态与重要标记均持久化
+        for (const CalendarItem &it : reloaded.itemsForDate(day)) {
+            if (it.id == item1)
                 QVERIFY(it.done);
-            if (it.id == todos.at(0).id)
+            if (it.id == dayItems.at(0).id)
                 QCOMPARE(it.important, true);
         }
     }

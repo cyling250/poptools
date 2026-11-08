@@ -1,5 +1,6 @@
 #include "CalendarWindow.h"
 
+#include "DesktopPin.h"
 #include "ItemDelegate.h"
 #include "ItemEditDialog.h"
 #include "MonthView.h"
@@ -39,8 +40,6 @@ namespace poptools {
 namespace {
 
 constexpr int kTitleBarHeight = 36;
-constexpr int kSnapTriggerPx = 18;   // 距屏幕边缘多少像素内触发贴边收起
-constexpr qint64 kSnapCooldownMs = 1500;
 
 // 由背景色亮度决定文字用深色还是浅色（用户可改背景色，不能跟着写死黑字）
 bool darkTextFor(const QColor &bg)
@@ -99,85 +98,6 @@ QDate pickDate(QWidget *parent, const QDate &initial)
 } // namespace
 
 // ============================================================
-// 贴边小条（file-local）：悬停/点击展开主窗口
-// ============================================================
-class CalendarWindow::EdgeTab : public QWidget
-{
-public:
-    EdgeTab()
-    {
-        setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
-                       | Qt::NoDropShadowWindowHint);
-        setAttribute(Qt::WA_TranslucentBackground);
-        setAttribute(Qt::WA_ShowWithoutActivating);
-        setCursor(Qt::PointingHandCursor);
-        m_hoverTimer.setSingleShot(true);
-        m_hoverTimer.setInterval(280);
-        connect(&m_hoverTimer, &QTimer::timeout, this, [this] {
-            if (underMouse() && expandRequested)
-                expandRequested();
-        });
-    }
-
-    // 展开请求回调（file-local 类不进 moc，用 std::function 替代信号）
-    std::function<void()> expandRequested;
-
-    void showFor(Edge edge, const QRect &anchor, const QColor &accent)
-    {
-        m_edge = edge;
-        m_accent = accent;
-        const QScreen *screen = QGuiApplication::screenAt(anchor.center());
-        const QRect avail = screen ? screen->availableGeometry()
-                                   : QGuiApplication::primaryScreen()->availableGeometry();
-        if (edge == Edge::Top) {
-            const int w = qBound(120, anchor.width() / 3, 180);
-            resize(w, 9);
-            move(avail.left() + (avail.width() - width()) / 2, avail.top());
-        } else {
-            const int h = qBound(80, anchor.height() / 2, 160);
-            resize(9, h);
-            const int y = qBound(avail.top() + 8, anchor.center().y() - h / 2,
-                                 avail.bottom() - h - 8);
-            move(edge == Edge::Left ? avail.left() : avail.right() - width() + 1, y);
-        }
-        show();
-    }
-
-    Edge edge() const { return m_edge; }
-
-protected:
-    void paintEvent(QPaintEvent * /*event*/) override
-    {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(Qt::NoPen);
-        p.setBrush(m_accent);
-        p.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 4, 4);
-    }
-    void enterEvent(QEnterEvent *event) override
-    {
-        m_hoverTimer.start();
-        QWidget::enterEvent(event);
-    }
-    void leaveEvent(QEvent *event) override
-    {
-        m_hoverTimer.stop();
-        QWidget::leaveEvent(event);
-    }
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (expandRequested)
-            expandRequested();
-        QWidget::mousePressEvent(event);
-    }
-
-private:
-    Edge m_edge = Edge::None;
-    QColor m_accent;
-    QTimer m_hoverTimer;
-};
-
-// ============================================================
 // CalendarWindow
 // ============================================================
 
@@ -198,16 +118,18 @@ CalendarWindow::CalendarWindow(CalendarStore *store, QWidget *parent)
     }
 
     buildUi();
+    applyWindowFlags();
     applySettings();
 
     connect(m_store, &CalendarStore::changed, this, &CalendarWindow::storeChanged);
     connect(m_monthView, &MonthView::selectedDateChanged, this, [this] {
+        hideInlineAdd();
         refreshLists();
         refreshDots();
         refreshTitle();
     });
-    connect(m_monthView, &MonthView::dayActivated, this,
-            [this] { m_todoInput->setFocus(); });
+    // 双击格子：原位内联添加日程
+    connect(m_monthView, &MonthView::dayActivated, this, &CalendarWindow::showInlineAdd);
 
     storeChanged();
 }
@@ -224,21 +146,20 @@ void CalendarWindow::buildUi()
     titleBar->setFixedHeight(kTitleBarHeight);
     auto *titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 8, 0);
-    titleLayout->setSpacing(4);
+    titleLayout->setSpacing(6);
 
     auto *titleLabel = new QLabel(QStringLiteral("桌面日历"), titleBar);
     titleLabel->setObjectName("calendarTitleLabel");
 
-    m_pinBtn = new QToolButton(titleBar);
-    m_pinBtn->setObjectName("calPinBtn");
-    m_pinBtn->setText(QStringLiteral("📌"));
-    m_pinBtn->setCheckable(true);
-    m_pinBtn->setToolTip(QStringLiteral("窗口置顶"));
-    m_pinBtn->setFixedSize(28, 26);
-    m_pinBtn->setChecked(Settings::instance().calendarAlwaysOnTop());
-    connect(m_pinBtn, &QToolButton::toggled, this, [](bool on) {
-        Settings::instance().setCalendarAlwaysOnTop(on);
-    });
+    // 模式提示（编辑模式可见）
+    m_modeHint = new QLabel(QStringLiteral("编辑中：拖动移动 · 拖边缘缩放"), titleBar);
+    m_modeHint->setObjectName("calModeHint");
+
+    m_modeBtn = new QToolButton(titleBar);
+    m_modeBtn->setObjectName("calModeBtn");
+    m_modeBtn->setFixedSize(28, 26);
+    connect(m_modeBtn, &QToolButton::clicked, this,
+            [this] { setEditMode(!m_editMode); });
 
     m_miniBtn = new QToolButton(titleBar);
     m_miniBtn->setObjectName("calMiniBtn");
@@ -253,18 +174,23 @@ void CalendarWindow::buildUi()
     m_closeBtn = new QToolButton(titleBar);
     m_closeBtn->setObjectName("calCloseBtn");
     m_closeBtn->setText(QStringLiteral("✕"));
-    m_closeBtn->setToolTip(QStringLiteral("关闭（可从托盘菜单重新打开）"));
+    m_closeBtn->setToolTip(QStringLiteral("隐藏（可在 设置 → 桌面日历 中重新开启）"));
     m_closeBtn->setFixedSize(28, 26);
-    connect(m_closeBtn, &QToolButton::clicked, this, &QWidget::hide);
+    connect(m_closeBtn, &QToolButton::clicked, this, [this] {
+        // 隐藏 = 关闭功能，与设置开关保持一致
+        Settings::instance().setCalendarEnabled(false);
+        hide();
+    });
 
     titleLayout->addWidget(titleLabel);
+    titleLayout->addWidget(m_modeHint);
     titleLayout->addStretch();
-    titleLayout->addWidget(m_pinBtn);
+    titleLayout->addWidget(m_modeBtn);
     titleLayout->addWidget(m_miniBtn);
     titleLayout->addWidget(m_closeBtn);
     rootLayout->addWidget(titleBar);
 
-    // ---- 内容区：左月历 | 右（日程 / 待办） ----
+    // ---- 内容区：左月历 | 右日程列表 ----
     m_hSplit = new QSplitter(Qt::Horizontal, this);
     m_hSplit->setObjectName("calHSplit");
     m_hSplit->setChildrenCollapsible(false);
@@ -310,138 +236,155 @@ void CalendarWindow::buildUi()
     calLayout->addWidget(navRow);
     calLayout->addWidget(m_monthView, 1);
 
-    // 右：日程 / 待办（垂直分栏）
-    m_vSplit = new QSplitter(Qt::Vertical, this);
-    m_vSplit->setObjectName("calVSplit");
-    m_vSplit->setChildrenCollapsible(false);
-    m_vSplit->setHandleWidth(4);
-    m_hSplit->addWidget(m_vSplit);
+    // 右：日程列表（日程=待办单一列表，可勾选完成）
+    auto *panel = new QWidget(m_hSplit);
+    m_hSplit->addWidget(panel);
+    auto *lay = new QVBoxLayout(panel);
+    lay->setContentsMargins(4, 2, 8, 8);
+    lay->setSpacing(4);
 
-    const QLocale zhLocale(QLocale::Chinese, QLocale::China);
+    m_itemLabel = new QLabel(QStringLiteral("日程"), panel);
+    m_itemLabel->setObjectName("calPanelLabel");
+    lay->addWidget(m_itemLabel);
 
-    auto buildPanel = [this, &zhLocale](const QString &title, bool todo) -> QWidget * {
-        auto *panel = new QWidget(m_vSplit);
-        m_vSplit->addWidget(panel);
-        auto *lay = new QVBoxLayout(panel);
-        lay->setContentsMargins(4, 2, 8, 8);
-        lay->setSpacing(4);
+    auto *list = new ReorderList(panel);
+    m_itemList = list;
+    list->setObjectName("calItemList");
+    list->setFrameShape(QFrame::NoFrame);
+    list->setSelectionMode(QAbstractItemView::SingleSelection);
+    list->setDragDropMode(QAbstractItemView::InternalMove);
+    list->setDefaultDropAction(Qt::MoveAction);
+    list->setContextMenuPolicy(Qt::CustomContextMenu);
+    list->setItemDelegate(new ItemDelegate(list));
+    lay->addWidget(list, 1);
 
-        QLabel **labelOut = todo ? &m_todoLabel : &m_scheduleLabel;
-        *labelOut = new QLabel(title, panel);
-        (*labelOut)->setObjectName("calPanelLabel");
-        lay->addWidget(*labelOut);
+    m_input = new QLineEdit(panel);
+    m_input->setObjectName("calItemInput");
+    m_input->setPlaceholderText(QStringLiteral("+ 添加日程，回车确认（可勾选完成）"));
+    m_input->installEventFilter(this);
+    lay->addWidget(m_input);
+    connect(m_input, &QLineEdit::returnPressed, this, [this] {
+        addFromInput(m_input->text());
+        m_input->clear();
+        m_input->setFocus();
+    });
 
-        auto *list = new ReorderList(panel);
-        if (todo)
-            m_todoList = list;
-        else
-            m_scheduleList = list;
-        list->setObjectName(todo ? "calTodoList" : "calScheduleList");
-        list->setFrameShape(QFrame::NoFrame);
-        list->setSelectionMode(QAbstractItemView::SingleSelection);
-        list->setDragDropMode(QAbstractItemView::InternalMove);
-        list->setDefaultDropAction(Qt::MoveAction);
-        list->setContextMenuPolicy(Qt::CustomContextMenu);
-        list->setItemDelegate(new ItemDelegate(list));
-        lay->addWidget(list, 1);
+    // 日程：点击左侧 30px 勾选区切换完成；双击整行打开编辑
+    connect(list, &QListWidget::itemClicked, this, [this, list](QListWidgetItem *row) {
+        if (!row)
+            return;
+        const QPoint pos = list->viewport()->mapFromGlobal(QCursor::pos());
+        if (pos.x() - list->visualItemRect(row).x() <= 30)
+            toggleDone(row);
+    });
+    connect(list, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *row) { editItem(row); });
+    connect(list, &QListWidget::customContextMenuRequested, this,
+            [this, list](const QPoint &pos) {
+                showContextMenu(list->viewport()->mapToGlobal(pos));
+            });
 
-        auto *input = new QLineEdit(panel);
-        if (todo)
-            m_todoInput = input;
-        else
-            m_scheduleInput = input;
-        input->setObjectName(todo ? "calTodoInput" : "calScheduleInput");
-        input->setPlaceholderText(todo ? QStringLiteral("+ 添加待办，回车确认")
-                                       : QStringLiteral("+ 添加日程，回车确认"));
-        lay->addWidget(input);
+    auto *delShortcut = new QShortcut(QKeySequence::Delete, list);
+    delShortcut->setContext(Qt::WidgetShortcut);
+    connect(delShortcut, &QShortcut::activated, this, [this] {
+        if (QListWidgetItem *row = m_itemList->currentItem())
+            removeItem(row);
+    });
 
-        connect(input, &QLineEdit::returnPressed, this,
-                [this, input, todo] { addFromInput(input, todo); });
-
-        // 待办：点击左侧 30px 勾选区切换完成；双击整行打开编辑
-        connect(list, &QListWidget::itemClicked, this, [this, list](QListWidgetItem *row) {
-            if (!row || !row->data(itemroles::Todo).toBool())
-                return;
-            const QPoint pos = list->viewport()->mapFromGlobal(QCursor::pos());
-            if (pos.x() - list->visualItemRect(row).x() <= 30)
-                toggleDone(list, row);
-        });
-        connect(list, &QListWidget::itemDoubleClicked, this,
-                [this, list](QListWidgetItem *row) { editItem(list, row); });
-        connect(list, &QListWidget::customContextMenuRequested, this,
-                [this, list, todo](const QPoint &pos) {
-                    showContextMenu(list, todo, list->viewport()->mapToGlobal(pos));
-                });
-
-        auto *delShortcut = new QShortcut(QKeySequence::Delete, list);
-        delShortcut->setContext(Qt::WidgetShortcut);
-        connect(delShortcut, &QShortcut::activated, this, [this, list] {
-            if (QListWidgetItem *row = list->currentItem())
-                removeItem(list, row);
-        });
-        return panel;
-    };
-
-    buildPanel(QStringLiteral("日程"), false);
-    buildPanel(QStringLiteral("待办"), true);
+    // 拖拽落点回写顺序
+    list->reordered = [this] { syncReorder(); };
 
     // 分栏比例：月历略宽
     m_hSplit->setStretchFactor(0, 5);
     m_hSplit->setStretchFactor(1, 4);
-    m_vSplit->setStretchFactor(0, 1);
-    m_vSplit->setStretchFactor(1, 1);
 
-    // 拖拽落点回写顺序
-    static_cast<ReorderList *>(m_scheduleList)->reordered = [this] {
-        syncReorder(m_scheduleList, false);
-    };
-    static_cast<ReorderList *>(m_todoList)->reordered = [this] {
-        syncReorder(m_todoList, true);
-    };
-
-    // 分栏状态持久化：base64(水平) | base64(垂直)
+    // 分栏状态持久化
     const QByteArray splitterState = Settings::instance().calendarSplitter();
-    const QList<QByteArray> parts = splitterState.split('|');
-    if (parts.size() == 2) {
-        m_hSplit->restoreState(QByteArray::fromBase64(parts.at(0)));
-        m_vSplit->restoreState(QByteArray::fromBase64(parts.at(1)));
-    }
+    if (!splitterState.isEmpty())
+        m_hSplit->restoreState(QByteArray::fromBase64(splitterState));
 
     rootLayout->addWidget(m_hSplit, 1);
 
-    m_edgeTab = new EdgeTab();
-    m_edgeTab->expandRequested = [this] { expandFromEdge(); };
+    // 双击格子的内联输入框（懒创建）
+    m_inlineAdd = nullptr;
+
+    updateModeUi();
 }
 
-// ---------- 增删改与数据刷新（见下方各节） ----------
+// ---------- 模式切换 ----------
 
-void CalendarWindow::updateWindowFlags()
+void CalendarWindow::applyWindowFlags()
 {
     Qt::WindowFlags f = Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint;
-    if (Settings::instance().calendarAlwaysOnTop())
-        f |= Qt::WindowStaysOnTopHint;
+    if (m_editMode)
+        f |= Qt::WindowStaysOnTopHint; // 编辑时浮到最上，方便抓取拖动
     if (windowFlags() != f) {
         const bool wasVisible = isVisible();
-        setWindowFlags(f);
+        setWindowFlags(f); // 重建原生窗口（顺带完成解钉）
         if (wasVisible)
             show();
     }
-    m_pinBtn->setChecked(Settings::instance().calendarAlwaysOnTop());
 }
+
+void CalendarWindow::setEditMode(bool on)
+{
+    if (on == m_editMode)
+        return;
+    hideInlineAdd();
+    m_editMode = on;
+    if (!on && m_zGuard)
+        m_zGuard->stop(); // 编辑期间暂停贴底守护
+    applyWindowFlags();
+    if (on) {
+        raise();
+        activateWindow();
+    } else if (isVisible()) {
+        glueIfFixed(); // 编辑 → 固定：当前位置贴底
+    }
+    updateModeUi();
+    update();
+}
+
+// 固定模式贴底 + 1s 守护（Z 序被搅动时归位；就位时零开销）
+void CalendarWindow::glueIfFixed()
+{
+    if (m_editMode || !isVisible())
+        return;
+    if (desktoppin::glueToDesktop(this) && !m_zGuard) {
+        m_zGuard = new QTimer(this);
+        m_zGuard->setInterval(1000);
+        connect(m_zGuard, &QTimer::timeout, this, [this] {
+            if (!m_editMode)
+                desktoppin::glueToDesktop(this);
+        });
+        m_zGuard->start();
+    }
+}
+
+void CalendarWindow::updateModeUi()
+{
+    if (m_editMode) {
+        m_modeBtn->setText(QStringLiteral("✅"));
+        m_modeBtn->setToolTip(QStringLiteral("完成编辑（贴回桌面）"));
+        m_modeHint->setVisible(true);
+    } else {
+        m_modeBtn->setText(QStringLiteral("✏️"));
+        m_modeBtn->setToolTip(QStringLiteral("编辑模式（拖动移动 · 拖边缘缩放）"));
+        m_modeHint->setVisible(false);
+    }
+}
+
+// ---------- 设置应用 ----------
 
 void CalendarWindow::applySettings()
 {
-    updateWindowFlags();
+    applyWindowFlags();
     setWindowOpacity(Settings::instance().calendarOpacity() / 100.0);
     m_bg = Settings::instance().calendarBgColor();
     m_accent = Settings::instance().calendarAccentColor();
     m_darkText = darkTextFor(m_bg);
     applyTheme();
     refreshDots();
-
-    // 关掉贴边后若正停靠，先展开
-    if (!Settings::instance().calendarEdgeSnap() && m_edgeTab && m_edgeTab->isVisible())
-        expandFromEdge();
 }
 
 void CalendarWindow::applyTheme()
@@ -468,8 +411,7 @@ void CalendarWindow::applyTheme()
     dp.text = text;
     dp.subText = subText;
     dp.accent = m_accent;
-    static_cast<ItemDelegate *>(m_scheduleList->itemDelegate())->setDelegatePalette(dp);
-    static_cast<ItemDelegate *>(m_todoList->itemDelegate())->setDelegatePalette(dp);
+    static_cast<ItemDelegate *>(m_itemList->itemDelegate())->setDelegatePalette(dp);
 
     // 控件样式（自定义类一律 ID 选择器，P-022；子控件用类型选择器）
     const QString accent = m_accent.name(QColor::HexRgb);
@@ -477,13 +419,12 @@ void CalendarWindow::applyTheme()
         "QWidget#calendarTitleBar { background: transparent; }"
         "QLabel { color: %1; background: transparent; }"
         "QLabel#calendarTitleLabel { font-weight: bold; font-size: 13px; }"
+        "QLabel#calModeHint { font-size: 11px; }"
         "QLabel#calMonthLabel { font-weight: bold; font-size: 14px; }"
         "QLabel#calPanelLabel { font-weight: bold; font-size: 12px; }"
         "QToolButton { background: transparent; border: 1px solid %2;"
         "  border-radius: 6px; color: %1; padding: 2px; font-size: 12px; }"
         "QToolButton:hover { border-color: %3; color: %3; }"
-        "QToolButton#calPinBtn:checked { background: %3; color: #FFFFFF;"
-        "  border-color: %3; }"
         "QToolButton#calNavBtn { border: none; font-weight: bold; padding: 3px 8px; }"
         "QListWidget { background: transparent; color: %1;"
         "  outline: none; font-size: 12px; }"
@@ -492,12 +433,16 @@ void CalendarWindow::applyTheme()
         "QLineEdit { background: %4; border: 1px solid %2; border-radius: 6px;"
         "  padding: 4px 8px; color: %1; font-size: 12px; }"
         "QLineEdit:focus { border-color: %3; }"
+        "QLineEdit#calInlineAdd { background: #FFFFFF; color: #000000;"
+        "  border: 2px solid %3; border-radius: 6px; padding: 2px 6px;"
+        "  font-size: 12px; }"
         "QSplitter::handle { background: %5; }"
-        "QSplitter::handle:hover { background: %3; }"
-        "QScrollArea { background: transparent; }")
+        "QSplitter::handle:hover { background: %3; }")
         .arg(text.name(QColor::HexRgb), btnBorder.name(QColor::HexRgb), accent,
              inputBg.name(QColor::HexRgb), line.name(QColor::HexRgb)));
 }
+
+// ---------- 数据刷新 ----------
 
 void CalendarWindow::refreshTitle()
 {
@@ -510,21 +455,17 @@ void CalendarWindow::refreshLists()
     const QDate date = m_monthView->selectedDate();
     const QLocale zhLocale(QLocale::Chinese, QLocale::China);
 
-    auto fill = [this, &date, &zhLocale](QListWidget *list, bool todo, QLabel *label,
-                                         const QString &title) {
-        list->clear();
-        const QList<CalendarItem> items = m_store->itemsForDate(date, todo);
-        for (const CalendarItem &it : items)
-            loadItemRow(list, it);
-        const QDate today = QDate::currentDate();
-        const QString dayText =
-            date == today ? QStringLiteral("今天") : date.toString(QStringLiteral("M月d日"));
-        const QString week = zhLocale.toString(date, QStringLiteral("dddd"));
-        label->setText(QStringLiteral("%1 · %2 %3（%4 项）").arg(title, dayText, week,
-                                                                QString::number(items.size())));
-    };
-    fill(m_scheduleList, false, m_scheduleLabel, QStringLiteral("日程"));
-    fill(m_todoList, true, m_todoLabel, QStringLiteral("待办"));
+    m_itemList->clear();
+    const QList<CalendarItem> items = m_store->itemsForDate(date);
+    for (const CalendarItem &it : items)
+        loadItemRow(m_itemList, it);
+
+    const QDate today = QDate::currentDate();
+    const QString dayText =
+        date == today ? QStringLiteral("今天") : date.toString(QStringLiteral("M月d日"));
+    const QString week = zhLocale.toString(date, QStringLiteral("dddd"));
+    m_itemLabel->setText(QStringLiteral("日程 · %1 %2（%3 项）")
+                             .arg(dayText, week, QString::number(items.size())));
 }
 
 void CalendarWindow::loadItemRow(QListWidget *list, const CalendarItem &item)
@@ -533,18 +474,14 @@ void CalendarWindow::loadItemRow(QListWidget *list, const CalendarItem &item)
     row->setData(itemroles::ItemId, item.id);
     row->setData(itemroles::CategoryColor, m_store->categoryColor(item.categoryId));
     row->setData(itemroles::Important, item.important);
-    row->setData(itemroles::Todo, item.todo);
-    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-    if (item.todo) {
-        row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
-        row->setCheckState(item.done ? Qt::Checked : Qt::Unchecked);
-    }
+    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled
+                  | Qt::ItemIsUserCheckable);
+    row->setCheckState(item.done ? Qt::Checked : Qt::Unchecked);
     QStringList tips;
     tips << m_store->categoryName(item.categoryId);
     if (item.important)
         tips << QStringLiteral("重要");
-    if (item.todo)
-        tips << (item.done ? QStringLiteral("已完成") : QStringLiteral("未完成"));
+    tips << (item.done ? QStringLiteral("已完成") : QStringLiteral("未完成"));
     row->setToolTip(tips.join(QStringLiteral(" · ")));
 }
 
@@ -574,21 +511,75 @@ void CalendarWindow::storeChanged()
 
 // ---------- 增删改 ----------
 
-void CalendarWindow::addFromInput(QLineEdit *input, bool todo)
+void CalendarWindow::addFromInput(const QString &text)
 {
-    const QString text = input->text().trimmed();
-    if (text.isEmpty())
+    const QString t = text.trimmed();
+    if (t.isEmpty())
         return;
-    const QDate date = m_monthView->selectedDate();
-    if (todo)
-        m_store->addTodo(date, QString(), text, false);
-    else
-        m_store->addSchedule(date, QString(), text, false);
-    input->clear();
-    input->setFocus();
+    m_store->addItem(m_monthView->selectedDate(), QString(), t, false);
 }
 
-void CalendarWindow::editItem(QListWidget *list, QListWidgetItem *row)
+// 双击格子：原位弹出内联输入框添加日程
+void CalendarWindow::showInlineAdd(const QDate &date)
+{
+    const QRect cell = m_monthView->cellRectFor(date);
+    if (cell.isNull())
+        return;
+    if (!m_inlineAdd) {
+        m_inlineAdd = new QLineEdit(this);
+        m_inlineAdd->setObjectName("calInlineAdd");
+        m_inlineAdd->installEventFilter(this);
+        connect(m_inlineAdd, &QLineEdit::returnPressed, this, [this] {
+            const QString text = m_inlineAdd->text().trimmed();
+            if (!text.isEmpty())
+                m_store->addItem(m_inlineDate, QString(), text, false);
+            hideInlineAdd();
+        });
+    }
+    m_inlineDate = date;
+    // 盖在格子上（略内缩），垂直居中
+    const QPoint tl = m_monthView->mapTo(this, cell.topLeft());
+    const int h = 26;
+    m_inlineAdd->setGeometry(QRect(tl + QPoint(5, (cell.height() - h) / 2),
+                                   QSize(cell.width() - 10, h)));
+    m_inlineAdd->clear();
+    m_inlineAdd->show();
+    m_inlineAdd->raise();
+    // 固定模式下点击不激活（防抬升），打字需要键盘焦点——用户双击
+    // 是明确意图，此处临时唤起窗口；输入结束守护定时器自动归位
+    if (!m_editMode)
+        activateWindow();
+    m_inlineAdd->setFocus();
+}
+
+void CalendarWindow::hideInlineAdd()
+{
+    if (m_inlineAdd && m_inlineAdd->isVisible())
+        m_inlineAdd->hide();
+}
+
+bool CalendarWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_inlineAdd) {
+        if (event->type() == QEvent::KeyPress) {
+            auto *ke = static_cast<QKeyEvent *>(event);
+            if (ke->key() == Qt::Key_Escape) {
+                hideInlineAdd();
+                return true;
+            }
+        } else if (event->type() == QEvent::FocusOut) {
+            hideInlineAdd();
+        }
+    } else if (watched == m_input && event->type() == QEvent::MouseButtonPress) {
+        // 固定模式下点击输入行：显式唤起窗口以获得键盘焦点
+        //（MA_NOACTIVATE 抑制了点击激活）
+        if (!m_editMode)
+            activateWindow();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void CalendarWindow::editItem(QListWidgetItem *row)
 {
     if (!row)
         return;
@@ -596,20 +587,19 @@ void CalendarWindow::editItem(QListWidget *list, QListWidgetItem *row)
     CalendarItem item;
     if (!findItem(m_store, id, &item))
         return;
-    ItemEditDialog dlg(m_store, item.date, item.todo, id, this);
+    ItemEditDialog dlg(m_store, id, this);
     if (dlg.exec() == QDialog::Accepted && !dlg.text().isEmpty())
         m_store->updateItem(id, dlg.text(), dlg.categoryId(), dlg.important());
 }
 
-void CalendarWindow::removeItem(QListWidget *list, QListWidgetItem *row)
+void CalendarWindow::removeItem(QListWidgetItem *row)
 {
     if (row)
         m_store->removeItem(row->data(itemroles::ItemId).toString());
 }
 
-void CalendarWindow::toggleDone(QListWidget *list, QListWidgetItem *row)
+void CalendarWindow::toggleDone(QListWidgetItem *row)
 {
-    Q_UNUSED(list);
     if (!row)
         return;
     const QString id = row->data(itemroles::ItemId).toString();
@@ -618,9 +608,8 @@ void CalendarWindow::toggleDone(QListWidget *list, QListWidgetItem *row)
         m_store->setDone(id, !item.done);
 }
 
-void CalendarWindow::toggleImportant(QListWidget *list, QListWidgetItem *row)
+void CalendarWindow::toggleImportant(QListWidgetItem *row)
 {
-    Q_UNUSED(list);
     if (!row)
         return;
     const QString id = row->data(itemroles::ItemId).toString();
@@ -629,38 +618,35 @@ void CalendarWindow::toggleImportant(QListWidget *list, QListWidgetItem *row)
         m_store->updateItem(id, item.text, item.categoryId, !item.important);
 }
 
-void CalendarWindow::moveItemRelative(QListWidget *list, QListWidgetItem *row, int delta)
+void CalendarWindow::moveItemRelative(QListWidgetItem *row, int delta)
 {
     if (!row)
         return;
     m_store->moveItem(row->data(itemroles::ItemId).toString(), delta);
 }
 
-void CalendarWindow::showContextMenu(QListWidget *list, bool todo, const QPoint &globalPos)
+void CalendarWindow::showContextMenu(const QPoint &globalPos)
 {
-    QListWidgetItem *row = list->currentItem();
-    QMenu menu(list);
+    QListWidgetItem *row = m_itemList->currentItem();
+    QMenu menu(m_itemList);
     if (row) {
         const QString id = row->data(itemroles::ItemId).toString();
         CalendarItem item;
         if (!findItem(m_store, id, &item))
             return;
 
-        if (todo)
-            menu.addAction(item.done ? QStringLiteral("标记为未完成")
-                                     : QStringLiteral("标记为完成"),
-                           [this, list, row] { toggleDone(list, row); });
+        menu.addAction(item.done ? QStringLiteral("标记为未完成")
+                                 : QStringLiteral("标记为完成"),
+                       [this, row] { toggleDone(row); });
         menu.addAction(item.important ? QStringLiteral("取消重要★")
                                       : QStringLiteral("标记重要★"),
-                       [this, list, row] { toggleImportant(list, row); });
-        menu.addAction(QStringLiteral("编辑…"), [this, list, row] { editItem(list, row); });
+                       [this, row] { toggleImportant(row); });
+        menu.addAction(QStringLiteral("编辑…"), [this, row] { editItem(row); });
         menu.addSeparator();
-        menu.addAction(QStringLiteral("上移"), [this, list, row] {
-            moveItemRelative(list, row, -1);
-        });
-        menu.addAction(QStringLiteral("下移"), [this, list, row] {
-            moveItemRelative(list, row, 1);
-        });
+        menu.addAction(QStringLiteral("上移"),
+                       [this, row] { moveItemRelative(row, -1); });
+        menu.addAction(QStringLiteral("下移"),
+                       [this, row] { moveItemRelative(row, 1); });
         menu.addSeparator();
         QMenu *assign = menu.addMenu(QStringLiteral("安排到…"));
         const QDate today = QDate::currentDate();
@@ -679,120 +665,74 @@ void CalendarWindow::showContextMenu(QListWidget *list, bool todo, const QPoint 
                 m_store->moveItemToDate(id, d);
         });
         menu.addSeparator();
-        menu.addAction(QStringLiteral("删除"), [this, list, row] { removeItem(list, row); });
+        menu.addAction(QStringLiteral("删除"), [this, row] { removeItem(row); });
     } else {
         // 空白处右键：快速新增
-        menu.addAction(todo ? QStringLiteral("新增待办…") : QStringLiteral("新增日程…"),
-                       [this, todo] {
-                           ItemEditDialog dlg(m_store, m_monthView->selectedDate(), todo,
-                                              QString(), this);
-                           if (dlg.exec() == QDialog::Accepted && !dlg.text().isEmpty()) {
-                               if (todo)
-                                   m_store->addTodo(m_monthView->selectedDate(),
-                                                    dlg.categoryId(), dlg.text(),
-                                                    dlg.important());
-                               else
-                                   m_store->addSchedule(m_monthView->selectedDate(),
-                                                        dlg.categoryId(), dlg.text(),
-                                                        dlg.important());
-                           }
-                       });
+        menu.addAction(QStringLiteral("新增日程…"), [this] {
+            ItemEditDialog dlg(m_store, QString(), this);
+            if (dlg.exec() == QDialog::Accepted && !dlg.text().isEmpty())
+                m_store->addItem(m_monthView->selectedDate(), dlg.categoryId(),
+                                 dlg.text(), dlg.important());
+        });
     }
     menu.exec(globalPos);
 }
 
-void CalendarWindow::syncReorder(QListWidget *list, bool todo)
+void CalendarWindow::syncReorder()
 {
     QStringList ids;
-    for (int i = 0; i < list->count(); ++i)
-        ids << list->item(i)->data(itemroles::ItemId).toString();
-    m_store->reorderItems(m_monthView->selectedDate(), todo, ids);
-}
-
-// ---------- 贴边收起 ----------
-
-CalendarWindow::Edge CalendarWindow::currentEdge() const
-{
-    const QRect g = frameGeometry();
-    const QScreen *screen = QGuiApplication::screenAt(g.center());
-    if (!screen)
-        return Edge::None;
-    const QRect avail = screen->availableGeometry();
-    if (g.left() <= avail.left() + kSnapTriggerPx)
-        return Edge::Left;
-    if (g.right() >= avail.right() - kSnapTriggerPx)
-        return Edge::Right;
-    if (g.top() <= avail.top() + kSnapTriggerPx)
-        return Edge::Top;
-    return Edge::None;
-}
-
-void CalendarWindow::maybeSnapToEdge()
-{
-    if (!Settings::instance().calendarEdgeSnap())
-        return;
-    if (m_edgeTab->isVisible())
-        return;
-    if (QDateTime::currentMSecsSinceEpoch() < m_snapCooldownUntil)
-        return;
-    const Edge edge = currentEdge();
-    if (edge != Edge::None)
-        dockToEdge(edge);
-}
-
-void CalendarWindow::dockToEdge(Edge edge)
-{
-    m_preDockGeometry = saveGeometry();
-    m_edgeTab->showFor(edge, frameGeometry(), m_accent);
-    hide();
-    emit dockChanged(true);
-}
-
-void CalendarWindow::expandFromEdge()
-{
-    m_edgeTab->hide();
-    if (!m_preDockGeometry.isEmpty()) {
-        restoreGeometry(m_preDockGeometry);
-        m_preDockGeometry.clear();
-    }
-    // 展开位置离边缘 40px，避免立即再次触发吸附
-    const QRect g = frameGeometry();
-    const QScreen *screen = QGuiApplication::screenAt(g.center());
-    const QRect avail = screen ? screen->availableGeometry()
-                               : QGuiApplication::primaryScreen()->availableGeometry();
-    int x = g.x(), y = g.y();
-    if (g.left() <= avail.left() + kSnapTriggerPx)
-        x = avail.left() + 40;
-    if (g.right() >= avail.right() - kSnapTriggerPx)
-        x = avail.right() - g.width() - 40;
-    if (g.top() <= avail.top() + kSnapTriggerPx)
-        y = avail.top() + 40;
-    move(x, y);
-
-    m_snapCooldownUntil = QDateTime::currentMSecsSinceEpoch() + kSnapCooldownMs;
-    show();
-    raise();
-    activateWindow();
-    emit dockChanged(false);
+    for (int i = 0; i < m_itemList->count(); ++i)
+        ids << m_itemList->item(i)->data(itemroles::ItemId).toString();
+    m_store->reorderItems(m_monthView->selectedDate(), ids);
 }
 
 // ---------- 窗口事件 ----------
 
-void CalendarWindow::moveEvent(QMoveEvent *event)
+void CalendarWindow::showEvent(QShowEvent *event)
 {
-    QWidget::moveEvent(event);
-    maybeSnapToEdge();
+    QWidget::showEvent(event);
+    // 固定模式：显示完成后贴底（延迟到事件循环，避开 show 过程中的
+    // 原生窗口状态变化窗口期）
+    if (!m_editMode)
+        QTimer::singleShot(0, this, [this] { glueIfFixed(); });
 }
 
 void CalendarWindow::hideEvent(QHideEvent *event)
 {
-    // 几何与分栏状态持久化（贴边收起时的隐藏不覆盖预停靠几何）
-    if (!m_edgeTab->isVisible())
-        Settings::instance().setCalendarGeometry(saveGeometry());
-    const QByteArray state = m_hSplit->saveState().toBase64() + '|'
-                             + m_vSplit->saveState().toBase64();
-    Settings::instance().setCalendarSplitter(state);
+    // 几何与分栏状态持久化（窗口始终为顶层，几何永远有效）
+    Settings::instance().setCalendarGeometry(saveGeometry());
+    Settings::instance().setCalendarSplitter(m_hSplit->saveState().toBase64());
+    if (m_zGuard)
+        m_zGuard->stop();
     QWidget::hideEvent(event);
+}
+
+// 固定模式：空白处右键转发给桌面（弹出系统桌面右键菜单），让日历
+// 像真的贴在桌面上一样；条目列表的右键由列表自身处理（条目操作），
+// 输入框/按钮等子控件各自的菜单不受影响。编辑模式维持默认行为。
+void CalendarWindow::contextMenuEvent(QContextMenuEvent *event)
+{
+    if (m_editMode) {
+        QWidget::contextMenuEvent(event);
+        return;
+    }
+#ifdef Q_OS_WIN
+    // 桌面图标层（DefView）响应 WM_CONTEXTMENU 弹出系统桌面菜单；
+    // lParam 为屏幕物理坐标
+    HWND progman = FindWindowW(L"Progman", nullptr);
+    HWND defview = progman ? FindWindowExW(progman, nullptr, L"SHELLDLL_DefView", nullptr)
+                           : nullptr;
+    if (defview) {
+        const QPointF phys = QPointF(event->globalPos()) * devicePixelRatioF();
+        const LPARAM lParam = MAKELPARAM(static_cast<SHORT>(phys.x()),
+                                         static_cast<SHORT>(phys.y()));
+        SendMessageTimeoutW(defview, WM_CONTEXTMENU, reinterpret_cast<WPARAM>(defview),
+                            lParam, SMTO_NORMAL, 1000, nullptr);
+        event->accept();
+        return;
+    }
+#endif
+    QWidget::contextMenuEvent(event);
 }
 
 void CalendarWindow::paintEvent(QPaintEvent * /*event*/)
@@ -807,6 +747,16 @@ void CalendarWindow::paintEvent(QPaintEvent * /*event*/)
     p.setPen(QPen(border, 1));
     p.setBrush(Qt::NoBrush);
     p.drawPath(path);
+
+    // 编辑模式：强调色虚线框 + 半透明遮罩提示
+    if (m_editMode) {
+        QPen dashPen(m_accent);
+        dashPen.setWidth(2);
+        dashPen.setStyle(Qt::DashLine);
+        p.setPen(dashPen);
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(rect().adjusted(1, 1, -2, -2), radius, radius);
+    }
 }
 
 bool CalendarWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
@@ -814,7 +764,22 @@ bool CalendarWindow::nativeEvent(const QByteArray &eventType, void *message, qin
 #ifdef Q_OS_WIN
     if (eventType == "windows_generic_MSG") {
         MSG *msg = static_cast<MSG *>(message);
+        if (msg->message == WM_MOUSEACTIVATE) {
+            // 固定模式：点击不激活窗口（Windows 默认把被点的窗口提到
+            // 前面——贴底日历必须抑制，否则会盖住正常应用窗口，随守护
+            // 定时器回落形成横跳）。需要键盘输入的场景由代码显式
+            // activateWindow() 临时唤起
+            if (!m_editMode) {
+                *result = MA_NOACTIVATE;
+                return true;
+            }
+        }
         if (msg->message == WM_NCHITTEST) {
+            // 固定模式：窗口完全锁定，全部按客户区处理（无缩放/拖动）
+            if (!m_editMode) {
+                *result = HTCLIENT;
+                return true;
+            }
             const qreal dpr = devicePixelRatioF();
             const QPoint globalPhys(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
             const QPointF local = mapFromGlobal(QPointF(globalPhys) / dpr);

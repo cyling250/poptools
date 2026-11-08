@@ -103,9 +103,7 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
         s.setTranslateDomains(parseDomains());
         s.setTranslateTerms(parseTerms());
         s.setPinSaveDir(m_dirEdit->text().trimmed());
-        s.setCalendarAlwaysOnTop(m_calTopCheck->isChecked());
-        s.setCalendarEdgeSnap(m_calSnapCheck->isChecked());
-        s.setCalendarShowOnStartup(m_calShowCheck->isChecked());
+        s.setCalendarEnabled(m_calShowCheck->isChecked());
         s.setCalendarOpacity(m_calOpacity->value());
         s.setCalendarBgColor(m_calBg);
         s.setCalendarAccentColor(m_calAccent);
@@ -349,16 +347,11 @@ QWidget *SettingsDialog::buildCalendarPage()
         lay->addWidget(sep);
     };
 
-    // ---- 行为 ----
-    addSection(QStringLiteral("行为"));
-    m_calTopCheck = new QCheckBox(QStringLiteral("窗口置顶（始终显示在其他窗口上方）"), page);
-    m_calTopCheck->setChecked(Settings::instance().calendarAlwaysOnTop());
-    m_calSnapCheck = new QCheckBox(QStringLiteral("拖到屏幕边缘自动收起（贴边小条，悬停/点击展开）"), page);
-    m_calSnapCheck->setChecked(Settings::instance().calendarEdgeSnap());
-    m_calShowCheck = new QCheckBox(QStringLiteral("开机自启后自动显示日历窗口"), page);
-    m_calShowCheck->setChecked(Settings::instance().calendarShowOnStartup());
-    lay->addWidget(m_calTopCheck);
-    lay->addWidget(m_calSnapCheck);
+    // ---- 显示 ----
+    addSection(QStringLiteral("显示"));
+    m_calShowCheck = new QCheckBox(QStringLiteral("显示桌面日历（贴在桌面上，被普通窗口遮挡）"), page);
+    m_calShowCheck->setChecked(Settings::instance().calendarEnabled());
+    m_calShowCheck->setToolTip(QStringLiteral("勾选后立即显示并随应用启动自动出现；日历窗口内 ✏️ 可进入编辑模式调整位置大小"));
     lay->addWidget(m_calShowCheck);
 
     addSeparator();

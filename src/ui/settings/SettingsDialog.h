@@ -68,8 +68,6 @@ private:
     QLineEdit *m_dirEdit = nullptr; // 贴图默认保存文件夹
 
     // 桌面日历
-    QCheckBox *m_calTopCheck = nullptr;
-    QCheckBox *m_calSnapCheck = nullptr;
     QCheckBox *m_calShowCheck = nullptr;
     QSlider *m_calOpacity = nullptr;
     QLabel *m_calOpacityValue = nullptr;

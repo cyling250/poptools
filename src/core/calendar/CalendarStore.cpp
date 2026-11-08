@@ -68,15 +68,6 @@ void CalendarStore::save()
 
 // ---------- 条目 ----------
 
-QList<CalendarItem> CalendarStore::itemsForDate(const QDate &date, bool todo) const
-{
-    QList<CalendarItem> result;
-    for (const CalendarItem &it : m_items)
-        if (it.date == date && it.todo == todo)
-            result << it;
-    return result;
-}
-
 QList<CalendarItem> CalendarStore::itemsForDate(const QDate &date) const
 {
     QList<CalendarItem> result;
@@ -86,33 +77,15 @@ QList<CalendarItem> CalendarStore::itemsForDate(const QDate &date) const
     return result;
 }
 
-static CalendarItem makeItem(const QDate &date, bool todo, const QString &categoryId,
-                             const QString &text, bool important)
+QString CalendarStore::addItem(const QDate &date, const QString &categoryId,
+                               const QString &text, bool important)
 {
     CalendarItem it;
     it.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     it.date = date;
-    it.todo = todo;
-    it.categoryId = categoryId.isEmpty() ? CalendarStore::defaultCategoryId() : categoryId;
+    it.categoryId = categoryId.isEmpty() ? defaultCategoryId() : categoryId;
     it.text = text;
     it.important = important;
-    return it;
-}
-
-QString CalendarStore::addTodo(const QDate &date, const QString &categoryId,
-                               const QString &text, bool important)
-{
-    const CalendarItem it = makeItem(date, true, categoryId, text, important);
-    m_items.append(it);
-    save();
-    emit changed();
-    return it.id;
-}
-
-QString CalendarStore::addSchedule(const QDate &date, const QString &categoryId,
-                                   const QString &text, bool important)
-{
-    const CalendarItem it = makeItem(date, false, categoryId, text, important);
     m_items.append(it);
     save();
     emit changed();
@@ -190,12 +163,11 @@ bool CalendarStore::moveItem(const QString &id, int delta)
     if (selfIndex < 0)
         return false;
 
-    // 同日同组（date+todo）条目在 m_items 中的下标序列，交换相邻两项
+    // 同日条目在 m_items 中的下标序列，交换相邻两项
     const CalendarItem self = m_items.at(selfIndex);
     QVector<int> group;
     for (int i = 0; i < m_items.size(); ++i) {
-        const CalendarItem &it = m_items.at(i);
-        if (it.date == self.date && it.todo == self.todo)
+        if (m_items.at(i).date == self.date)
             group.append(i);
     }
     const int target = group.indexOf(selfIndex);
@@ -208,12 +180,12 @@ bool CalendarStore::moveItem(const QString &id, int delta)
     return true;
 }
 
-void CalendarStore::reorderItems(const QDate &date, bool todo, const QStringList &orderedIds)
+void CalendarStore::reorderItems(const QDate &date, const QStringList &orderedIds)
 {
-    // 取出该组现有序列（保持 m_items 相对顺序），按 orderedIds 重排
+    // 取出该日现有序列（保持 m_items 相对顺序），按 orderedIds 重排
     QList<CalendarItem> group;
     for (const CalendarItem &it : m_items)
-        if (it.date == date && it.todo == todo)
+        if (it.date == date)
             group << it;
 
     QList<CalendarItem> reordered;
@@ -230,7 +202,7 @@ void CalendarStore::reorderItems(const QDate &date, bool todo, const QStringList
     // 写回：遍历 m_items，命中组内位置时用重排后的序列逐个替换
     int cursor = 0;
     for (CalendarItem &it : m_items) {
-        if (it.date == date && it.todo == todo && cursor < reordered.size())
+        if (it.date == date && cursor < reordered.size())
             it = reordered.at(cursor++);
     }
     save();
@@ -347,7 +319,6 @@ void CalendarStore::toJson(QJsonArray *items, QJsonArray *categories) const
         QJsonObject o;
         o.insert("id", it.id);
         o.insert("date", it.date.toString(Qt::ISODate));
-        o.insert("todo", it.todo);
         o.insert("text", it.text);
         o.insert("category", it.categoryId);
         o.insert("important", it.important);
@@ -367,12 +338,13 @@ void CalendarStore::fromJson(const QJsonArray &categories, const QJsonArray &ite
         if (!cat.id.isEmpty() && !cat.name.isEmpty() && cat.color.isValid())
             m_categories << cat;
     }
+    // 注：旧版（T-042）条目带 todo 字段区分日程/待办，T-043 已合并为单一
+    // 列表，读取时忽略该字段
     for (const QJsonValue &v : items) {
         const QJsonObject o = v.toObject();
         CalendarItem it;
         it.id = o.value("id").toString();
         it.date = QDate::fromString(o.value("date").toString(), Qt::ISODate);
-        it.todo = o.value("todo").toBool();
         it.text = o.value("text").toString();
         it.categoryId = o.value("category").toString();
         it.important = o.value("important").toBool();

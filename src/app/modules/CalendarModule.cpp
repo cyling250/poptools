@@ -24,9 +24,8 @@ void CalendarModule::init(AppServices &services)
     m_store = services.calendarStore;
     Q_ASSERT(m_store && "组合根必须先创建共享 CalendarStore 再装配模块");
 
-    // 设置页保存后的外观/行为重应用
-    connect(&services, &AppServices::settingsChanged, this,
-            &CalendarModule::onSettingsChanged);
+    // 设置页保存后：外观重应用 + 按「显示桌面日历」开关显隐
+    connect(&services, &AppServices::settingsChanged, this, &CalendarModule::onSettingsChanged);
 
     // 迷你条的数据刷新：数据变化 + 每分钟（跨天自动换内容）
     connect(m_store, &CalendarStore::changed, this, &CalendarModule::refreshMini);
@@ -35,13 +34,10 @@ void CalendarModule::init(AppServices &services)
     connect(minuteTimer, &QTimer::timeout, this, &CalendarModule::refreshMini);
     minuteTimer->start();
 
-    // 托盘菜单（排在既有功能模块之后）
-    services.addTrayAction(QStringLiteral("桌面日历"), [this] { toggleWindow(); });
-
-    // 开机自启后自动显示（组合根托盘 show 后由事件循环触发，晚于窗口系统就绪）
-    if (Settings::instance().calendarShowOnStartup())
+    // 设置开启时随应用启动显示（窗口在事件循环就绪后创建，桌面 Explorer 已就绪）
+    if (Settings::instance().calendarEnabled())
         QTimer::singleShot(0, QCoreApplication::instance(),
-                           [this] { ensureWindow()->show(); });
+                           [this] { applyVisibility(); });
 }
 
 void CalendarModule::shutdown()
@@ -62,18 +58,21 @@ CalendarWindow *CalendarModule::ensureWindow()
     return m_window;
 }
 
-void CalendarModule::toggleWindow()
+void CalendarModule::applyVisibility()
 {
-    CalendarWindow *window = ensureWindow();
-    if (window->isVisible()) {
-        window->hide();
-        return;
+    if (Settings::instance().calendarEnabled()) {
+        CalendarWindow *window = ensureWindow();
+        if (m_mini && m_mini->isVisible())
+            m_mini->hide(); // 从迷你条唤起完整窗口时收起迷你条
+        window->show();
+        // 不 raise()：贴底窗口必须待在一切普通窗口之下，
+        // 显示后由贴底守护定时器归位
+    } else {
+        if (m_window)
+            m_window->hide();
+        if (m_mini)
+            m_mini->hide();
     }
-    if (m_mini && m_mini->isVisible())
-        m_mini->hide(); // 从迷你条唤起完整窗口时收起迷你条
-    window->show();
-    window->raise();
-    window->activateWindow();
 }
 
 void CalendarModule::showMini()
@@ -89,22 +88,19 @@ void CalendarModule::showMini()
     const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
     if (!m_mini->isVisible())
         m_mini->move(avail.right() - m_mini->width() - 10, avail.top() + 10);
-    m_mini->show();
-    m_mini->raise();
+    m_mini->show(); // 不 raise()：贴底窗口不得抬升
 }
 
 void CalendarModule::showFullFromMini()
 {
     if (m_mini)
         m_mini->hide();
-    CalendarWindow *window = ensureWindow();
-    window->show();
-    window->raise();
-    window->activateWindow();
+    applyVisibility(); // 与设置开关保持一致（开着才显示）
 }
 
 void CalendarModule::onSettingsChanged()
 {
+    applyVisibility();
     if (m_window)
         m_window->applySettings();
     if (m_mini)

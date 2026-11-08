@@ -1,5 +1,6 @@
 #include "CalendarMiniWidget.h"
 
+#include "DesktopPin.h"
 #include "ItemDelegate.h"
 #include "core/calendar/CalendarStore.h"
 #include "core/settings/Settings.h"
@@ -13,6 +14,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -41,8 +43,7 @@ CalendarMiniWidget::CalendarMiniWidget(CalendarStore *store, QWidget *parent)
 {
     setObjectName("calendarMini");
     setWindowIcon(QIcon(":/app_icon.svg"));
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint
-                   | Qt::WindowStaysOnTopHint);
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
     setFixedWidth(kMiniWidth);
@@ -125,34 +126,31 @@ void CalendarMiniWidget::refresh()
                                   zhLocale.toString(today, QStringLiteral("dddd"))));
 
     m_list->clear();
-    const QList<CalendarItem> todos = m_store->itemsForDate(today, true);
+    const QList<CalendarItem> items = m_store->itemsForDate(today);
     // 未完成在前，完成垫底；各按存储顺序
-    for (const CalendarItem &it : todos) {
+    for (const CalendarItem &it : items) {
         if (it.done)
             continue;
         auto *row = new QListWidgetItem(it.text, m_list);
         row->setData(itemroles::ItemId, it.id);
         row->setData(itemroles::CategoryColor, m_store->categoryColor(it.categoryId));
         row->setData(itemroles::Important, it.important);
-        row->setData(itemroles::Todo, true);
         row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
         row->setCheckState(Qt::Unchecked);
     }
-    for (const CalendarItem &it : todos) {
+    for (const CalendarItem &it : items) {
         if (!it.done)
             continue;
         auto *row = new QListWidgetItem(it.text, m_list);
         row->setData(itemroles::ItemId, it.id);
         row->setData(itemroles::CategoryColor, m_store->categoryColor(it.categoryId));
         row->setData(itemroles::Important, it.important);
-        row->setData(itemroles::Todo, true);
         row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
         row->setCheckState(Qt::Checked);
     }
 
-    if (todos.isEmpty()) {
-        auto *row = new QListWidgetItem(QStringLiteral("今日无待办 🌿"), m_list);
-        row->setData(itemroles::Todo, false);
+    if (items.isEmpty()) {
+        auto *row = new QListWidgetItem(QStringLiteral("今日无日程 🌿"), m_list);
         row->setFlags(Qt::ItemIsEnabled);
         row->setSizeHint(QSize(0, 40));
     }
@@ -197,6 +195,22 @@ void CalendarMiniWidget::applyTheme()
              m_accent.name(QColor::HexRgb)));
 }
 
+void CalendarMiniWidget::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    // 贴底（顶层 + Z 序紧贴桌面，显示完成后延迟执行）+ 1s 守护
+    if (!m_zGuard) {
+        m_zGuard = new QTimer(this);
+        m_zGuard->setInterval(1000);
+        connect(m_zGuard, &QTimer::timeout, this,
+                [this] { desktoppin::glueToDesktop(this); });
+    }
+    QTimer::singleShot(0, this, [this] {
+        desktoppin::glueToDesktop(this);
+        m_zGuard->start();
+    });
+}
+
 void CalendarMiniWidget::paintEvent(QPaintEvent * /*event*/)
 {
     QPainter p(this);
@@ -217,6 +231,11 @@ bool CalendarMiniWidget::nativeEvent(const QByteArray &eventType, void *message,
 #ifdef Q_OS_WIN
     if (eventType == "windows_generic_MSG") {
         MSG *msg = static_cast<MSG *>(message);
+        if (msg->message == WM_MOUSEACTIVATE) {
+            // 贴底小组件：点击不激活（避免抬升到正常窗口之上）
+            *result = MA_NOACTIVATE;
+            return true;
+        }
         if (msg->message == WM_NCHITTEST) {
             const qreal dpr = devicePixelRatioF();
             const QPoint globalPhys(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));

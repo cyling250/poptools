@@ -14,8 +14,8 @@
 
 namespace poptools {
 
-ItemEditDialog::ItemEditDialog(CalendarStore *store, const QDate &date, bool todo,
-                               const QString &existingId, QWidget *parent)
+ItemEditDialog::ItemEditDialog(CalendarStore *store, const QString &existingId,
+                               QWidget *parent)
     : QDialog(parent)
     , m_store(store)
     , m_itemId(existingId)
@@ -23,7 +23,7 @@ ItemEditDialog::ItemEditDialog(CalendarStore *store, const QDate &date, bool tod
     setObjectName("itemEditDialog"); // P-022：自定义类 QSS 一律 ID 选择器
     setModal(true);
     setMinimumWidth(340);
-    setWindowTitle(todo ? QStringLiteral("待办") : QStringLiteral("日程"));
+    setWindowTitle(QStringLiteral("日程"));
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->setSpacing(10);

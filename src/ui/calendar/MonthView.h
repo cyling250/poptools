@@ -27,6 +27,10 @@ public:
     // 当月各日期的事项圆点（每格最多画 3 个）
     void setEventDots(const QHash<QDate, QVector<QColor>> &dots);
 
+    // 某日期格子的矩形（本控件坐标系）；不在当前网格返回无效矩形
+    // （双击原位添加的内联输入框定位用）
+    QRect cellRectFor(const QDate &date) const;
+
     struct Palette
     {
         QColor bg;          // 格子底（=窗口背景）
