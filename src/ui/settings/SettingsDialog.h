@@ -11,6 +11,7 @@ class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QSlider;
+class QSpinBox;
 class QStackedWidget;
 class QToolButton;
 
@@ -40,6 +41,9 @@ private:
     QWidget *buildCapturePage();
     QWidget *buildTranslatePage();
     QWidget *buildCalendarPage();
+    QWidget *buildOrganizerPage();
+    QWidget *buildMonitorPage();
+    QWidget *buildGoodyPage();
     void updateAutoStartButton();
     void updateCalendarColorButtons();
     QStringList parseDomains() const;                  // 逗号/顿号分隔的领域输入 → 列表
@@ -71,6 +75,8 @@ private:
     QCheckBox *m_calShowCheck = nullptr;
     QSlider *m_calOpacity = nullptr;
     QLabel *m_calOpacityValue = nullptr;
+    QSlider *m_calTextOpacity = nullptr;
+    QLabel *m_calTextOpacityValue = nullptr;
     QPushButton *m_calBgBtn = nullptr;
     QPushButton *m_calAccentBtn = nullptr;
     QLabel *m_calBgSwatch = nullptr;
@@ -78,6 +84,25 @@ private:
     QColor m_calBg;
     QColor m_calAccent;
     CalendarStore *m_calendarStore = nullptr;
+
+    // 桌面收纳盒
+    QCheckBox *m_orgShowCheck = nullptr;
+
+    // 活动监控
+    QCheckBox *m_monEnabledCheck = nullptr;
+    QCheckBox *m_monMaskCheck = nullptr;
+    QCheckBox *m_monOcrCheck = nullptr;
+    QSpinBox *m_monIdleSpin = nullptr;
+    QSpinBox *m_monRetentionSpin = nullptr;
+
+    // Goody 管家
+    QLineEdit *m_gdyKeyEdit = nullptr;
+    QLineEdit *m_gdyUrlEdit = nullptr;
+    QLineEdit *m_gdyModelEdit = nullptr;
+    QComboBox *m_gdyPermCombo = nullptr;
+    QLineEdit *m_gdyTimeEdit = nullptr;
+    QCheckBox *m_gdyAutoCheck = nullptr;
+    QPlainTextEdit *m_gdyAppendix = nullptr;
 };
 
 } // namespace poptools

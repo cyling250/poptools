@@ -47,10 +47,10 @@ private:
     QLabel *m_dateLabel = nullptr;
     QListWidget *m_list = nullptr;
     QColor m_bg = QColor("#FFFFFF");
+    int m_textOpacity = 100;
     QColor m_accent = QColor(0x2B, 0x6F, 0xF2);
     bool m_darkText = false;
     QDate m_loadedForDate;
-    QTimer *m_zGuard = nullptr; // 贴底守护（Z 序被搅动时归位）
 };
 
 } // namespace poptools

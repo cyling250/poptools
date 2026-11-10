@@ -20,6 +20,7 @@ temp_scripts/
 *.log
 *.tmp
 *.user
+.tmp-xhs/
 
 # ===== IDE =====
 .idea/

@@ -77,9 +77,12 @@ public:
     // 是否显示桌面日历（设置页开关；勾选即启动时自动显示，取消即隐藏）
     bool calendarEnabled() const;
     void setCalendarEnabled(bool on);
-    // 整窗不透明度 20-100（%，默认 95）
+    // 整窗不透明度拆分两路：背景（卡片底色 alpha）与文字（文字/强调色
+    // alpha），分别 20-100 / 30-100（默认 95 / 100）
     int calendarOpacity() const;
     void setCalendarOpacity(int percent);
+    int calendarTextOpacity() const;
+    void setCalendarTextOpacity(int percent);
     // 背景色 / 强调色（默认白底 + 应用主色 #2B6FF2）
     QColor calendarBgColor() const;
     void setCalendarBgColor(const QColor &color);
@@ -90,6 +93,62 @@ public:
     void setCalendarGeometry(const QByteArray &state);
     QByteArray calendarSplitter() const;
     void setCalendarSplitter(const QByteArray &state);
+
+    // ---- 桌面收纳盒 ----
+    // 是否显示桌面收纳盒（设置页开关；勾选即启动时自动出现）
+    bool organizerEnabled() const;
+    void setOrganizerEnabled(bool on);
+
+    // ---- 活动监控 ----
+    // 总开关（默认关闭；开启即授权键盘键入记录 + 窗口时间线 + OCR 快照，
+    // 钩子常驻，红线2豁免条款见 docs/handover.md）
+    bool monitorEnabled() const;
+    void setMonitorEnabled(bool on);
+    // 密码框自动打码（焦点在密码框时记 ● 占位，不落明文）
+    bool monitorMaskPasswords() const;
+    void setMonitorMaskPasswords(bool on);
+    // 输入空闲阈值（秒）：超过即判定离开，时间线段以最后输入时刻收尾
+    int monitorIdleThresholdSec() const;
+    void setMonitorIdleThresholdSec(int sec);
+    // 日志保留天数（0 = 永久；过期日目录随启动清理）
+    int monitorRetentionDays() const;
+    void setMonitorRetentionDays(int days);
+    // 中文上屏 OCR 快照（输入法上屏→截前台窗口→OCR→记增量→删图）
+    bool monitorOcrSnapshot() const;
+    void setMonitorOcrSnapshot(bool on);
+
+    // ---- Goody 管家（内置大模型助手） ----
+    // API 配置（OpenAI 兼容，默认 DeepSeek；Key 只存本机 ini）
+    QString assistantApiKey() const;
+    void setAssistantApiKey(const QString &key);
+    QString assistantApiBaseUrl() const;
+    void setAssistantApiBaseUrl(const QString &url);
+    QString assistantApiModel() const;
+    void setAssistantApiModel(const QString &model);
+    // 呼出热键（默认 Ctrl+Alt+G：VK_G=0x47, MOD_CONTROL|MOD_ALT=0x0003）
+    quint32 assistantHotKeyVk() const;
+    quint32 assistantHotKeyModifiers() const;
+    void setAssistantHotKey(quint32 vk, quint32 modifiers);
+    // 每日工作记录生成时刻（"HH:mm"，默认 22:00）与自动开关
+    QString assistantSummaryTime() const;
+    void setAssistantSummaryTime(const QString &hhmm);
+    bool assistantAutoSummarize() const;
+    void setAssistantAutoSummarize(bool on);
+    // 权限模式："ask"逐条确认 / "smart"智能自动 / "auto"全自动
+    QString assistantPermMode() const;
+    void setAssistantPermMode(const QString &mode);
+    // "总是允许此类"工具名清单（用户在确认卡片勾选后累积）
+    QStringList assistantAlwaysAllowTools() const;
+    void setAssistantAlwaysAllowTools(const QStringList &tools);
+    // Smart 模式的 shell 安全命令前缀白名单
+    QStringList assistantShellAllowPrefixes() const;
+    void setAssistantShellAllowPrefixes(const QStringList &prefixes);
+    // 人格附言（用户追加到 Goody 系统提示词末尾）
+    QString assistantPersonaAppendix() const;
+    void setAssistantPersonaAppendix(const QString &text);
+    // 聊天窗口几何（base64 序列化；空 = 未记忆）
+    QByteArray assistantGeometry() const;
+    void setAssistantGeometry(const QByteArray &state);
 
 private:
     Settings();

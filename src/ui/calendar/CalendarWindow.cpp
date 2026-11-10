@@ -1,6 +1,6 @@
 #include "CalendarWindow.h"
 
-#include "DesktopPin.h"
+#include "ui/shared/DesktopStack.h"
 #include "ItemDelegate.h"
 #include "ItemEditDialog.h"
 #include "MonthView.h"
@@ -332,8 +332,8 @@ void CalendarWindow::setEditMode(bool on)
         return;
     hideInlineAdd();
     m_editMode = on;
-    if (!on && m_zGuard)
-        m_zGuard->stop(); // 编辑期间暂停贴底守护
+    if (on)
+        desktopstack::detach(this); // 编辑期间浮为置顶，退出贴桌队列
     applyWindowFlags();
     if (on) {
         raise();
@@ -345,20 +345,13 @@ void CalendarWindow::setEditMode(bool on)
     update();
 }
 
-// 固定模式贴底 + 1s 守护（Z 序被搅动时归位；就位时零开销）
+// 固定模式贴底：Z 序经 DesktopStack 钉在桌面之上（1s 全局守护归位；
+// 与收纳盒层共用协调器，保证收纳盒层稳定在日历层之上）
 void CalendarWindow::glueIfFixed()
 {
     if (m_editMode || !isVisible())
         return;
-    if (desktoppin::glueToDesktop(this) && !m_zGuard) {
-        m_zGuard = new QTimer(this);
-        m_zGuard->setInterval(1000);
-        connect(m_zGuard, &QTimer::timeout, this, [this] {
-            if (!m_editMode)
-                desktoppin::glueToDesktop(this);
-        });
-        m_zGuard->start();
-    }
+    desktopstack::attach(this, desktopstack::Layer::Calendar);
 }
 
 void CalendarWindow::updateModeUi()
@@ -379,8 +372,10 @@ void CalendarWindow::updateModeUi()
 void CalendarWindow::applySettings()
 {
     applyWindowFlags();
-    setWindowOpacity(Settings::instance().calendarOpacity() / 100.0);
+    // 整窗透明度拆分：背景走卡片底色 alpha，文字走文字色 alpha
     m_bg = Settings::instance().calendarBgColor();
+    m_bg.setAlpha(255 * Settings::instance().calendarOpacity() / 100);
+    m_textOpacity = Settings::instance().calendarTextOpacity();
     m_accent = Settings::instance().calendarAccentColor();
     m_darkText = darkTextFor(m_bg);
     applyTheme();
@@ -389,20 +384,27 @@ void CalendarWindow::applySettings()
 
 void CalendarWindow::applyTheme()
 {
-    const QColor text = m_darkText ? QColor("#000000") : QColor("#FFFFFF");
-    const QColor subText = m_darkText ? QColor(0, 0, 0, 130) : QColor(255, 255, 255, 150);
+    // 文字系颜色统一乘文字透明度系数（背景透明度只作用于底色/底纹）
+    const auto textTone = [this](const QColor &c) {
+        QColor r = c;
+        r.setAlpha(r.alpha() * m_textOpacity / 100);
+        return r;
+    };
+    const QColor text = textTone(m_darkText ? QColor("#000000") : QColor("#FFFFFF"));
+    const QColor subText = textTone(m_darkText ? QColor(0, 0, 0, 130) : QColor(255, 255, 255, 150));
     const QColor line = m_darkText ? QColor(0, 0, 0, 28) : QColor(255, 255, 255, 36);
     const QColor inputBg = m_darkText ? QColor(255, 255, 255, 120) : QColor(0, 0, 0, 60);
     const QColor btnBorder = m_darkText ? QColor(0, 0, 0, 40) : QColor(255, 255, 255, 55);
+    const QColor accent = textTone(m_accent);
 
     // MonthView 配色
     MonthView::Palette p;
     p.bg = m_bg;
     p.text = text;
     p.subText = subText;
-    p.dimText = m_darkText ? QColor(0, 0, 0, 60) : QColor(255, 255, 255, 90);
-    p.festival = QColor(0xE0, 0x53, 0x3D);
-    p.accent = m_accent;
+    p.dimText = textTone(m_darkText ? QColor(0, 0, 0, 60) : QColor(255, 255, 255, 90));
+    p.festival = textTone(QColor(0xE0, 0x53, 0x3D));
+    p.accent = accent;
     p.line = line;
     m_monthView->setViewPalette(p);
 
@@ -410,11 +412,10 @@ void CalendarWindow::applyTheme()
     ItemDelegate::Palette dp;
     dp.text = text;
     dp.subText = subText;
-    dp.accent = m_accent;
+    dp.accent = accent;
     static_cast<ItemDelegate *>(m_itemList->itemDelegate())->setDelegatePalette(dp);
 
     // 控件样式（自定义类一律 ID 选择器，P-022；子控件用类型选择器）
-    const QString accent = m_accent.name(QColor::HexRgb);
     setStyleSheet(QStringLiteral(
         "QWidget#calendarTitleBar { background: transparent; }"
         "QLabel { color: %1; background: transparent; }"
@@ -438,8 +439,8 @@ void CalendarWindow::applyTheme()
         "  font-size: 12px; }"
         "QSplitter::handle { background: %5; }"
         "QSplitter::handle:hover { background: %3; }")
-        .arg(text.name(QColor::HexRgb), btnBorder.name(QColor::HexRgb), accent,
-             inputBg.name(QColor::HexRgb), line.name(QColor::HexRgb)));
+        .arg(text.name(QColor::HexArgb), btnBorder.name(QColor::HexArgb), accent.name(QColor::HexArgb),
+             inputBg.name(QColor::HexArgb), line.name(QColor::HexArgb)));
 }
 
 // ---------- 数据刷新 ----------
@@ -702,8 +703,7 @@ void CalendarWindow::hideEvent(QHideEvent *event)
     // 几何与分栏状态持久化（窗口始终为顶层，几何永远有效）
     Settings::instance().setCalendarGeometry(saveGeometry());
     Settings::instance().setCalendarSplitter(m_hSplit->saveState().toBase64());
-    if (m_zGuard)
-        m_zGuard->stop();
+    desktopstack::detach(this);
     QWidget::hideEvent(event);
 }
 

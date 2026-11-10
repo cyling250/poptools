@@ -6,6 +6,7 @@
 #include <QTimer>
 
 #include "../AppServices.h"
+#include "core/assistant/ToolRegistry.h"
 #include "core/calendar/CalendarStore.h"
 #include "core/settings/Settings.h"
 #include "ui/calendar/CalendarMiniWidget.h"
@@ -38,6 +39,30 @@ void CalendarModule::init(AppServices &services)
     if (Settings::instance().calendarEnabled())
         QTimer::singleShot(0, QCoreApplication::instance(),
                            [this] { applyVisibility(); });
+
+    // Goody 工具贡献：模型可开关桌面日历（写设置后走既有显隐通路）
+    if (services.toolRegistry) {
+        ToolDef d;
+        d.name = QStringLiteral("app.calendar_show");
+        d.readOnly = true;
+        d.description = QStringLiteral("显示或隐藏 PopTools 桌面日历。");
+        d.parameters = QJsonObject{
+            {"type", QStringLiteral("object")},
+            {"properties",
+             QJsonObject{{"show", QJsonObject{{"type", QStringLiteral("boolean")},
+                                              {"description", QStringLiteral("true=显示，false=隐藏")}}}}},
+            {"required", QJsonArray{QStringLiteral("show")}},
+        };
+        d.fn = [this](const QJsonObject &args, const std::function<void(QJsonObject)> &done) {
+            const bool show = args.value(QStringLiteral("show")).toBool(true);
+            Settings::instance().setCalendarEnabled(show);
+            QTimer::singleShot(0, QCoreApplication::instance(),
+                               [this] { applyVisibility(); });
+            done(QJsonObject{{"ok", true},
+                             {"visible", show}});
+        };
+        services.toolRegistry->registerTool(d);
+    }
 }
 
 void CalendarModule::shutdown()

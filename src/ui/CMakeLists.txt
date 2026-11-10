@@ -13,6 +13,20 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
+# ---- 共享窗口技术（贴桌 Z 序协调器；日历/收纳盒共用） ----
+add_library(poptools_ui_shared STATIC
+    shared/DesktopStack.cpp
+    shared/DesktopStack.h
+    shared/DesktopPin.h
+)
+target_link_libraries(poptools_ui_shared PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+target_include_directories(poptools_ui_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # ---- 截图功能：画布窗口 + 控制器 + 工具栏 + 标注工具 ----
 add_library(poptools_ui_capture STATIC
     capture/CaptureWindow.cpp
@@ -95,11 +109,39 @@ add_library(poptools_ui_calendar STATIC
 )
 target_link_libraries(poptools_ui_calendar PUBLIC
     poptools_core
+    poptools_ui_shared
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
 )
 target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# ---- 桌面收纳盒功能（贴桌分类卡片；DesktopPin.h 为贴桌共享头） ----
+add_library(poptools_ui_box STATIC
+    box/BoxWindow.cpp
+    box/BoxWindow.h
+)
+target_link_libraries(poptools_ui_box PUBLIC
+    poptools_core
+    poptools_ui_shared
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# ---- Goody 管家聊天窗（无边框工具窗；会话/工具在 core/assistant） ----
+add_library(poptools_ui_goody STATIC
+    goody/GoodyWindow.cpp
+    goody/GoodyWindow.h
+)
+target_link_libraries(poptools_ui_goody PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+target_include_directories(poptools_ui_goody PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
 add_library(poptools_ui_settings STATIC
@@ -123,5 +165,8 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_pin
     poptools_ui_translate
     poptools_ui_calendar
+    poptools_ui_box
+    poptools_ui_goody
     poptools_ui_settings
+    poptools_ui_shared
 )

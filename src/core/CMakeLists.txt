@@ -9,6 +9,32 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg)
 
 add_library(poptools_core STATIC
+    assistant/ChatSession.cpp
+    assistant/ChatSession.h
+    assistant/DailyAggregator.cpp
+    assistant/DailyAggregator.h
+    assistant/DailyRecordJob.cpp
+    assistant/DailyRecordJob.h
+    assistant/FsTool.cpp
+    assistant/FsTool.h
+    assistant/LlmClient.cpp
+    assistant/LlmClient.h
+    assistant/McpStdioClient.cpp
+    assistant/McpStdioClient.h
+    assistant/MemoryStore.cpp
+    assistant/MemoryStore.h
+    assistant/MonitorQueryTool.cpp
+    assistant/MonitorQueryTool.h
+    assistant/PermissionManager.cpp
+    assistant/PermissionManager.h
+    assistant/Scheduler.cpp
+    assistant/Scheduler.h
+    assistant/ShellTool.cpp
+    assistant/ShellTool.h
+    assistant/ToolRegistry.cpp
+    assistant/ToolRegistry.h
+    assistant/WorkingMemory.cpp
+    assistant/WorkingMemory.h
     annotation/AnnotationCanvas.cpp
     annotation/AnnotationCanvas.h
     annotation/AnnotationItem.h
@@ -19,6 +45,10 @@ add_library(poptools_core STATIC
     calendar/LunarCalendar.h
     calendar/CalendarStore.cpp
     calendar/CalendarStore.h
+    box/BoxStore.cpp
+    box/BoxStore.h
+    box/IconExtractor.cpp
+    box/IconExtractor.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp
@@ -30,6 +60,22 @@ add_library(poptools_core STATIC
     hotkey/HotKeyNames.h
     hotkey/GlobalMouseHook.cpp
     hotkey/GlobalMouseHook.h
+    monitor/ActivityStore.cpp
+    monitor/ActivityStore.h
+    monitor/ForegroundTracker.cpp
+    monitor/ForegroundTracker.h
+    monitor/GlobalKeyboardHook.cpp
+    monitor/GlobalKeyboardHook.h
+    monitor/ImeCommitDetector.cpp
+    monitor/ImeCommitDetector.h
+    monitor/InputActivityMonitor.cpp
+    monitor/InputActivityMonitor.h
+    monitor/KeyboardTextComposer.cpp
+    monitor/KeyboardTextComposer.h
+    monitor/PasswordFieldGuard.cpp
+    monitor/PasswordFieldGuard.h
+    monitor/SnapshotOcrPipeline.cpp
+    monitor/SnapshotOcrPipeline.h
     ocr/RapidOcrService.cpp
     ocr/RapidOcrService.h
     settings/Settings.cpp
@@ -49,9 +95,10 @@ target_link_libraries(poptools_core PUBLIC
     Qt6::Network
 )
 
-# Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）
+# Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）、
+# 收纳盒图标提取（shell32：SHGetFileInfo/SHGetImageList）
 if(WIN32)
-    target_link_libraries(poptools_core PRIVATE user32 dwmapi)
+    target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32)
 endif()
 
 # ---- 二维码识别（可选）：zxing-cpp 静态编入（源码由 scripts/install_zxing.py

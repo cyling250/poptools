@@ -1,9 +1,12 @@
 #include "CaptureModule.h"
 
+#include <QCoreApplication>
 #include <QPixmap>
 #include <QRect>
+#include <QTimer>
 
 #include "../AppServices.h"
+#include "core/assistant/ToolRegistry.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
 #include "ui/capture/CaptureWindow.h"
@@ -46,6 +49,24 @@ void CaptureModule::init(AppServices &services)
             if (!m_window->isVisible())
                 m_window->startCapture();
         });
+
+    // Goody 工具贡献：模型可发起截图（UI 操作延迟到事件循环，与热键同纪律）
+    if (services.toolRegistry) {
+        ToolDef d;
+        d.name = QStringLiteral("app.capture");
+        d.readOnly = true;
+        d.description = QStringLiteral("启动 PopTools 截图（进入全屏选区模式）。");
+        d.parameters = QJsonObject{{"type", QStringLiteral("object")},
+                                   {"properties", QJsonObject{}}};
+        d.fn = [this](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
+            QTimer::singleShot(0, QCoreApplication::instance(), [this] {
+                if (!m_window->isVisible())
+                    m_window->startCapture();
+            });
+            done(QJsonObject{{"ok", true}, {"note", QStringLiteral("已启动截图选区模式")}});
+        };
+        services.toolRegistry->registerTool(d);
+    }
 }
 
 void CaptureModule::shutdown()

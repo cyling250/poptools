@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QTime>
 
 namespace poptools {
 
@@ -238,6 +239,19 @@ void Settings::setCalendarOpacity(int percent)
     syncChecked();
 }
 
+int Settings::calendarTextOpacity() const
+{
+    // 文字/强调色 alpha 系数（背景透明度分离后新增）；过低文字难辨认
+    const int v = m_s.value("calendar/textOpacity", 100).toInt();
+    return qBound(30, v, 100);
+}
+
+void Settings::setCalendarTextOpacity(int percent)
+{
+    m_s.setValue("calendar/textOpacity", qBound(30, percent, 100));
+    syncChecked();
+}
+
 QColor Settings::calendarBgColor() const
 {
     const QColor c(m_s.value("calendar/bgColor", "#FFFFFF").toString());
@@ -284,6 +298,220 @@ QByteArray Settings::calendarSplitter() const
 void Settings::setCalendarSplitter(const QByteArray &state)
 {
     m_s.setValue("calendar/splitter", state);
+    syncChecked();
+}
+
+// ---- 桌面收纳盒 ----
+
+bool Settings::organizerEnabled() const
+{
+    return m_s.value("organizer/enabled", false).toBool();
+}
+
+void Settings::setOrganizerEnabled(bool on)
+{
+    m_s.setValue("organizer/enabled", on);
+    syncChecked();
+}
+
+// ---- 活动监控 ----
+
+bool Settings::monitorEnabled() const
+{
+    // 默认关闭：键入记录涉及高隐私，必须用户显式授权
+    return m_s.value("monitor/enabled", false).toBool();
+}
+
+void Settings::setMonitorEnabled(bool on)
+{
+    m_s.setValue("monitor/enabled", on);
+    syncChecked();
+}
+
+bool Settings::monitorMaskPasswords() const
+{
+    return m_s.value("monitor/maskPasswords", true).toBool();
+}
+
+void Settings::setMonitorMaskPasswords(bool on)
+{
+    m_s.setValue("monitor/maskPasswords", on);
+    syncChecked();
+}
+
+int Settings::monitorIdleThresholdSec() const
+{
+    // 钳制 10-3600：过小把思考间隙算成离开，过大失去"离开"语义
+    const int v = m_s.value("monitor/idleThresholdSec", 120).toInt();
+    return qBound(10, v, 3600);
+}
+
+void Settings::setMonitorIdleThresholdSec(int sec)
+{
+    m_s.setValue("monitor/idleThresholdSec", qBound(10, sec, 3600));
+    syncChecked();
+}
+
+int Settings::monitorRetentionDays() const
+{
+    // 钳制 1-3650；0 需手改 INI 才能永久保留（设置页不给永久档，防误设）
+    const int v = m_s.value("monitor/retentionDays", 14).toInt();
+    return qBound(1, v, 3650);
+}
+
+void Settings::setMonitorRetentionDays(int days)
+{
+    m_s.setValue("monitor/retentionDays", qBound(1, days, 3650));
+    syncChecked();
+}
+
+bool Settings::monitorOcrSnapshot() const
+{
+    return m_s.value("monitor/ocrSnapshot", true).toBool();
+}
+
+void Settings::setMonitorOcrSnapshot(bool on)
+{
+    m_s.setValue("monitor/ocrSnapshot", on);
+    syncChecked();
+}
+
+// ---- Goody 管家 ----
+
+QString Settings::assistantApiKey() const
+{
+    return m_s.value("assistant/apiKey", "").toString();
+}
+
+void Settings::setAssistantApiKey(const QString &key)
+{
+    m_s.setValue("assistant/apiKey", key);
+    syncChecked();
+}
+
+QString Settings::assistantApiBaseUrl() const
+{
+    return m_s.value("assistant/apiBaseUrl", "https://api.deepseek.com/v1").toString();
+}
+
+void Settings::setAssistantApiBaseUrl(const QString &url)
+{
+    m_s.setValue("assistant/apiBaseUrl", url);
+    syncChecked();
+}
+
+QString Settings::assistantApiModel() const
+{
+    // 默认 deepseek-v4-flash（与翻译模块同款）：调试期便宜快，用户可改 deepseek-chat
+    return m_s.value("assistant/apiModel", "deepseek-v4-flash").toString();
+}
+
+void Settings::setAssistantApiModel(const QString &model)
+{
+    m_s.setValue("assistant/apiModel", model);
+    syncChecked();
+}
+
+quint32 Settings::assistantHotKeyVk() const
+{
+    const quint32 vk = m_s.value("assistant/hotkeyVk", 0x47 /* G */).toUInt();
+    return (vk >= 0x01 && vk <= 0xFE) ? vk : 0x47;
+}
+
+quint32 Settings::assistantHotKeyModifiers() const
+{
+    return m_s.value("assistant/hotkeyMod", 0x0003 /* MOD_CONTROL|MOD_ALT */).toUInt();
+}
+
+void Settings::setAssistantHotKey(quint32 vk, quint32 modifiers)
+{
+    m_s.setValue("assistant/hotkeyVk", vk);
+    m_s.setValue("assistant/hotkeyMod", modifiers);
+    syncChecked();
+}
+
+QString Settings::assistantSummaryTime() const
+{
+    const QString v = m_s.value("assistant/summaryTime", "22:00").toString();
+    // 非法手改回退默认（QTime 严格解析 HH:mm）
+    return QTime::fromString(v, "HH:mm").isValid() ? v : QStringLiteral("22:00");
+}
+
+void Settings::setAssistantSummaryTime(const QString &hhmm)
+{
+    m_s.setValue("assistant/summaryTime", hhmm);
+    syncChecked();
+}
+
+bool Settings::assistantAutoSummarize() const
+{
+    return m_s.value("assistant/autoSummarize", true).toBool();
+}
+
+void Settings::setAssistantAutoSummarize(bool on)
+{
+    m_s.setValue("assistant/autoSummarize", on);
+    syncChecked();
+}
+
+QString Settings::assistantPermMode() const
+{
+    const QString v = m_s.value("assistant/permMode", "ask").toString();
+    return (v == "smart" || v == "auto") ? v : QStringLiteral("ask");
+}
+
+void Settings::setAssistantPermMode(const QString &mode)
+{
+    m_s.setValue("assistant/permMode", mode);
+    syncChecked();
+}
+
+QStringList Settings::assistantAlwaysAllowTools() const
+{
+    return m_s.value("assistant/alwaysAllowTools", QStringList()).toStringList();
+}
+
+void Settings::setAssistantAlwaysAllowTools(const QStringList &tools)
+{
+    m_s.setValue("assistant/alwaysAllowTools", tools);
+    syncChecked();
+}
+
+QStringList Settings::assistantShellAllowPrefixes() const
+{
+    // Smart 模式默认白名单：只读性质的常用查询命令（降低确认打扰，
+    // 不是安全边界——白名单外命令仍逐条确认）
+    return m_s.value("assistant/shellAllowPrefixes",
+                     QStringList{"git status", "git log", "git diff", "dir", "ls",
+                                 "ipconfig", "ping", "systeminfo"})
+        .toStringList();
+}
+
+void Settings::setAssistantShellAllowPrefixes(const QStringList &prefixes)
+{
+    m_s.setValue("assistant/shellAllowPrefixes", prefixes);
+    syncChecked();
+}
+
+QString Settings::assistantPersonaAppendix() const
+{
+    return m_s.value("assistant/personaAppendix", "").toString();
+}
+
+void Settings::setAssistantPersonaAppendix(const QString &text)
+{
+    m_s.setValue("assistant/personaAppendix", text);
+    syncChecked();
+}
+
+QByteArray Settings::assistantGeometry() const
+{
+    return m_s.value("assistant/geometry").toByteArray();
+}
+
+void Settings::setAssistantGeometry(const QByteArray &state)
+{
+    m_s.setValue("assistant/geometry", state);
     syncChecked();
 }
 

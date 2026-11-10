@@ -10,8 +10,10 @@
 namespace poptools {
 
 class AppServices;
+class BoxStore;
 class CalendarStore;
 class RapidOcrService;
+class ToolRegistry;
 
 // ============================================================
 // 应用外壳（组合根）：系统托盘 + 共享服务装配 + 功能模块注册。
@@ -39,6 +41,8 @@ private:
     GlobalHotKey m_hotKey;              // 全局热键注册器（nativeEventFilter 由该类安装）
     RapidOcrService *m_ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
     CalendarStore *m_calendarStore = nullptr; // 桌面日历数据仓库（全局唯一）
+    BoxStore *m_boxStore = nullptr;    // 桌面收纳盒数据仓库（全局唯一）
+    ToolRegistry *m_toolRegistry = nullptr; // Goody 工具注册表（模块贡献能力入口）
     AppServices *m_services = nullptr;  // 共享服务与贡献点
     FeatureRegistry m_registry;         // 功能模块注册表
 };

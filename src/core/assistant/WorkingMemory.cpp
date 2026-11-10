@@ -1,0 +1,209 @@
+#include "WorkingMemory.h"
+
+#include <QDate>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QSaveFile>
+
+namespace poptools {
+
+WorkingMemory::WorkingMemory(const QString &baseDir, QObject *parent)
+    : QObject(parent)
+    , m_workDir(baseDir + QStringLiteral("/memory/working"))
+    , m_archiveDir(baseDir + QStringLiteral("/memory/archive"))
+{
+    loadAll();
+}
+
+void WorkingMemory::loadAll()
+{
+    m_tasks.clear();
+    QDir dir(m_workDir);
+    if (!dir.exists())
+        return;
+    const QFileInfoList files = dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files);
+    for (const QFileInfo &fi : files) {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+        if (o.value(QStringLiteral("status")).toString() != QLatin1String("open"))
+            continue; // 完成/异常态不装载
+        Task t;
+        t.id = o.value(QStringLiteral("id")).toString();
+        t.title = o.value(QStringLiteral("title")).toString();
+        t.goal = o.value(QStringLiteral("goal")).toString();
+        for (const QJsonValue &n : o.value(QStringLiteral("notes")).toArray())
+            t.notes << n.toString();
+        t.created = static_cast<qint64>(o.value(QStringLiteral("created")).toDouble());
+        t.updated = static_cast<qint64>(o.value(QStringLiteral("updated")).toDouble());
+        if (!t.id.isEmpty())
+            m_tasks << t;
+    }
+}
+
+QString WorkingMemory::makeId()
+{
+    return QStringLiteral("task_%1").arg(QDateTime::currentMSecsSinceEpoch() % 100000000, 8, 16, QLatin1Char('0'));
+}
+
+bool WorkingMemory::saveTask(const Task &t) const
+{
+    QDir().mkpath(m_workDir);
+    QJsonArray notes;
+    for (const QString &n : t.notes)
+        notes.append(n);
+    QSaveFile f(m_workDir + QLatin1Char('/') + t.id + QStringLiteral(".json"));
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    f.write(QJsonDocument(QJsonObject{
+                 {"version", 1},
+                 {"id", t.id},
+                 {"title", t.title},
+                 {"goal", t.goal},
+                 {"notes", notes},
+                 {"status", QStringLiteral("open")},
+                 {"created", double(t.created)},
+                 {"updated", double(t.updated)}})
+                .toJson(QJsonDocument::Compact));
+    return f.commit();
+}
+
+WorkingMemory::Task *WorkingMemory::find(const QString &id)
+{
+    for (Task &t : m_tasks)
+        if (t.id == id)
+            return &t;
+    return nullptr;
+}
+
+QJsonObject WorkingMemory::startTask(const QString &title, const QString &goal)
+{
+    const QString t = title.trimmed();
+    if (t.isEmpty())
+        return QJsonObject{{"ok", false}, {"error", QStringLiteral("标题为空")}};
+    // 缓存命中：标题包含匹配（"继续收纳盒" 命中 "收纳盒整理"）→ 续用
+    for (Task &task : m_tasks) {
+        if (task.title.contains(t, Qt::CaseInsensitive)
+            || t.contains(task.title, Qt::CaseInsensitive)) {
+            if (!goal.trimmed().isEmpty() && goal != task.goal)
+                task.notes << QStringLiteral("[目标更新] ") + goal.trimmed();
+            task.updated = QDateTime::currentMSecsSinceEpoch();
+            saveTask(task);
+            QJsonArray notes;
+            for (const QString &n : task.notes)
+                notes.append(n);
+            return QJsonObject{{"ok", true},
+                               {"continued", true},
+                               {"id", task.id},
+                               {"title", task.title},
+                               {"notes", notes},
+                               {"note", QStringLiteral("命中未结任务，已续用（避免重复开工）")}};
+        }
+    }
+    Task nt;
+    nt.id = makeId();
+    nt.title = t;
+    nt.goal = goal.trimmed();
+    nt.created = nt.updated = QDateTime::currentMSecsSinceEpoch();
+    m_tasks << nt;
+    saveTask(nt);
+    return QJsonObject{{"ok", true},
+                       {"continued", false},
+                       {"id", nt.id},
+                       {"title", nt.title}};
+}
+
+QJsonObject WorkingMemory::listTasks() const
+{
+    QJsonArray arr;
+    for (const Task &t : m_tasks) {
+        QJsonArray notes;
+        for (const QString &n : t.notes)
+            notes.append(n);
+        arr.append(QJsonObject{{"id", t.id},
+                               {"title", t.title},
+                               {"goal", t.goal},
+                               {"notes", notes},
+                               {"updated", double(t.updated)}});
+    }
+    return QJsonObject{{"ok", true}, {"tasks", arr}};
+}
+
+QJsonObject WorkingMemory::updateTask(const QString &id, const QString &note)
+{
+    Task *t = find(id);
+    if (!t)
+        return QJsonObject{{"ok", false}, {"error", QStringLiteral("任务不存在或已归档")}};
+    t->notes << note.trimmed();
+    t->updated = QDateTime::currentMSecsSinceEpoch();
+    return QJsonObject{{"ok", saveTask(*t)}, {"notes", double(t->notes.size())}};
+}
+
+QJsonObject WorkingMemory::completeTask(const QString &id, const QString &summary)
+{
+    Task *t = find(id);
+    if (!t)
+        return QJsonObject{{"ok", false}, {"error", QStringLiteral("任务不存在或已归档")}};
+
+    // 归档：标题日期化 + 摘要 + 全部笔记（供长期记忆 L3 引用）
+    QDir().mkpath(m_archiveDir);
+    QString safeTitle;
+    for (const QChar &c : t->title) // 文件名清洗：非法字符转下划线
+        safeTitle += (c.isLetterOrNumber() || c == QLatin1Char(' ')
+                      || c == QLatin1Char('_') || c == QLatin1Char('-'))
+            ? c : QLatin1Char('_');
+    safeTitle = safeTitle.trimmed().left(40);
+    if (safeTitle.isEmpty())
+        safeTitle = QStringLiteral("task");
+    const QString path = m_archiveDir + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd")
+        + QLatin1Char('-') + safeTitle + QStringLiteral(".md");
+    QFile md(path);
+    if (md.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        md.write(QStringLiteral("# %1\n\n- 开始：%2\n- 结束：%3\n- 目标：%4\n\n## 收尾摘要\n\n%5\n\n## 过程笔记\n")
+                     .arg(t->title,
+                          QDateTime::fromMSecsSinceEpoch(t->created).toString("MM-dd HH:mm"),
+                          QDateTime::currentDateTime().toString("MM-dd HH:mm"),
+                          t->goal.isEmpty() ? QStringLiteral("（未记录）") : t->goal,
+                          summary.trimmed().isEmpty() ? QStringLiteral("（无）") : summary.trimmed())
+                     .toUtf8());
+        for (const QString &n : t->notes)
+            md.write(QStringLiteral("- %1\n").arg(n).toUtf8());
+    }
+
+    // 从工作集移除（上下文释放）+ 删任务文件
+    const QString filePath = m_workDir + QLatin1Char('/') + t->id + QStringLiteral(".json");
+    for (int i = 0; i < m_tasks.size(); ++i) {
+        if (m_tasks.at(i).id == t->id) {
+            m_tasks.removeAt(i);
+            break;
+        }
+    }
+    QFile::remove(filePath);
+    return QJsonObject{{"ok", true},
+                       {"archived", path},
+                       {"note", QStringLiteral("已归档并释放上下文")}};
+}
+
+QString WorkingMemory::promptBlock() const
+{
+    if (m_tasks.isEmpty())
+        return QString();
+    QStringList lines;
+    for (const Task &t : m_tasks) {
+        lines << QStringLiteral("- [%1] %2%3（进度笔记 %4 条）")
+                     .arg(t.id, t.title,
+                          t.goal.isEmpty() ? QString()
+                                           : QStringLiteral("：") + t.goal.left(60))
+                     .arg(t.notes.size());
+    }
+    return QStringLiteral(
+        "当前挂起的工作任务（开工前先看这里，命中即续用 task.start；完成后 task.complete 归档释放）：\n%1")
+        .arg(lines.join(QLatin1Char('\n')));
+}
+
+} // namespace poptools

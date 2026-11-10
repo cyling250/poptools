@@ -116,11 +116,11 @@ private:
     // 主题
     QColor m_bg = QColor("#FFFFFF");
     QColor m_accent = QColor(0x2B, 0x6F, 0xF2);
+    int m_textOpacity = 100; // 文字透明度系数（背景透明度分离）
     bool m_darkText = false;
 
     // 模式状态
     bool m_editMode = false;    // true = 编辑模式（置顶浮动，可拖缩）
-    QTimer *m_zGuard = nullptr; // 贴底守护（Z 序被搅动时归位）
 };
 
 } // namespace poptools

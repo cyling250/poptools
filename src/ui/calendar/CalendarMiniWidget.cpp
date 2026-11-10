@@ -1,6 +1,6 @@
 #include "CalendarMiniWidget.h"
 
-#include "DesktopPin.h"
+#include "ui/shared/DesktopStack.h"
 #include "ItemDelegate.h"
 #include "core/calendar/CalendarStore.h"
 #include "core/settings/Settings.h"
@@ -164,8 +164,9 @@ void CalendarMiniWidget::refresh()
 
 void CalendarMiniWidget::applySettings()
 {
-    setWindowOpacity(Settings::instance().calendarOpacity() / 100.0);
     m_bg = Settings::instance().calendarBgColor();
+    m_bg.setAlpha(255 * Settings::instance().calendarOpacity() / 100);
+    m_textOpacity = Settings::instance().calendarTextOpacity();
     m_accent = Settings::instance().calendarAccentColor();
     m_darkText = darkTextFor(m_bg);
     applyTheme();
@@ -173,13 +174,25 @@ void CalendarMiniWidget::applySettings()
 
 void CalendarMiniWidget::applyTheme()
 {
-    const QColor text = m_darkText ? QColor("#000000") : QColor("#FFFFFF");
+    const QColor text = [this] {
+        QColor r = m_darkText ? QColor("#000000") : QColor("#FFFFFF");
+        r.setAlpha(r.alpha() * m_textOpacity / 100);
+        return r;
+    }();
     const QColor btnBorder = m_darkText ? QColor(0, 0, 0, 40) : QColor(255, 255, 255, 55);
 
     ItemDelegate::Palette dp;
     dp.text = text;
-    dp.subText = m_darkText ? QColor(0, 0, 0, 130) : QColor(255, 255, 255, 150);
-    dp.accent = m_accent;
+    dp.subText = [this] {
+        QColor r = m_darkText ? QColor(0, 0, 0, 130) : QColor(255, 255, 255, 150);
+        r.setAlpha(r.alpha() * m_textOpacity / 100);
+        return r;
+    }();
+    dp.accent = [this] {
+        QColor r = m_accent;
+        r.setAlpha(r.alpha() * m_textOpacity / 100);
+        return r;
+    }();
     static_cast<ItemDelegate *>(m_list->itemDelegate())->setDelegatePalette(dp);
 
     setStyleSheet(QStringLiteral(
@@ -191,23 +204,16 @@ void CalendarMiniWidget::applyTheme()
         "QListWidget { background: transparent; color: %1;"
         "  outline: none; font-size: 12px; }"
         "QListWidget::item { background: transparent; }")
-        .arg(text.name(QColor::HexRgb), btnBorder.name(QColor::HexRgb),
-             m_accent.name(QColor::HexRgb)));
+        .arg(text.name(QColor::HexArgb), btnBorder.name(QColor::HexArgb),
+             m_accent.name(QColor::HexArgb)));
 }
 
 void CalendarMiniWidget::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    // 贴底（顶层 + Z 序紧贴桌面，显示完成后延迟执行）+ 1s 守护
-    if (!m_zGuard) {
-        m_zGuard = new QTimer(this);
-        m_zGuard->setInterval(1000);
-        connect(m_zGuard, &QTimer::timeout, this,
-                [this] { desktoppin::glueToDesktop(this); });
-    }
+    // 贴底（Z 序经 DesktopStack 全局守护归位，显示完成后延迟执行）
     QTimer::singleShot(0, this, [this] {
-        desktoppin::glueToDesktop(this);
-        m_zGuard->start();
+        desktopstack::attach(this, desktopstack::Layer::Calendar);
     });
 }
 

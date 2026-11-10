@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyleHints>
 #include <QToolButton>
@@ -59,6 +60,9 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
     m_nav->addItem(QStringLiteral("截图与贴图"));
     m_nav->addItem(QStringLiteral("翻译"));
     m_nav->addItem(QStringLiteral("桌面日历"));
+    m_nav->addItem(QStringLiteral("桌面收纳盒"));
+    m_nav->addItem(QStringLiteral("活动监控"));
+    m_nav->addItem(QStringLiteral("Goody 管家"));
 
     m_pages = new QStackedWidget(this);
     m_pages->setObjectName("settingsPages");
@@ -66,6 +70,9 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
     m_pages->addWidget(buildCapturePage());
     m_pages->addWidget(buildTranslatePage());
     m_pages->addWidget(buildCalendarPage());
+    m_pages->addWidget(buildOrganizerPage());
+    m_pages->addWidget(buildMonitorPage());
+    m_pages->addWidget(buildGoodyPage());
 
     connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     m_nav->setCurrentRow(0);
@@ -105,8 +112,22 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
         s.setPinSaveDir(m_dirEdit->text().trimmed());
         s.setCalendarEnabled(m_calShowCheck->isChecked());
         s.setCalendarOpacity(m_calOpacity->value());
+        s.setCalendarTextOpacity(m_calTextOpacity->value());
         s.setCalendarBgColor(m_calBg);
         s.setCalendarAccentColor(m_calAccent);
+        s.setOrganizerEnabled(m_orgShowCheck->isChecked());
+        s.setMonitorEnabled(m_monEnabledCheck->isChecked());
+        s.setMonitorMaskPasswords(m_monMaskCheck->isChecked());
+        s.setMonitorOcrSnapshot(m_monOcrCheck->isChecked());
+        s.setMonitorIdleThresholdSec(m_monIdleSpin->value());
+        s.setMonitorRetentionDays(m_monRetentionSpin->value());
+        s.setAssistantApiKey(m_gdyKeyEdit->text().trimmed());
+        s.setAssistantApiBaseUrl(m_gdyUrlEdit->text().trimmed());
+        s.setAssistantApiModel(m_gdyModelEdit->text().trimmed());
+        s.setAssistantPermMode(m_gdyPermCombo->currentData().toString());
+        s.setAssistantSummaryTime(m_gdyTimeEdit->text().trimmed());
+        s.setAssistantAutoSummarize(m_gdyAutoCheck->isChecked());
+        s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
     });
 
     applyTheme();
@@ -360,7 +381,7 @@ QWidget *SettingsDialog::buildCalendarPage()
     addSection(QStringLiteral("外观"));
     auto *opacityRow = new QHBoxLayout;
     opacityRow->setSpacing(8);
-    opacityRow->addWidget(new QLabel(QStringLiteral("整体透明度:"), page));
+    opacityRow->addWidget(new QLabel(QStringLiteral("背景不透明度:"), page));
     m_calOpacity = new QSlider(Qt::Horizontal, page);
     m_calOpacity->setRange(20, 100);
     m_calOpacity->setValue(Settings::instance().calendarOpacity());
@@ -375,6 +396,24 @@ QWidget *SettingsDialog::buildCalendarPage()
     opacityRow->addWidget(m_calOpacityValue);
     opacityRow->addStretch();
     lay->addLayout(opacityRow);
+
+    auto *textOpacityRow = new QHBoxLayout;
+    textOpacityRow->setSpacing(8);
+    textOpacityRow->addWidget(new QLabel(QStringLiteral("文字不透明度:"), page));
+    m_calTextOpacity = new QSlider(Qt::Horizontal, page);
+    m_calTextOpacity->setRange(30, 100);
+    m_calTextOpacity->setValue(Settings::instance().calendarTextOpacity());
+    m_calTextOpacity->setFixedWidth(220);
+    m_calTextOpacityValue = new QLabel(page);
+    auto updateTextOpacityLabel = [this] {
+        m_calTextOpacityValue->setText(QStringLiteral("%1%").arg(m_calTextOpacity->value()));
+    };
+    connect(m_calTextOpacity, &QSlider::valueChanged, page, updateTextOpacityLabel);
+    updateTextOpacityLabel();
+    textOpacityRow->addWidget(m_calTextOpacity);
+    textOpacityRow->addWidget(m_calTextOpacityValue);
+    textOpacityRow->addStretch();
+    lay->addLayout(textOpacityRow);
 
     auto *colorForm = new QFormLayout;
     colorForm->setContentsMargins(0, 4, 0, 0);
@@ -434,6 +473,196 @@ QWidget *SettingsDialog::buildCalendarPage()
     categoryRow->addWidget(categoryBtn);
     categoryRow->addStretch();
     lay->addLayout(categoryRow);
+
+    lay->addStretch();
+    return page;
+}
+
+QWidget *SettingsDialog::buildOrganizerPage()
+{
+    auto *page = newPage();
+    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
+    Q_ASSERT(lay);
+
+    auto *label = new QLabel(QStringLiteral("显示"));
+    label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+    lay->addWidget(label);
+
+    m_orgShowCheck =
+        new QCheckBox(QStringLiteral("显示桌面收纳盒（手机文件夹式桌面分类卡片）"), page);
+    m_orgShowCheck->setChecked(Settings::instance().organizerEnabled());
+    m_orgShowCheck->setToolTip(
+        QStringLiteral("勾选后桌面出现分类卡片：把桌面文件拖进卡片即收纳到"
+                       "桌面上的同名文件夹，桌面随之清爽；点卡片内图标打开；"
+                       "标题栏可拖动位置"));
+    lay->addWidget(m_orgShowCheck);
+
+    auto *hint = new QLabel(QStringLiteral(
+        "新建入口：托盘菜单「新建收纳盒…」（模块关闭时点击会自动启用）。\n"
+        "⚙ 按钮：设置几行几列；− 按钮：折叠成标题横条；双击标题文字改名。\n"
+        "标题栏右键：重命名 / 打开目录 / 解散收纳盒（文件移回桌面） / "
+        "删除收纳盒（保留磁盘文件）。"));
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: gray; font-size: 12px;");
+    lay->addWidget(hint);
+
+    lay->addStretch();
+    return page;
+}
+
+QWidget *SettingsDialog::buildMonitorPage()
+{
+    auto *page = newPage();
+    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
+    Q_ASSERT(lay);
+
+    auto *label = new QLabel(QStringLiteral("记录"));
+    label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+    lay->addWidget(label);
+
+    m_monEnabledCheck = new QCheckBox(
+        QStringLiteral("开启活动监控（键入记录 + 窗口时间线 + 中文上屏快照）"), page);
+    m_monEnabledCheck->setChecked(Settings::instance().monitorEnabled());
+    m_monEnabledCheck->setToolTip(QStringLiteral(
+        "开启后 PopTools 将在本地记录你输入的文字与使用的窗口，"
+        "供 Goody 管家生成「本日工作记录」。数据只存本机，"
+        "生成总结时当日摘要会发送给所配的大模型 API。"));
+    lay->addWidget(m_monEnabledCheck);
+
+    m_monMaskCheck = new QCheckBox(QStringLiteral("密码框自动打码（推荐）"), page);
+    m_monMaskCheck->setChecked(Settings::instance().monitorMaskPasswords());
+    m_monMaskCheck->setToolTip(QStringLiteral(
+        "焦点在密码输入框时，键入内容记为 ●●● 占位符（保留长度、不记内容）。"
+        "部分浏览器/UWP 自绘密码框可能无法识别，重要密码建议仍避免在监控开启时输入。"));
+    lay->addWidget(m_monMaskCheck);
+
+    m_monOcrCheck = new QCheckBox(QStringLiteral("中文上屏 OCR 快照（输入法上屏时截屏识别）"), page);
+    m_monOcrCheck->setChecked(Settings::instance().monitorOcrSnapshot());
+    m_monOcrCheck->setToolTip(QStringLiteral(
+        "全局键盘钩子拿不到输入法的上屏中文，只记得到拼音。开启本项后，"
+        "检测到中文上屏（按空格/回车）会截取前台窗口做本地 OCR，"
+        "识别出新增文字后立即删除截图。"));
+    lay->addWidget(m_monOcrCheck);
+
+    auto addSeparator = [lay, page]() {
+        auto *sep = new QFrame(page);
+        sep->setObjectName("dialogSeparator"); // 颜色走 applyTheme 的 ID 规则
+        sep->setFrameShape(QFrame::HLine);
+        lay->addWidget(sep);
+    };
+    addSeparator();
+
+    auto *section2 = new QLabel(QStringLiteral("参数"));
+    section2->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+    lay->addWidget(section2);
+
+    auto *form = new QFormLayout;
+    form->setLabelAlignment(Qt::AlignRight);
+    m_monIdleSpin = new QSpinBox(page);
+    m_monIdleSpin->setRange(10, 3600);
+    m_monIdleSpin->setSuffix(QStringLiteral(" 秒"));
+    m_monIdleSpin->setValue(Settings::instance().monitorIdleThresholdSec());
+    m_monIdleSpin->setToolTip(QStringLiteral("键鼠无输入超过该时长即判定离开，工作时长不再累计"));
+    form->addRow(QStringLiteral("判定离开的空闲时长:"), m_monIdleSpin);
+
+    m_monRetentionSpin = new QSpinBox(page);
+    m_monRetentionSpin->setRange(1, 3650);
+    m_monRetentionSpin->setSuffix(QStringLiteral(" 天"));
+    m_monRetentionSpin->setValue(Settings::instance().monitorRetentionDays());
+    m_monRetentionSpin->setToolTip(QStringLiteral("活动日志按天存放，超期目录在启动时自动删除"));
+    form->addRow(QStringLiteral("日志保留天数:"), m_monRetentionSpin);
+    lay->addLayout(form);
+
+    auto *hint = new QLabel(QStringLiteral(
+        "日志位置：%LOCALAPPDATA%\\PopTools\\monitor\\<日期>\\（JSONL 文本，可用记事本打开）。\n"
+        "托盘菜单可一键启停；Goody 管家（内测中）将基于这些日志生成每日工作记录。"));
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: gray; font-size: 12px;");
+    lay->addWidget(hint);
+
+    lay->addStretch();
+    return page;
+}
+
+QWidget *SettingsDialog::buildGoodyPage()
+{
+    auto *page = newPage();
+    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
+    Q_ASSERT(lay);
+
+    auto addSection = [lay](const QString &title) {
+        auto *label = new QLabel(title);
+        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+        lay->addWidget(label);
+    };
+    auto addSeparator = [lay, page]() {
+        auto *sep = new QFrame(page);
+        sep->setObjectName("dialogSeparator");
+        sep->setFrameShape(QFrame::HLine);
+        lay->addWidget(sep);
+    };
+
+    // ---- 大模型 API ----
+    addSection(QStringLiteral("大模型 API（OpenAI 兼容）"));
+    auto *apiForm = new QFormLayout;
+    apiForm->setLabelAlignment(Qt::AlignRight);
+    m_gdyKeyEdit = new QLineEdit(page);
+    m_gdyKeyEdit->setEchoMode(QLineEdit::Password);
+    m_gdyKeyEdit->setPlaceholderText(QStringLiteral("sk-…"));
+    m_gdyKeyEdit->setText(Settings::instance().assistantApiKey());
+    apiForm->addRow(QStringLiteral("API Key:"), m_gdyKeyEdit);
+    m_gdyUrlEdit = new QLineEdit(page);
+    m_gdyUrlEdit->setText(Settings::instance().assistantApiBaseUrl());
+    apiForm->addRow(QStringLiteral("Base URL:"), m_gdyUrlEdit);
+    m_gdyModelEdit = new QLineEdit(page);
+    m_gdyModelEdit->setText(Settings::instance().assistantApiModel());
+    m_gdyModelEdit->setToolTip(QStringLiteral("调试推荐 deepseek-v4-flash（便宜快）；正式总结可换 deepseek-chat"));
+    apiForm->addRow(QStringLiteral("模型:"), m_gdyModelEdit);
+    lay->addLayout(apiForm);
+
+    addSeparator();
+
+    // ---- 权限与每日记录 ----
+    addSection(QStringLiteral("权限与每日记录"));
+    auto *permForm = new QFormLayout;
+    permForm->setLabelAlignment(Qt::AlignRight);
+    m_gdyPermCombo = new QComboBox(page);
+    m_gdyPermCombo->addItem(QStringLiteral("逐条确认（写文件/执行命令前都问我）"),
+                            QStringLiteral("ask"));
+    m_gdyPermCombo->addItem(QStringLiteral("智能自动（安全命令白名单内自动执行）"),
+                            QStringLiteral("smart"));
+    m_gdyPermCombo->addItem(QStringLiteral("全自动（不再询问，风险自负）"), QStringLiteral("auto"));
+    const QString permMode = Settings::instance().assistantPermMode();
+    for (int i = 0; i < m_gdyPermCombo->count(); ++i)
+        if (m_gdyPermCombo->itemData(i).toString() == permMode)
+            m_gdyPermCombo->setCurrentIndex(i);
+    permForm->addRow(QStringLiteral("权限模式:"), m_gdyPermCombo);
+    m_gdyTimeEdit = new QLineEdit(page);
+    m_gdyTimeEdit->setText(Settings::instance().assistantSummaryTime());
+    m_gdyTimeEdit->setPlaceholderText(QStringLiteral("22:00"));
+    m_gdyTimeEdit->setToolTip(QStringLiteral("每天到点后检查活动日志，为有记录但未总结的日子生成「本日工作记录」"));
+    permForm->addRow(QStringLiteral("每日总结时刻:"), m_gdyTimeEdit);
+    m_gdyAutoCheck = new QCheckBox(QStringLiteral("自动生成每日工作记录（启动时补账 + 定时）"), page);
+    m_gdyAutoCheck->setChecked(Settings::instance().assistantAutoSummarize());
+    permForm->addRow(QString(), m_gdyAutoCheck);
+    lay->addLayout(permForm);
+
+    addSeparator();
+
+    // ---- 人格附言 ----
+    addSection(QStringLiteral("人格附言（可选，追加到 Goody 系统提示词末尾）"));
+    m_gdyAppendix = new QPlainTextEdit(page);
+    m_gdyAppendix->setPlaceholderText(QStringLiteral("例如：称呼我为\"老板\"；记录风格口语化一点…"));
+    m_gdyAppendix->setMaximumHeight(80);
+    m_gdyAppendix->setPlainText(Settings::instance().assistantPersonaAppendix());
+    lay->addWidget(m_gdyAppendix);
+
+    auto *hint = new QLabel(QStringLiteral(
+        "呼出方式：Ctrl+Alt+G 或托盘菜单「Goody 管家」。\n"
+        "Key 只保存在本机 PopTools.ini，不会随仓库提交。"));
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: gray; font-size: 12px;");
+    lay->addWidget(hint);
 
     lay->addStretch();
     return page;
