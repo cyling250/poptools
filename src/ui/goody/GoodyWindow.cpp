@@ -314,14 +314,6 @@ void GoodyWindow::showErrorLine(const QString &text)
     renderTranscript();
 }
 
-void GoodyWindow::clearTranscript()
-{
-    m_bubbles.clear();
-    m_streaming = false;
-    m_streamBuf.clear();
-    renderTranscript();
-}
-
 void GoodyWindow::scheduleRender()
 {
     if (!m_renderTimer->isActive())
@@ -363,15 +355,28 @@ void GoodyWindow::setBusy(bool on)
     m_busy = on;
     m_sendBtn->setText(on ? QStringLiteral("停止") : QStringLiteral("发送"));
     m_input->setEnabled(true); // busy 时仍可输入下一条，但 Enter 不发送
+    // busy（LLM 请求在途）同样禁用「清空」（C-N2 第一道保险）：清空后迟到
+    // 回包 unconditional append 进空会话，断裂序列会让下一轮请求 400。
+    // 与工具期联合判断，避免两阶段交错时按钮态被单侧复位
+    updateClearBtnState();
 }
 
 void GoodyWindow::setToolPhase(bool on)
 {
-    // 工具执行期（含权限确认等待）禁用「清空」：会话清空后剩余工具结果
-    // 继续回填会留下孤儿 tool 序列，之后每轮请求被 API 整包拒绝
-    m_clearBtn->setEnabled(!on);
-    m_clearBtn->setToolTip(on ? QStringLiteral("工具执行中，暂不可清空会话")
-                              : QStringLiteral("清空当前会话（记忆与日志不受影响）"));
+    // 工具执行期（含权限确认等待）禁用「清空」（B-2）：会话清空后剩余工具
+    // 结果继续回填会留下孤儿 tool 序列，之后每轮请求被 API 整包拒绝
+    m_toolPhase = on;
+    updateClearBtnState();
+}
+
+void GoodyWindow::updateClearBtnState()
+{
+    const bool locked = m_busy || m_toolPhase;
+    m_clearBtn->setEnabled(!locked);
+    m_clearBtn->setToolTip(
+        locked ? (m_toolPhase ? QStringLiteral("工具执行中，暂不可清空会话")
+                              : QStringLiteral("回复进行中，暂不可清空会话"))
+               : QStringLiteral("清空当前会话（记忆与日志不受影响）"));
 }
 
 } // namespace poptools

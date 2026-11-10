@@ -33,7 +33,6 @@ public:
     void finishAssistantBubble(const QString &fullText); // 收尾（原文为准）
     void appendSystemLine(const QString &text);        // 工具调用/结果提示行
     void showErrorLine(const QString &text);
-    void clearTranscript();
 
     // 权限确认横条：展示请求 → 用户点按钮 → 一次性回调
     void promptPermission(const QString &tool, const QString &argsSummary,
@@ -41,7 +40,8 @@ public:
 
     void setBusy(bool on);
     bool isBusy() const { return m_busy; }
-    // 工具执行期标志（模块注入）：期间禁用「清空」按钮（防孤儿 tool 序列）
+    // 工具执行期标志（模块注入）：与 busy 态共同决定「清空」按钮可用性
+    //（工具期防孤儿 tool 序列 B-2；busy 期防清空后迟到回包写坏会话 C-N2）
     void setToolPhase(bool on);
 
 signals:
@@ -61,6 +61,7 @@ private slots:
 private:
     void renderTranscript(); // 全量重绘（气泡列表 → markdown）
     void scheduleRender();   // 流式节流
+    void updateClearBtnState(); // 按 busy/工具期联合刷新「清空」按钮（B-2/C-N2）
 
     struct Bubble
     {
@@ -84,6 +85,7 @@ private:
     QString m_streamBuf;   // 流式累积原文
     bool m_streaming = false;
     bool m_busy = false;
+    bool m_toolPhase = false; // 工具执行期（模块注入，与 busy 联合禁「清空」）
     QPoint m_dragAt;       // 标题栏拖拽起点（窗口坐标）
     bool m_dragging = false;
 

@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutex>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
@@ -232,10 +233,19 @@ QString BoxStore::uniqueTargetPath(const QString &dir, const QString &fileName)
     }
 }
 
+// 收纳移动的进程级互斥（C-N3）：不同 BoxWindow 的 worker 并发跑"uniqueTargetPath
+// + 移动"时，各自可能看到同一空落点 → 撞车两败俱伤（一方失败气泡、文件不动）。
+// 锁覆盖整段（含跨盘复制兜底），换来全进程收纳操作串行——用户操作频率低，
+// 正确性优先
+namespace {
+QMutex g_fsMoveMutex;
+} // namespace
+
 // 单条目移动：rename 优先，失败（跨盘）走复制+删除兜底。纯 FS 操作，
 // 无共享状态，可在工作线程调用
-static bool moveEntryIntoDir(const QFileInfo &info, const QString &dir)
+bool BoxStore::moveEntryIntoDir(const QFileInfo &info, const QString &dir)
 {
+    QMutexLocker lock(&g_fsMoveMutex);
     const QString target = BoxStore::uniqueTargetPath(dir, info.fileName());
     if (QFile::rename(info.filePath(), target))
         return true;

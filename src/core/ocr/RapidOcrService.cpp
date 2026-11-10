@@ -125,7 +125,8 @@ bool RapidOcrService::available() const
 void RapidOcrService::startEngine()
 {
     if (m_process && m_process->state() != QProcess::NotRunning)
-        return; // Running/Starting：已有实例在途（Starting → started 后发送命令）
+        return; // 已有实例在途：Starting → started 后发送命令；Running →
+                // started 已发过（暖引擎命令由 onTempImageReady 直接补发）
 
     if (!m_process)
     {
@@ -218,7 +219,15 @@ void RapidOcrService::onTempImageReady(bool ok)
         fail(QStringLiteral("无法写入 OCR 临时图片文件"));
         return;
     }
-    startEngine();
+    // 暖引擎补发命令（C-N1）：started 每个进程实例只发一次，进程已 Running
+    // 时 startEngine 只会早退（:127），writeCommand 的 started 唯一触发点
+    // 不会再发 → 请求永久无响应（m_busy 卡真到进程被杀）。Running 直接补发
+    //（writeCommand 重开看门狗/停空闲回收）；Starting 复用 started 处理器
+    //（m_busy 在位，就绪即发）；NotRunning 走完整冷启动
+    if (m_process && m_process->state() == QProcess::Running)
+        writeCommand();
+    else
+        startEngine();
 }
 
 void RapidOcrService::writeCommand()
@@ -307,7 +316,8 @@ void RapidOcrService::onReadyRead()
             emit ocrBoxesFinished(false, QVector<OcrBox>(),
                                   msg.isEmpty() ? QStringLiteral("OCR 识别失败") : msg);
         }
-        return; // 只处理第一个响应行（后续行留到下次 readyRead）
+        continue; // 单请求单响应下正常只有一行；残留行就地排空，不留到下次
+                  // readyRead 被误认成下一个请求的响应（#7）
     }
 }
 

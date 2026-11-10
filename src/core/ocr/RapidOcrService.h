@@ -89,10 +89,12 @@ signals:
 
 private:
     // 异步启动子进程（started 信号到达后 writeCommand；启动失败经
-    // errorOccurred → fail）。Running/Starting 在途时直接复用
+    // errorOccurred → fail）。Running/Starting 在途时早退复用：Running 的
+    // 命令由 onTempImageReady 直接补发（started 只发一次，C-N1）
     void startEngine();
 
-    // worker 落盘完成回主线程：成功则启动引擎发送命令，失败统一报错
+    // worker 落盘完成回主线程：Running 进程直接补发命令（暖引擎），
+    // Starting/NotRunning 走 startEngine（冷启动 → started 后发送），失败统一报错
     void onTempImageReady(bool ok);
 
     // 通过 stdin 发送命令（临时图片路径已在 m_tempFile）

@@ -160,8 +160,19 @@ QJsonObject WorkingMemory::completeTask(const QString &id, const QString &summar
     safeTitle = safeTitle.trimmed().left(40);
     if (safeTitle.isEmpty())
         safeTitle = QStringLiteral("task");
-    const QString path = m_archiveDir + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd")
-        + QLatin1Char('-') + safeTitle + QStringLiteral(".md");
+    const QString stem = m_archiveDir + QLatin1Char('/')
+        + QDate::currentDate().toString("yyyy-MM-dd") + QLatin1Char('-') + safeTitle;
+    QString path = stem + QStringLiteral(".md");
+    // 同日同名归档防覆盖（R4 遗留）：档案名已存在时追加 _HHmmss 时间戳；
+    // 同一秒内极端连续归档再退避序号，保证先完成的归档不被静默覆盖
+    if (QFileInfo::exists(path)) {
+        const QString stamp = QDateTime::currentDateTime().toString("HHmmss");
+        QString candidate = stem + QLatin1Char('_') + stamp + QStringLiteral(".md");
+        for (int n = 2; QFileInfo::exists(candidate); ++n)
+            candidate = stem + QLatin1Char('_') + stamp + QLatin1Char('_')
+                + QString::number(n) + QStringLiteral(".md");
+        path = candidate;
+    }
     // 归档原子写（QSaveFile，B-9①）：直写曾半截留档；写失败时任务保留在
     // 工作集可重试，不再静默丢档（原实现 open 失败也照常移除并删任务文件）
     QSaveFile md(path);

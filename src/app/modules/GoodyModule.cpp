@@ -280,12 +280,13 @@ void GoodyModule::ensureWindow()
     connect(m_window, &GoodyWindow::sendRequested, this, &GoodyModule::sendMessage);
     connect(m_window, &GoodyWindow::stopRequested, this, [this] { m_client->abort(); });
     connect(m_window, &GoodyWindow::sessionCleared, this, [this] {
-        // 工具执行期清空（B-2）：会话清空后，剩余/在途工具结果若继续回填
-        // 会留下孤儿 tool 序列（之后每轮请求被 API 整包拒绝且无法自愈）。
-        // 收束本轮：放弃剩余工具（按拒绝语义补审计），在途回调经 epoch
-        // 失配丢弃；窗口侧工具期已禁用清空按钮，此处是兜底
+        // 会话清空收束（B-2/C-N2）：一律推进代数——工具期在途回调（确认/
+        // 执行）与 busy 期在途 LLM 回包都以代数失配丢弃，任何半截内容都
+        // 不得写进刚清空的会话（断裂序列会让之后每轮请求被 API 整包拒绝）
+        ++m_toolEpoch;
         if (m_toolPhase) {
-            ++m_toolEpoch;
+            // 工具执行期清空：放弃剩余工具（按拒绝语义补审计），在途回调经
+            // epoch 失配丢弃；窗口侧工具期已禁用清空按钮，此处是兜底
             for (const QJsonValue &tc : m_pendingToolCalls) {
                 const QJsonObject fn =
                     tc.toObject().value(QStringLiteral("function")).toObject();
@@ -302,6 +303,11 @@ void GoodyModule::ensureWindow()
             if (m_window)
                 m_window->showErrorLine(QStringLiteral("工具执行已随会话清空中止"));
         }
+        // busy 期清空（C-N2）：abort 在途 LLM 请求——其 finished 回包带旧代数
+        // 到达，onTurnFinished 丢弃（不 append、不走工具链）。窗口侧 busy 已
+        // 禁用清空按钮，这是绕过 UI 的兜底路径
+        if (m_client->busy())
+            m_client->abort();
         m_session->clear();
         m_session->save();
     });
@@ -433,6 +439,7 @@ void GoodyModule::sendMessage(const QString &text)
 
 void GoodyModule::runTurn()
 {
+    m_activeTurnEpoch = m_toolEpoch; // 回合代数快照：清空后迟到回包按失配丢弃
     m_window->setBusy(true);
     m_window->beginAssistantBubble();
     m_session->setSystemPrompt(buildSystemPrompt());
@@ -447,6 +454,19 @@ void GoodyModule::runTurn()
 void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
                                  const QString &error)
 {
+    // 迟到回包丢弃（C-N2）：回包所属回合的会话已被清空（代数失配）时，
+    // 不入会话、不走工具链——清空后 unconditional append 会让新会话以
+    // assistant（含 tool_calls 时更糟）开头，下一轮请求被网关 400 且无自愈。
+    // 只做窗口收尾复位 busy 灯，用户可立即发起新会话
+    if (m_activeTurnEpoch != m_toolEpoch) {
+        if (m_window) {
+            m_window->setBusy(false);
+            m_window->finishAssistantBubble(
+                assistantMessage.value(QStringLiteral("content")).toString());
+        }
+        return;
+    }
+
     if (m_window) {
         m_window->setBusy(false);
         m_window->finishAssistantBubble(assistantMessage.value(QStringLiteral("content")).toString());

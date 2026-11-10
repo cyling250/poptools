@@ -36,13 +36,16 @@
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
+#include "ui/goody/GoodyWindow.h"
 
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPushButton>
 #include <QTemporaryDir>
 
 using namespace poptools;
@@ -1762,12 +1765,14 @@ private slots:
         WorkingMemory work(base.path());
         const QJsonObject t1 = work.startTask(QStringLiteral("归档失败任务"), {});
         const QString id = t1.value("id").toString();
-        // 预置同名目录占住归档文件路径 → QSaveFile open 必然失败
-        const QString collide =
-            base.path() + QStringLiteral("/memory/archive/")
-            + QDate::currentDate().toString("yyyy-MM-dd") + QLatin1Char('-')
-            + QStringLiteral("归档失败任务") + QStringLiteral(".md");
-        QVERIFY(QDir().mkpath(collide));
+        // 注入写失败：archive 目录位落成同名文件 → mkpath 失败、QSaveFile
+        // 对任意档名 open 必然失败。（R4 后归档重名自动换 _HHmmss 名绕开
+        // 占位，原"同名目录占住档名"的注入点会被人性化换名规避，故上移）
+        const QString collide = base.path() + QStringLiteral("/memory/archive");
+        {
+            QFile blocker(collide);
+            QVERIFY(blocker.open(QIODevice::WriteOnly));
+        }
 
         const QJsonObject done = work.completeTask(id, QStringLiteral("摘要"));
         QVERIFY(!done.value("ok").toBool(true));
@@ -1775,11 +1780,87 @@ private slots:
         QCOMPARE(work.openCount(), 1); // 任务保留（可重试）
         QVERIFY(QFileInfo::exists(base.path() + QStringLiteral("/memory/working/")
                                   + id + QStringLiteral(".json")));
-        // 移走占位目录后重试成功
-        QVERIFY(QDir().rmdir(collide));
+        // 移走占位文件后重试成功
+        QVERIFY(QFile::remove(collide));
         const QJsonObject retry = work.completeTask(id, QStringLiteral("摘要"));
         QVERIFY(retry.value("ok").toBool());
         QCOMPARE(work.openCount(), 0);
+    }
+
+    // ---- WorkingMemory：同日同名归档不覆盖（R4 遗留修复） ----
+    void working_memory_same_day_archive_no_overwrite()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        WorkingMemory work(base.path());
+
+        const QJsonObject t1 = work.startTask(QStringLiteral("同名归档任务"), {});
+        QVERIFY(t1.value("ok").toBool(true));
+        const QJsonObject c1 =
+            work.completeTask(t1.value("id").toString(), QStringLiteral("第一份"));
+        QVERIFY(c1.value("ok").toBool());
+        const QString path1 = c1.value("archived").toString();
+        QVERIFY(QFileInfo::exists(path1));
+
+        // 首个任务已归档出未结集 → 同名新任务同日完成：不得覆盖第一份归档
+        const QJsonObject t2 = work.startTask(QStringLiteral("同名归档任务"), {});
+        QVERIFY(!t2.value("continued").toBool());
+        const QJsonObject c2 =
+            work.completeTask(t2.value("id").toString(), QStringLiteral("第二份"));
+        QVERIFY(c2.value("ok").toBool());
+        const QString path2 = c2.value("archived").toString();
+        QVERIFY(path1 != path2);
+        QVERIFY(QFileInfo::exists(path2));
+
+        QFile f1(path1);
+        QVERIFY(f1.open(QIODevice::ReadOnly));
+        const QByteArray b1 = f1.readAll();
+        QVERIFY(b1.contains("第一份"));
+        QVERIFY(!b1.contains("第二份")); // 第一份内容完好
+
+        QFile f2(path2);
+        QVERIFY(f2.open(QIODevice::ReadOnly));
+        QVERIFY(f2.readAll().contains("第二份"));
+
+        // 极端：同秒内第三次同名归档 → 时间戳后缀再退避序号，三份并存
+        const QJsonObject t3 = work.startTask(QStringLiteral("同名归档任务"), {});
+        QVERIFY(!t3.value("continued").toBool());
+        const QJsonObject c3 =
+            work.completeTask(t3.value("id").toString(), QStringLiteral("第三份"));
+        QVERIFY(c3.value("ok").toBool());
+        const QString path3 = c3.value("archived").toString();
+        QVERIFY(path3 != path1 && path3 != path2);
+        QVERIFY(QFileInfo::exists(path3));
+        QCOMPARE(work.openCount(), 0);
+    }
+
+    // ---- GoodyWindow：「清空」按钮 busy/工具期联合禁用（B-2/C-N2） ----
+    void goody_window_clear_guard_busy_and_toolphase()
+    {
+        GoodyWindow win;
+        QPushButton *clearBtn = nullptr;
+        for (QPushButton *b : win.findChildren<QPushButton *>()) {
+            if (b->text() == QStringLiteral("清空")) {
+                clearBtn = b;
+                break;
+            }
+        }
+        QVERIFY(clearBtn);
+        QVERIFY(clearBtn->isEnabled()); // 空闲态可清空
+
+        win.setBusy(true); // LLM 请求在途：禁清空（C-N2：迟到回包不得写空会话）
+        QVERIFY(!clearBtn->isEnabled());
+        win.setBusy(false);
+        QVERIFY(clearBtn->isEnabled()); // busy 复位即恢复
+
+        win.setToolPhase(true); // 工具执行期：禁清空（B-2：孤儿 tool 序列）
+        QVERIFY(!clearBtn->isEnabled());
+        // 收尾交错：busy 先复位、工具期后复位——联合判断不得被单侧提前放开
+        win.setBusy(true);
+        win.setBusy(false);
+        QVERIFY(!clearBtn->isEnabled());
+        win.setToolPhase(false);
+        QVERIFY(clearBtn->isEnabled());
     }
 };
 

@@ -7,6 +7,7 @@
 #include <QUrl>
 
 class QJsonArray;
+class QFileInfo;
 
 namespace poptools {
 
@@ -69,6 +70,11 @@ public:
     static QStringList moveDirContents(const QString &fromDir, const QString &toDir);
     // 目标目录内生成不重名的落点路径
     static QString uniqueTargetPath(const QString &dir, const QString &fileName);
+    // 单条目移动：rename 优先，失败（跨盘）走复制+删除兜底。进程级互斥
+    //（C-N3）：「移出到桌面」「拖入盒」「解散」可能来自不同窗口的并发
+    // worker，同名落点先到先得——后到者在锁内 uniqueTargetPath 必然看到
+    // 前者已落位，自动顺延 (2) 序号，不再撞同一落点两败俱伤。可在工作线程调用
+    static bool moveEntryIntoDir(const QFileInfo &info, const QString &dir);
 
 signals:
     // 任意数据变更（盒子增删改/位置），UI 层连接后整体刷新

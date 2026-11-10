@@ -582,13 +582,10 @@ void BoxWindow::contextMenuEvent(QContextMenuEvent *event)
             QThreadPool::globalInstance()->start([self, path, desktop] {
                 QStringList failures;
                 const QFileInfo moving(path);
-                const QString target = BoxStore::uniqueTargetPath(desktop, moving.fileName());
-                if (!QFile::rename(path, target)) {
-                    // 跨盘移动：复制 + 删除兜底（目录无法复制，保持报错）
-                    if (moving.isDir()
-                        || !(QFile::copy(path, target) && QFile::remove(path)))
-                        failures << moving.fileName();
-                }
+                // 进程级互斥（C-N3）：与「拖入盒/解散」及他窗「移出」共用
+                // moveEntryIntoDir，锁内取名+移动，同名落点自动顺延不再撞车
+                if (!BoxStore::moveEntryIntoDir(moving, desktop))
+                    failures << moving.fileName();
                 if (!self)
                     return; // 窗口已销毁：文件已移完，仅省去刷新
                 QMetaObject::invokeMethod(

@@ -84,6 +84,9 @@ private:
     bool m_toolPhase = false;      // 工具执行期（tool_calls 回填中）：sendMessage 守卫
     qint64 m_toolEpoch = 0;        // 会话清空收束代数（清空时 +1）：在途工具/
                                    // 确认回调按代数失配丢弃，防孤儿 tool 入会话
+    qint64 m_activeTurnEpoch = -1; // 当前在途 LLM 回合发起时的代数快照：
+                                   // onTurnFinished 与 m_toolEpoch 失配即迟到
+                                   // 回包（会话已清空），整体丢弃不入新会话（C-N2）
 };
 
 } // namespace poptools
