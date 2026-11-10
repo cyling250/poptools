@@ -68,11 +68,18 @@ QString BoxStore::addBox(const QString &name, const QString &dir, int x, int y)
     const QString cleanName = name.trimmed().isEmpty()
                                   ? QStringLiteral("收纳盒")
                                   : name.trimmed();
-    QString cleanDir = dir.trimmed().isEmpty()
-                           ? QDir(QStandardPaths::writableLocation(
-                                      QStandardPaths::DesktopLocation))
-                                 .filePath(cleanName)
-                           : QDir(dir.trimmed()).absolutePath();
+    QString cleanDir;
+    const QString dirInput = dir.trimmed();
+    if (dirInput.isEmpty()) {
+        cleanDir = QDir(QStandardPaths::writableLocation(QStandardPaths::DesktopLocation))
+                       .filePath(cleanName);
+    } else {
+        // 二次校验：目录参数须为绝对路径且不含 ".." 段——absolutePath()
+        // 会把 .. 解析掉，穿越在下方 mkpath 时才显形，须在归一化前拦截
+        if (QDir::isRelativePath(dirInput) || dirInput.contains(QLatin1String("..")))
+            return QString();
+        cleanDir = QDir(dirInput).absolutePath();
+    }
 
     // 目录不存在时创建（存在则直接用——收纳已有的文件夹）
     if (!QFileInfo::exists(cleanDir))

@@ -3,6 +3,7 @@
 #include <QDateTime>
 
 #include "../monitor/ActivityStore.h"
+#include "ToolRegistry.h"
 
 namespace poptools {
 
@@ -39,6 +40,17 @@ bool PermissionManager::shellCommandAllowed(const QJsonObject &args) const
     const QString cmd = args.value(QStringLiteral("command")).toString().trimmed();
     if (cmd.isEmpty())
         return false;
+    // 多段命令/命令替换一律不放行：分号、管道、逻辑连接、反引号、$()、
+    // 换行都能在白名单前缀（如 "git status"）之后拼接任意命令，前缀
+    // 匹配只对单条命令有意义（PowerShell 中 ; | && ` $( ) 与换行均
+    // 可引出第二段执行体）
+    for (const QChar &ch : cmd) {
+        if (ch == QLatin1Char(';') || ch == QLatin1Char('|') || ch == QLatin1Char('&')
+            || ch == QLatin1Char('`') || ch == QLatin1Char('\n') || ch == QLatin1Char('\r'))
+            return false;
+    }
+    if (cmd.contains(QLatin1String("$(")))
+        return false;
     for (const QString &prefix : m_shellPrefixes) {
         const QString p = prefix.trimmed();
         if (!p.isEmpty() && cmd.startsWith(p))
@@ -53,13 +65,19 @@ PermissionManager::Decision PermissionManager::decide(const QString &tool,
     if (m_mode == Mode::Auto)
         return Decision::Allow;
 
-    // 只读/安全类工具任何模式都放行（查询、查看、软件内开关）
-    // 注意：readOnly 标记由工具注册方声明；注册表不在手时按敏感处理
-    if (tool == QLatin1String("fs.list") || tool == QLatin1String("fs.read")
-        || tool == QLatin1String("monitor.query") || tool == QLatin1String("time.now")
-        || tool == QLatin1String("memory.list") || tool == QLatin1String("memory.search")
-        || tool == QLatin1String("task.list") || tool.startsWith(QLatin1String("app.")))
+    // 只读/安全类工具任何模式都放行（查询、查看、软件内开关）。
+    // readOnly 以注册表声明为准——app.* 前缀不再一刀切放行（写类
+    // app.* 如 app.box_create 会真实建目录）；注册表不在手时走保守
+    // 硬编码白名单（仅纯查询类）
+    if (m_registry) {
+        if (m_registry->isReadOnly(tool))
+            return Decision::Allow;
+    } else if (tool == QLatin1String("fs.list") || tool == QLatin1String("fs.read")
+               || tool == QLatin1String("monitor.query") || tool == QLatin1String("time.now")
+               || tool == QLatin1String("memory.list") || tool == QLatin1String("memory.search")
+               || tool == QLatin1String("task.list")) {
         return Decision::Allow;
+    }
 
     if (m_alwaysAllow.contains(tool))
         return Decision::Allow;
@@ -68,7 +86,7 @@ PermissionManager::Decision PermissionManager::decide(const QString &tool,
         && shellCommandAllowed(args))
         return Decision::Allow;
 
-    return Decision::Confirm; // 敏感类：fs.write/fs.move/fs.delete/shell.run/未知工具
+    return Decision::Confirm; // 敏感类：fs.write/fs.move/fs.delete/shell.run/app.* 写类/未知工具
 }
 
 void PermissionManager::audit(const QString &tool, const QJsonObject &args,

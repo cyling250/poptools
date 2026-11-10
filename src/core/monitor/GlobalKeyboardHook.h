@@ -14,12 +14,16 @@ namespace poptools {
 // 性能纪律（handover 红线2豁免条款：监控开启期间允许钩子常驻，
 // 前提是回调零耗时）：钩子回调只做入队转发，打码判定/文本翻译/
 // 磁盘写全部在接收方（主线程事件循环或 worker）完成——低级钩子
-// 有超时限制，超限会被系统静默摘钩且无提示。
+// 有超时限制，超限会被系统静默摘钩且无提示。唯一例外是回调内
+// 一次 GetGUIThreadInfo（µs 级读线程状态，不向目标进程发消息）：
+// 把"捕获时刻的焦点窗口句柄"随事件入队，打码判定才能在接收方
+// 按捕获时刻的焦点做，否则"输完密码立刻切窗"会按切窗后的前台
+// 判定为非密码框，明文落盘。
 //
 // 用法（单消费者）：
 //   GlobalKeyboardHook hook;
 //   hook.start();   // 监控开启期间常驻
-//   connect(&hook, &GlobalKeyboardHook::keyEvent, this, [](int vk, int scan, bool ext, bool down){ ... });
+//   connect(&hook, &GlobalKeyboardHook::keyEvent, this, [](int vk, int scan, bool ext, bool down, quintptr focusHwnd){ ... });
 //   hook.stop();
 // ============================================================
 class GlobalKeyboardHook : public QObject
@@ -35,9 +39,10 @@ public:
 
 signals:
     // 全系统键盘事件（down/up 均有，含被输入法吞掉前的原始键）。
-    // vk 为 Windows 虚拟键码；scan 为扫描码；extended 是否扩展键。
+    // vk 为 Windows 虚拟键码；scan 为扫描码；extended 是否扩展键；
+    // focusHwnd 为捕获时刻（钩子回调）的前台焦点控件，可能为 0。
     // 经队列转发，槽在主线程事件循环执行。
-    void keyEvent(int vk, int scan, bool extended, bool down);
+    void keyEvent(int vk, int scan, bool extended, bool down, quintptr focusHwnd);
 
 private:
     bool m_active = false;

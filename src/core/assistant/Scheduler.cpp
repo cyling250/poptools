@@ -35,7 +35,10 @@ void Scheduler::setDailyTask(const QString &name, const QTime &at,
 {
     if (!at.isValid() || !fn)
         return;
-    m_jobs.insert(name, DailyJob{at, fn, QDate()});
+    // 重注册（改时刻/回调）保留当天已跑记账：设置页改时刻不应导致
+    // 当天已跑过的任务重复触发
+    const QDate lastRun = m_jobs.value(name).lastRunDate;
+    m_jobs.insert(name, DailyJob{at, fn, lastRun});
 }
 
 void Scheduler::tick()

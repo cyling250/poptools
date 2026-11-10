@@ -15,6 +15,27 @@
 
 namespace poptools {
 
+namespace {
+// 盒名清洗：盒名即桌面真实目录名。含路径分隔符 / Windows 目录非法
+// 字符 / 点段（".."\\"."）的名称一律拒绝——防 LLM 或手输的 "..\\..\\x"
+// 经 QDir 归一化后在桌面之外创建目录树。返回空串表示非法
+QString sanitizeBoxName(const QString &raw)
+{
+    const QString name = raw.trimmed();
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        return QString();
+    if (name.endsWith(QLatin1Char('.'))) // Windows 目录名不允许结尾点
+        return QString();
+    for (const QChar &c : name) {
+        if (c == QLatin1Char('\\') || c == QLatin1Char('/') || c == QLatin1Char(':')
+            || c == QLatin1Char('*') || c == QLatin1Char('?') || c == QLatin1Char('"')
+            || c == QLatin1Char('<') || c == QLatin1Char('>') || c == QLatin1Char('|'))
+            return QString();
+    }
+    return name;
+}
+} // namespace
+
 BoxModule::BoxModule(QObject *parent)
     : QObject(parent)
 {
@@ -57,9 +78,11 @@ void BoxModule::init(AppServices &services)
             {"required", QJsonArray{QStringLiteral("name")}},
         };
         d.fn = [this](const QJsonObject &args, const std::function<void(QJsonObject)> &done) {
-            const QString name = args.value(QStringLiteral("name")).toString().trimmed();
+            const QString name = sanitizeBoxName(args.value(QStringLiteral("name")).toString());
             if (name.isEmpty()) {
-                done(QJsonObject{{"ok", false}, {"error", QStringLiteral("名称为空")}});
+                done(QJsonObject{{"ok", false},
+                                 {"error", QStringLiteral("名称为空或含非法字符（路径分隔符/"
+                                                          "点段/Windows 保留字符），已拒绝")}});
                 return;
             }
             const QString dir = QDir(QStandardPaths::writableLocation(
@@ -166,13 +189,13 @@ BoxWindow *BoxModule::ensureWindow(const QString &boxId)
 // 则直接收纳它）。模块关闭时自动启用
 void BoxModule::createBox()
 {
-    const QString name = QInputDialog::getText(
-        nullptr, QStringLiteral("新建收纳盒"), QStringLiteral("名称："));
-    if (name.trimmed().isEmpty())
+    const QString name = sanitizeBoxName(QInputDialog::getText(
+        nullptr, QStringLiteral("新建收纳盒"), QStringLiteral("名称：")));
+    if (name.isEmpty())
         return;
     const QString dir = QDir(QStandardPaths::writableLocation(
                                  QStandardPaths::DesktopLocation))
-                            .filePath(name.trimmed());
+                            .filePath(name);
 
     // 新盒位置：沿已有盒子右侧依次排开，首盒放屏幕右侧中部
     int x = 60, y = 200;
@@ -187,7 +210,7 @@ void BoxModule::createBox()
         Settings::instance().setOrganizerEnabled(true);
         applyVisibility();
     }
-    m_store->addBox(name.trimmed(), dir, x, y);
+    m_store->addBox(name, dir, x, y);
 }
 
 void BoxModule::onSettingsChanged()

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QFileInfo>
+#include <QHash>
 #include <QList>
+#include <QPixmap>
+#include <QSet>
 #include <QWidget>
 
 class QFileSystemWatcher;
@@ -10,7 +13,6 @@ class QLineEdit;
 namespace poptools {
 
 class BoxStore;
-class IconExtractor;
 
 // ============================================================
 // 桌面收纳盒窗口：贴在桌面层的分类卡片（一个盒子一个窗口）。
@@ -75,6 +77,7 @@ private:
 
     // ---- 行为 ----
     void refresh();                   // 重读目录 + 重绘（QFileSystemWatcher/拖放后）
+    void prefetchIcons();             // 条目图标后台预取（完成后 update 刷新）
     void openSizeMenu();              // ⚙：几行几列设置菜单
     void startRename();               // 双击标题文字：内联编辑框
     void finishRename(bool commit);
@@ -82,7 +85,6 @@ private:
     void glueIfFixed();               // 贴桌（经 DesktopStack，日历层之上）
 
     BoxStore *m_store = nullptr;
-    IconExtractor *m_icons = nullptr;
     QString m_boxId;
     QString m_name;            // 标题快照
     QString m_dir;             // 目录快照
@@ -92,10 +94,16 @@ private:
     QList<QFileInfo> m_items;  // 目录内容（截断展示 rows×cols）
     int m_totalCount = 0;
 
+    // 图标缓存（shell 提取在 QThreadPool 后台做，主线程只查缓存绘制；
+    // 文件夹图标自绘不走缓存）
+    QHash<QString, QPixmap> m_iconCache;  // 原生路径 → 已提取图标
+    QSet<QString> m_iconPending;          // 后台提取在途（防重复派发）
+
     // 交互状态
     int m_hoverItem = -1;
     bool m_dropHover = false;
     bool m_draggingWindow = false; // 标题栏拖动中
+    bool m_moveInFlight = false;   // 拖放收纳移动中（worker 线程）——显示"收纳中"
     QPoint m_dragOffset;
     bool m_hoverGear = false;
     bool m_hoverCollapse = false;

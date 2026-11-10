@@ -18,7 +18,6 @@ namespace {
 constexpr int kFlushThresholdLines = 64;  // 缓冲满 64 行立即移交（正常键入速率下约几秒的量）
 constexpr int kFlushIntervalMs = 2000;    // 定时移交周期：崩溃最多丢 2s 缓冲
 constexpr int kMetaVersion = 1;
-const char *kStreamNames[] = {"keys", "timeline", "ocrtext"};
 } // namespace
 
 // ============================================================
@@ -175,9 +174,12 @@ void ActivityStore::stop()
 {
     if (!m_running)
         return;
-    m_running = false;
     m_timer->stop();
-    flushBlocking(); // 余量落盘（阻塞排队写完，量小，等待可忽略）
+    // 余量落盘须在置 m_running=false 之前：flushBlocking/sendAll 都以
+    // m_running 为守卫，先停会把最后一批缓冲（最多 2s / 64 行）挡在门外
+    //（暂停监控前专门 flush 的残余恰好就是这批）
+    flushBlocking();
+    m_running = false;
     m_thread->quit();
     m_thread->wait();
     m_thread = nullptr;
@@ -226,11 +228,12 @@ void ActivityStore::sendAll()
 {
     if (!m_running)
         return;
-    for (const QString &stream : kStreamNames) {
-        const auto it = m_bufs.constFind(stream);
-        if (it == m_bufs.cend() || it->isEmpty())
-            continue;
-        emit linesReady(stream, *it);
+    // 全量流遍历：流名由写入方决定（monitor 三流 + goody 审计流 audit）。
+    // 白名单遍历会让未列出的流静默滞留缓冲并被 clear 吞掉（audit 曾因此
+    // 从未落盘）
+    for (auto it = m_bufs.constBegin(); it != m_bufs.constEnd(); ++it) {
+        if (!it->isEmpty())
+            emit linesReady(it.key(), *it);
     }
     m_bufs.clear();
 }

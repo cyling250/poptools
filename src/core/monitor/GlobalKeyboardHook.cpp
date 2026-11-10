@@ -24,11 +24,18 @@ LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             || msg == WM_KEYUP || msg == WM_SYSKEYUP) {
             const auto *info = reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam);
             const bool down = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+            // 捕获时刻的焦点控件（GetGUIThreadInfo 只读线程状态，µs 级，
+            // 不向目标进程发消息）：随事件入队后，打码判定在接收方按
+            // 捕获时刻的焦点做样式探测，消除"处理时刻已切窗"的时点差
+            GUITHREADINFO gi = {};
+            gi.cbSize = sizeof(gi);
+            const HWND focusHwnd = GetGUIThreadInfo(0, &gi) ? gi.hwndFocus : nullptr;
             QMetaObject::invokeMethod(g_consumer, "keyEvent", Qt::QueuedConnection,
                                       Q_ARG(int, static_cast<int>(info->vkCode)),
                                       Q_ARG(int, static_cast<int>(info->scanCode)),
                                       Q_ARG(bool, (info->flags & LLKHF_EXTENDED) != 0),
-                                      Q_ARG(bool, down));
+                                      Q_ARG(bool, down),
+                                      Q_ARG(quintptr, reinterpret_cast<quintptr>(focusHwnd)));
         }
     }
     return CallNextHookEx(nullptr, nCode, wParam, lParam);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
@@ -65,6 +66,10 @@ private:
 
     QString m_dir;
     QList<EntryMeta> m_entries;
+    // 正文缓存（id → 去头之后正文）：indexSummary 每回合读最多 30 个
+    // 文件是主线程 IO（红线1），条目小而有限，读过的正文常驻缓存；
+    // addEntry/removeEntry 同步维护
+    mutable QHash<QString, QString> m_contentCache;
 };
 
 // 记忆/任务工具组（注册进 ToolRegistry；两者由 GoodyModule 持有）

@@ -1,6 +1,7 @@
 #include "SnapshotOcrPipeline.h"
 
 #include <QDateTime>
+#include <QPointer>
 #include <QThreadPool>
 #include <QTimer>
 #include <algorithm>
@@ -96,19 +97,27 @@ void SnapshotOcrPipeline::captureNow()
     m_reqTitle = m_title;
     m_pending = true; // 在途期间新请求一律丢弃（下次上屏自然补拍）
 
-    // QPixmap→QImage 必须在 GUI 线程；裁剪与缩放（大图操作）挪线程池
+    // QPixmap→QImage 必须在 GUI 线程；裁剪与缩放（大图操作）挪线程池。
+    // 外层 lambda 以 QPointer 捕获：stopMonitor 直接 delete 管线时在途
+    // 任务不得访问悬垂对象（内层排队调用以 self 为接收者，销毁后自动
+    // 丢弃投递）
     QImage full = cap.screen.toImage();
     const QRect rel = crop.translated(-cap.physDesktop.topLeft());
-    QThreadPool::globalInstance()->start([this, full, rel] {
+    QPointer<SnapshotOcrPipeline> self(this);
+    QThreadPool::globalInstance()->start([self, full, rel] {
         QImage part = full.copy(rel); // 隐式共享深拷贝，主线程已不再写它
         if (part.width() > kMaxScaleWidth)
             part = part.scaledToWidth(kMaxScaleWidth, Qt::FastTransformation);
-        QMetaObject::invokeMethod(this, [this, part] {
-            if (!m_ocr || m_ocr->busy()) {
-                m_pending = false; // 引擎忙：丢弃本次
+        if (!self)
+            return; // 管线已销毁：结果作废（DailyAggregator 同款 QPointer 交付模式）
+        QMetaObject::invokeMethod(self.data(), [self, part] {
+            if (!self)
+                return;
+            if (!self->m_ocr || self->m_ocr->busy()) {
+                self->m_pending = false; // 引擎忙：丢弃本次
                 return;
             }
-            m_ocr->recognizeBoxes(part);
+            self->m_ocr->recognizeBoxes(part);
         }, Qt::QueuedConnection);
     });
 #endif
@@ -118,6 +127,12 @@ void SnapshotOcrPipeline::onOcrFinished(bool ok, const QVector<OcrBox> &boxes,
                                         const QString &error)
 {
     Q_UNUSED(error);
+    // 归属防护（红线3，对照 OcrController::m_ocrPending 先例）：AppServices.ocr
+    // 是多消费者共享单例（贴图/截图也在用）——无在途请求时的回包属于
+    // 其他消费者，直接丢弃。此前会把外部文本与陈旧基线做 diff、以监控
+    // 窗口名义写进 ocrtext.jsonl，并污染基线导致下次真增量丢失
+    if (!m_pending)
+        return;
     m_pending = false;
     if (!ok) {
         m_skipUntilMs = QDateTime::currentMSecsSinceEpoch() + kBackoffMs;

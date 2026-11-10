@@ -52,6 +52,7 @@ private:
     void openChat();
     void registerBuiltinTools();
     void setupMcp(); // mcp.json 服务器拉起 + 工具桥接（P6）
+    void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
     void sendMessage(const QString &text);
     void runTurn();
     void onTurnFinished(bool ok, const QJsonObject &assistantMessage, const QString &error);
@@ -80,6 +81,7 @@ private:
 
     QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
     int m_toolRounds = 0;          // 单次用户消息的工具回合计数（防失控循环）
+    bool m_toolPhase = false;      // 工具执行期（tool_calls 回填中）：sendMessage 守卫
 };
 
 } // namespace poptools

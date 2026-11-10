@@ -8,6 +8,7 @@
 namespace poptools {
 
 class ActivityStore;
+class ToolRegistry;
 
 // ============================================================
 // goody 权限管理器（对齐 ZCode 的三模式，用户在设置中自选）：
@@ -33,6 +34,10 @@ public:
     // auditStore 为组合根/模块注入的 ActivityStore（baseDir=goody），
     // 为空时不落审计（单测）
     explicit PermissionManager(ActivityStore *auditStore, QObject *parent = nullptr);
+
+    // 注入工具注册表：readOnly 判定以注册表声明为准；不注入时走保守
+    // 硬编码白名单（单测/极端场景）
+    void setToolRegistry(const ToolRegistry *registry) { m_registry = registry; }
 
     void setMode(Mode mode) { m_mode = mode; }
     Mode mode() const { return m_mode; }
@@ -60,6 +65,7 @@ private:
     Mode m_mode = Mode::Ask;
     QStringList m_alwaysAllow;
     QStringList m_shellPrefixes;
+    const ToolRegistry *m_registry = nullptr;
     ActivityStore *m_audit = nullptr;
 };
 

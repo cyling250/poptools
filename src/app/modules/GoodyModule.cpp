@@ -51,6 +51,7 @@ void GoodyModule::init(AppServices &services)
     m_auditStore->start();
 
     m_perm = new PermissionManager(m_auditStore, this);
+    m_perm->setToolRegistry(m_registry); // readOnly 判定以注册表为准（app.* 不再一刀切放行）
     m_client = new LlmClient(this);
     m_session = new ChatSession(goodyDir + QStringLiteral("/chat/sessions.json"), this);
     m_session->load();
@@ -67,20 +68,9 @@ void GoodyModule::init(AppServices &services)
         + QStringLiteral("/monitor");
     m_recordJob = new DailyRecordJob(monitorDir, goodyDir, this);
     m_scheduler = new Scheduler(this);
-    const Settings &st = Settings::instance();
-    if (st.assistantAutoSummarize()) {
-        m_scheduler->setDailyTask(
-            QStringLiteral("dailySummary"),
-            QTime::fromString(st.assistantSummaryTime(), QStringLiteral("HH:mm")),
-            [this] { m_recordJob->processPending(true, [this](int n, const QString &err) {
-                         if (n > 0 && m_services && m_services->notify)
-                             m_services->notify(QStringLiteral("Goody 管家"),
-                                                QStringLiteral("已生成 %1 份本日工作记录")
-                                                    .arg(n));
-                         Q_UNUSED(err);
-                     }); });
-        m_scheduler->start();
-        // 启动补账（延迟 5s：等事件循环与网络就绪；只补历史日，今天留给定时点）
+    applySummarySchedule();
+    // 启动补账（延迟 5s：等事件循环与网络就绪；只补历史日，今天留给定时点）
+    if (Settings::instance().assistantAutoSummarize()) {
         QTimer::singleShot(5000, this, [this] {
             if (Settings::instance().assistantAutoSummarize())
                 m_recordJob->processPending(false, [](int, const QString &) {});
@@ -122,6 +112,31 @@ void GoodyModule::onSettingsChanged()
         m_perm->setAlwaysAllowTools(s.assistantAlwaysAllowTools());
         m_perm->setShellAllowPrefixes(s.assistantShellAllowPrefixes());
     }
+    // 总结调度接线：总结时刻/自动开关改动即时生效（原实现须重启）
+    applySummarySchedule();
+}
+
+// 总结调度接线（init 与设置变更共用）：按当前设置注册/启停每日任务
+void GoodyModule::applySummarySchedule()
+{
+    if (!m_scheduler || !m_recordJob)
+        return;
+    const Settings &s = Settings::instance();
+    if (!s.assistantAutoSummarize()) {
+        m_scheduler->stop();
+        return;
+    }
+    m_scheduler->setDailyTask(
+        QStringLiteral("dailySummary"),
+        QTime::fromString(s.assistantSummaryTime(), QStringLiteral("HH:mm")),
+        [this] { m_recordJob->processPending(true, [this](int n, const QString &err) {
+                     if (n > 0 && m_services && m_services->notify)
+                         m_services->notify(QStringLiteral("Goody 管家"),
+                                            QStringLiteral("已生成 %1 份本日工作记录")
+                                                .arg(n));
+                     Q_UNUSED(err);
+                 }); });
+    m_scheduler->start();
 }
 
 void GoodyModule::registerBuiltinTools()
@@ -370,6 +385,12 @@ void GoodyModule::sendMessage(const QString &text)
 {
     if (m_client->busy())
         return;
+    // 工具执行期禁发新消息（busy 只覆盖请求在途，不覆盖工具执行与确认
+    // 等待）：此时 assistant(tool_calls) 与其 tool 结果尚未配对完成，新
+    // user 消息插进中间会让请求序列非法（API 400），旧工具结果还会以
+    // 新回合的名义交错执行
+    if (m_toolPhase)
+        return;
     if (Settings::instance().assistantApiKey().trimmed().isEmpty()) {
         ensureWindow();
         m_window->showErrorLine(
@@ -380,7 +401,7 @@ void GoodyModule::sendMessage(const QString &text)
     m_toolRounds = 0;
     m_window->appendUserBubble(text);
     m_session->append(QJsonObject{{"role", QStringLiteral("user")}, {"content", text}});
-    m_session->save();
+    m_session->saveSoon();
     runTurn();
 }
 
@@ -406,23 +427,45 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         if (!ok && error != QStringLiteral("已中止"))
             m_window->showErrorLine(QStringLiteral("请求失败：%1").arg(error));
     }
-    // 助手消息入会话（含被中止的半截内容，保持上下文连续）
-    m_session->append(assistantMessage);
-    m_session->save();
 
+    // 会话一致性护栏（P0：孤儿 tool_calls 会让之后每轮请求被 API 整包
+    // 拒绝且永久卡死）：失败/中止路径的消息可能带着已聚合的半截
+    // tool_calls，且不会再有工具执行——入会话前剥离 tool_calls 字段
+    //（保留正文，维持上下文连续）
+    QJsonObject msg = assistantMessage;
     if (!ok)
+        msg.remove(QStringLiteral("tool_calls"));
+    m_session->append(msg);
+    m_session->saveSoon();
+
+    if (!ok) {
+        m_toolPhase = false; // 中止收束工具执行期守卫
         return; // 失败/中止不再走工具链
+    }
 
     const QJsonArray toolCalls = assistantMessage.value(QStringLiteral("tool_calls")).toArray();
-    if (toolCalls.isEmpty())
-        return; // 普通回答，回合结束
+    if (toolCalls.isEmpty()) {
+        m_toolPhase = false; // 普通回答，回合结束
+        return;
+    }
 
     if (++m_toolRounds > kMaxToolRounds) {
+        // 轮次超限收尾：本轮 tool_calls 已随 assistant 消息入会话，必须
+        // 补齐 tool 结果再结束（否则留下非法序列，会话被永久拒绝）
+        for (const QJsonValue &tc : toolCalls) {
+            m_session->appendToolResult(
+                tc.toObject().value(QStringLiteral("id")).toString(),
+                QJsonObject{{"ok", false},
+                            {"error", QStringLiteral("工具调用轮次已达上限，已停止执行")}});
+        }
+        m_session->saveSoon();
+        m_toolPhase = false;
         if (m_window)
             m_window->showErrorLine(QStringLiteral("工具调用轮次过多（>%1），已停止。")
                                         .arg(kMaxToolRounds));
         return;
     }
+    m_toolPhase = true; // 进入工具执行期（sendMessage 守卫到结果回填完毕）
     m_pendingToolCalls = toolCalls;
     processNextToolCall();
 }
@@ -488,7 +531,7 @@ void GoodyModule::executeToolCall(const QString &toolCallId, const QString &name
 void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &result)
 {
     m_session->appendToolResult(toolCallId, result);
-    m_session->save();
+    m_session->saveSoon(); // 防抖：工具密集回合不再每个结果全量写盘
     if (m_window) {
         m_window->appendSystemLine(
             (result.value(QStringLiteral("ok")).toBool(true)
@@ -496,6 +539,8 @@ void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &res
                  : QStringLiteral("✗ 失败：%1"))
                 .arg(summarizeResult(result)));
     }
+    if (m_pendingToolCalls.isEmpty())
+        m_toolPhase = false; // 结果全部回填，工具执行期结束
     processNextToolCall();
 }
 

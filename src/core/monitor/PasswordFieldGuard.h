@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QtGlobal> // quintptr
+
 namespace poptools {
 
 // ============================================================
@@ -18,6 +20,12 @@ namespace PasswordFieldGuard {
 
 // 焦点是否在密码框（主线程调用；非主线程结果未定义）
 bool isPasswordFocused();
+
+// 针对指定焦点窗口判定（主线程调用）。供键盘监控在"捕获时刻"使用：
+// 钩子回调随事件带上当时的焦点 HWND（GetGUIThreadInfo µs 级），处理
+// 时刻再对本函数做样式探测——控件密码样式极少变化，迟到探测不改变
+// 结论；而按处理时刻的前台查询会漏掉"输完密码立刻切窗"的场景
+bool isPasswordWindow(quintptr hwnd);
 
 } // namespace PasswordFieldGuard
 

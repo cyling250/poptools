@@ -5,6 +5,8 @@
 #include <QObject>
 #include <QString>
 
+class QTimer;
+
 namespace poptools {
 
 // ============================================================
@@ -25,6 +27,9 @@ public:
 
     void load(); // 文件缺失/损坏 → 空会话
     void save(); // QSaveFile 原子落盘
+    // 防抖落盘：1s 内合并为一次写（工具密集回合的热路径用）；
+    // 退出 flush 走显式 save()
+    void saveSoon();
 
     const QJsonArray &messages() const { return m_messages; }
     int size() const { return m_messages.size(); }
@@ -41,6 +46,7 @@ private:
 
     QString m_path;
     QJsonArray m_messages;
+    QTimer *m_saveTimer = nullptr; // 防抖落盘定时器（单发）
 };
 
 } // namespace poptools

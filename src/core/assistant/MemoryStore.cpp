@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
@@ -21,6 +22,7 @@ MemoryStore::MemoryStore(const QString &baseDir, QObject *parent)
 void MemoryStore::load()
 {
     m_entries.clear();
+    m_contentCache.clear(); // 重载以文件为准（防外部改动后的陈旧正文）
     QFile f(m_dir + QStringLiteral("/index.json"));
     if (!f.open(QIODevice::ReadOnly))
         return; // 首次使用：空记忆
@@ -94,6 +96,7 @@ QString MemoryStore::addEntry(const QString &kind, const QStringList &tags,
     m.tags = tags;
     m.created = now;
     m_entries << m;
+    m_contentCache.insert(id, content.trimmed()); // 正文缓存与写盘同步（见 entryContent）
     saveIndex(m_dir, m_entries);
     return id;
 }
@@ -110,6 +113,11 @@ QString MemoryStore::entryPath(const QString &id) const
 
 QString MemoryStore::entryContent(const QString &id) const
 {
+    // 正文缓存命中即免读盘（indexSummary 每回合调、search 逐条比对，
+    // 此前每次都全量读文件——主线程 IO）
+    const auto cached = m_contentCache.constFind(id);
+    if (cached != m_contentCache.cend())
+        return *cached;
     QFile f(entryPath(id));
     if (!f.open(QIODevice::ReadOnly))
         return QString();
@@ -120,13 +128,16 @@ QString MemoryStore::entryContent(const QString &id) const
         if (end >= 0)
             text = text.mid(end + 3);
     }
-    return text.trimmed();
+    text = text.trimmed();
+    m_contentCache.insert(id, text);
+    return text;
 }
 
 QList<MemoryStore::SearchHit> MemoryStore::search(const QString &query)
 {
     QList<SearchHit> hits;
     const QString q = query.trimmed();
+    bool touched = false;
     for (const EntryMeta &m : m_entries) {
         // 命中判定：query 任一空格分词命中标签即中（正文按需比对）
         bool tagHit = q.isEmpty();
@@ -157,6 +168,7 @@ QList<MemoryStore::SearchHit> MemoryStore::search(const QString &query)
             if (e.id == m.id) {
                 ++e.hits;
                 e.lastHit = QDateTime::currentMSecsSinceEpoch();
+                touched = true;
             }
         }
         SearchHit h;
@@ -164,7 +176,8 @@ QList<MemoryStore::SearchHit> MemoryStore::search(const QString &query)
         h.excerpt = content.left(200);
         hits << h;
     }
-    saveIndex(m_dir, m_entries); // touch 落盘
+    if (touched)
+        saveIndex(m_dir, m_entries); // touch 落盘（无命中/无变化不再每次写）
     return hits;
 }
 
@@ -174,6 +187,7 @@ bool MemoryStore::removeEntry(const QString &id)
         if (m_entries.at(i).id == id) {
             QFile::remove(entryPath(id));
             m_entries.removeAt(i);
+            m_contentCache.remove(id);
             saveIndex(m_dir, m_entries);
             return true;
         }
@@ -190,7 +204,7 @@ QString MemoryStore::indexSummary(int maxEntries) const
     for (const EntryMeta &m : m_entries) {
         if (n >= maxEntries)
             break;
-        // 首行正文摘要（读文件开销可接受：条目数有限）
+        // 首行正文摘要（正文走缓存：每回合注入系统提示词，不能反复读盘）
         const QString content = entryContent(m.id);
         const QString firstLine =
             content.section(QLatin1Char('\n'), 0, 0).left(60);

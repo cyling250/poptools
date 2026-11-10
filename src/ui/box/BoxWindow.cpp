@@ -18,7 +18,9 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QPointer>
 #include <QStandardPaths>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 
@@ -45,7 +47,6 @@ constexpr int kRadius = 12;
 BoxWindow::BoxWindow(BoxStore *store, const QString &boxId, QWidget *parent)
     : QWidget(parent)
     , m_store(store)
-    , m_icons(&IconExtractor::instance())
     , m_boxId(boxId)
 {
     // 与日历同款窗口纪律：无框透明 + Tool（不进 Alt-Tab）+ 显示不激活；
@@ -134,7 +135,37 @@ void BoxWindow::refresh()
         m_items = entries.mid(0, m_rows * m_cols); // 几行几列的容量截断
     }
 
+    prefetchIcons();
     applyGeometry();
+}
+
+// 图标后台预取（红线1：shell 图标提取是磁盘/跨进程 COM，禁入主线程）：
+// 提取完回主线程入缓存并重绘。paint 只查缓存，首帧永不为提取阻塞
+//（在途期间画占位块）
+void BoxWindow::prefetchIcons()
+{
+    for (const QFileInfo &info : m_items) {
+        if (info.isDir())
+            continue; // 文件夹图标自绘，无需提取
+        const QString key = QDir::toNativeSeparators(info.filePath());
+        if (m_iconCache.contains(key) || m_iconPending.contains(key))
+            continue;
+        m_iconPending.insert(key);
+        QPointer<BoxWindow> self(this);
+        QThreadPool::globalInstance()->start([self, key] {
+            const QImage image = IconExtractor::extractShellImage(key);
+            if (!self)
+                return; // 窗口已销毁：结果作废
+            QMetaObject::invokeMethod(self.data(), [self, key, image] {
+                if (!self)
+                    return;
+                self->m_iconPending.remove(key);
+                if (!self->m_iconCache.contains(key))
+                    self->m_iconCache.insert(key, QPixmap::fromImage(image));
+                self->update();
+            }, Qt::QueuedConnection);
+        });
+    }
 }
 
 // 仓库外改（含本窗口 setBoxXxx 触发的 changed）：同步元数据
@@ -269,9 +300,11 @@ void BoxWindow::paintEvent(QPaintEvent * /*event*/)
         p.setPen(QColor(255, 255, 255, 150));
         f.setPixelSize(11);
         p.setFont(f);
-        const QString hint = QFileInfo::exists(m_dir)
-                                 ? QStringLiteral("把桌面文件拖进来收纳")
-                                 : QStringLiteral("目录不存在，右键标题可重新设置");
+        const QString hint = m_moveInFlight
+                                 ? QStringLiteral("收纳中…")
+                                 : (QFileInfo::exists(m_dir)
+                                        ? QStringLiteral("把桌面文件拖进来收纳")
+                                        : QStringLiteral("目录不存在，右键标题可重新设置"));
         p.drawText(rect().adjusted(kPad, kPad + kTitleHeight, -kPad, -kPad),
                    Qt::AlignCenter, hint);
         return;
@@ -288,16 +321,28 @@ void BoxWindow::paintEvent(QPaintEvent * /*event*/)
             p.fillPath(halo, QColor(255, 255, 255, 34));
         }
 
-        const QPixmap icon = info.isDir()
-                                 ? m_icons->folderIcon()
-                                 : m_icons->appIcon(QDir::toNativeSeparators(info.filePath()));
+        // 图标只查本地缓存（后台预取，见 prefetchIcons）；未就绪画占位块
+        const QString iconKey = QDir::toNativeSeparators(info.filePath());
+        const QPixmap icon = info.isDir() ? IconExtractor::instance().folderIcon()
+                                          : m_iconCache.value(iconKey);
         const QRect iconRect(cell.center().x() - 19, cell.top() + 3, 38, 38);
-        p.save();
-        QPainterPath clip;
-        clip.addRoundedRect(iconRect, 8, 8);
-        p.setClipPath(clip);
-        p.drawPixmap(iconRect, icon, QRectF(0, 0, icon.width(), icon.height()));
-        p.restore();
+        if (icon.isNull()) {
+            QPainterPath ph;
+            ph.addRoundedRect(iconRect.adjusted(6, 6, -6, -6), 8, 8);
+            p.fillPath(ph, QColor(0x4C, 0x52, 0x60));
+            QFont pf = p.font();
+            pf.setPixelSize(16);
+            p.setFont(pf);
+            p.setPen(QColor(255, 255, 255, 220));
+            p.drawText(iconRect, Qt::AlignCenter, info.completeBaseName().left(1).toUpper());
+        } else {
+            p.save();
+            QPainterPath clip;
+            clip.addRoundedRect(iconRect, 8, 8);
+            p.setClipPath(clip);
+            p.drawPixmap(iconRect, icon, QRectF(0, 0, icon.width(), icon.height()));
+            p.restore();
+        }
 
         p.setPen(QColor(255, 255, 255, 200));
         f.setPixelSize(10);
@@ -580,10 +625,26 @@ void BoxWindow::dropEvent(QDropEvent *event)
     if (urls.isEmpty())
         return;
     event->acceptProposedAction();
-    const QStringList failures = BoxStore::moveUrlsIntoDir(m_dir, urls);
-    if (!failures.isEmpty())
-        emit storageError(QStringLiteral("无法收纳：%1").arg(failures.join(QStringLiteral("、"))));
-    refresh();
+    // 磁盘 IO 禁入主线程（红线1，跨盘大文件会触发复制兜底）：移动挪
+    // 线程池，期间条目区显示"收纳中"，完成后回主线程刷新 + 气泡报错
+    const QString dir = m_dir;
+    m_moveInFlight = true;
+    update();
+    QPointer<BoxWindow> self(this);
+    QThreadPool::globalInstance()->start([self, dir, urls] {
+        const QStringList failures = BoxStore::moveUrlsIntoDir(dir, urls);
+        if (!self)
+            return; // 窗口已销毁：文件已移完，仅省去刷新
+        QMetaObject::invokeMethod(self.data(), [self, failures] {
+            if (!self)
+                return;
+            self->m_moveInFlight = false;
+            if (!failures.isEmpty())
+                emit self->storageError(QStringLiteral("无法收纳：%1")
+                                            .arg(failures.join(QStringLiteral("、"))));
+            self->refresh();
+        }, Qt::QueuedConnection);
+    });
 }
 
 // ---------- 贴桌与原生事件 ----------

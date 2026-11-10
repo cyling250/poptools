@@ -32,7 +32,7 @@ QPixmap IconExtractor::appIcon(const QString &target)
 
     QPixmap pixmap;
     if (QFile::exists(key))
-        pixmap = extractShellIcon(key);
+        pixmap = QPixmap::fromImage(extractShellImage(key));
     if (pixmap.isNull())
         pixmap = placeholderIcon(QFileInfo(key).completeBaseName());
     m_appCache.insert(key, pixmap);
@@ -43,15 +43,15 @@ QPixmap IconExtractor::appIcon(const QString &target)
 
 namespace {
 
-// HICON → QPixmap：GetIconInfo 拿到颜色位图后经 GetDIBits 读出 BGRA。
+// HICON → QImage：GetIconInfo 拿到颜色位图后经 GetDIBits 读出 BGRA。
 // 仅画 Dock 内部使用，不走 QIcon（规避 P-021）
-QPixmap pixmapFromHIcon(HICON icon)
+QImage imageFromHIcon(HICON icon)
 {
     ICONINFO info = {};
     if (!GetIconInfo(icon, &info))
-        return QPixmap();
+        return QImage();
 
-    QPixmap result;
+    QImage result;
     BITMAP bm = {};
     if (info.hbmColor && GetObject(info.hbmColor, sizeof(bm), &bm) && bm.bmWidth > 0) {
         const int w = bm.bmWidth, h = bm.bmHeight;
@@ -69,14 +69,14 @@ QPixmap pixmapFromHIcon(HICON icon)
                   DIB_RGB_COLORS);
         ReleaseDC(nullptr, hdc);
         // 预乘 alpha：jumbo 图标的 alpha 通道为非预乘，QImage 需归一
-        result = QPixmap::fromImage(img.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+        result = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     } else if (info.hbmMask) {
         // 无颜色位图（单色图标）：用掩码生成黑色剪影，至少保证有内容
         BITMAP bmMask = {};
         if (GetObject(info.hbmMask, sizeof(bmMask), &bmMask) && bmMask.bmWidth > 0) {
             QImage img(bmMask.bmWidth, bmMask.bmHeight / 2, QImage::Format_ARGB32);
             img.fill(QColor(40, 44, 52));
-            result = QPixmap::fromImage(img);
+            result = img;
         }
     }
     DeleteObject(info.hbmColor);
@@ -86,12 +86,21 @@ QPixmap pixmapFromHIcon(HICON icon)
 
 } // namespace
 
-QPixmap IconExtractor::extractShellIcon(const QString &target)
+QImage IconExtractor::extractShellImage(const QString &target)
 {
     const QString path = QDir::toNativeSeparators(target);
 
+    // shell 图像列表依赖 COM：工作线程内自初始化（主线程已由 Qt 初始化，
+    // 重复调用返回 S_FALSE 同样安全）；RAII 配对释放
+    struct ComInit
+    {
+        bool ok = false;
+        ComInit() { ok = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)); }
+        ~ComInit() { if (ok) CoUninitialize(); }
+    } com;
+
     // jumbo 图标：SHGetFileInfoW 拿系统图像列表索引 → SHGetImageList(SHIL_JUMBO)
-    // → IImageList::GetIcon。主线程 COM 由 QApplication(OleInitialize) 提供
+    // → IImageList::GetIcon
     SHFILEINFOW sfi = {};
     const uintptr_t listIndex = SHGetFileInfoW(reinterpret_cast<const wchar_t *>(path.utf16()),
                                                0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX);
@@ -102,11 +111,11 @@ QPixmap IconExtractor::extractShellIcon(const QString &target)
             HICON icon = nullptr;
             if (SUCCEEDED(jumbo->GetIcon(static_cast<int>(sfi.iIcon), ILD_TRANSPARENT, &icon))
                 && icon) {
-                QPixmap pixmap = pixmapFromHIcon(icon);
+                QImage image = imageFromHIcon(icon);
                 DestroyIcon(icon);
                 jumbo->Release();
-                if (!pixmap.isNull())
-                    return pixmap;
+                if (!image.isNull())
+                    return image;
             } else {
                 jumbo->Release();
             }
@@ -119,19 +128,19 @@ QPixmap IconExtractor::extractShellIcon(const QString &target)
     if (SHGetFileInfoW(reinterpret_cast<const wchar_t *>(path.utf16()), 0, &sfi2, sizeof(sfi2),
                        SHGFI_ICON | SHGFI_LARGEICON)
         && sfi2.hIcon) {
-        QPixmap pixmap = pixmapFromHIcon(sfi2.hIcon);
+        QImage image = imageFromHIcon(sfi2.hIcon);
         DestroyIcon(sfi2.hIcon);
-        return pixmap;
+        return image;
     }
-    return QPixmap();
+    return QImage();
 }
 
 #else
 
-QPixmap IconExtractor::extractShellIcon(const QString &target)
+QImage IconExtractor::extractShellImage(const QString &target)
 {
     Q_UNUSED(target);
-    return QPixmap();
+    return QImage();
 }
 
 #endif

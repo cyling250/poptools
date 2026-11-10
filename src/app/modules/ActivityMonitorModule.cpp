@@ -65,6 +65,13 @@ void ActivityMonitorModule::applyRunningState()
         startMonitor();
     else if (!want && m_store)
         stopMonitor();
+    else if (want && m_store
+             && Settings::instance().monitorRetentionDays() != m_appliedRetentionDays) {
+        // 保留天数改动即时生效（原实现从未接线，恒为默认 14 天）：重启
+        // store——prune 只在 start 时执行，毫秒级开销
+        stopMonitor();
+        startMonitor();
+    }
     if (m_trayAction)
         m_trayAction->setText(want ? QStringLiteral("活动监控：运行中（点击暂停）")
                                    : QStringLiteral("活动监控：已暂停（点击开启）"));
@@ -90,6 +97,9 @@ void ActivityMonitorModule::startMonitor()
     const Settings &s = Settings::instance();
 
     m_store = new ActivityStore(QString(), this);
+    // 保留天数须在 start 前设置（prune 只在启动时执行一次）
+    m_appliedRetentionDays = s.monitorRetentionDays();
+    m_store->setRetentionDays(m_appliedRetentionDays);
     m_store->start();
 
     m_composer = new KeyboardTextComposer(this);
@@ -102,12 +112,14 @@ void ActivityMonitorModule::startMonitor()
     m_tracker = new ForegroundTracker(this);
     m_mouseHook = new GlobalMouseHook(this);
 
-    // 键盘事件：down 才记键入；打码判定每键一次（GUITHREADINFO，µs 级）
+    // 键盘事件：down 才记键入；打码判定按捕获时刻（钩子回调入队时）的
+    // 焦点窗口做样式探测——按处理时刻查前台会漏掉"输完密码立刻切窗"
+    // 的场景（密码明文落盘）
     connect(m_kbHook, &GlobalKeyboardHook::keyEvent, this,
-            [this](int vk, int scan, bool ext, bool down) {
+            [this](int vk, int scan, bool ext, bool down, quintptr focusHwnd) {
                 if (down) {
                     m_composer->setMasked(Settings::instance().monitorMaskPasswords()
-                                              && PasswordFieldGuard::isPasswordFocused());
+                                              && PasswordFieldGuard::isPasswordWindow(focusHwnd));
                     m_composer->onKeyEvent(vk, scan, ext, down);
                     m_activity->noteKeydown();
                     if (m_imeDetector)

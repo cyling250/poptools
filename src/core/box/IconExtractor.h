@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QImage>
 #include <QPixmap>
 #include <QString>
 
@@ -26,10 +27,14 @@ public:
     // macOS 风格黄色文件夹图标（自绘，非系统文件夹图标）
     QPixmap folderIcon();
 
+    // 纯提取（无缓存，QImage 出货）：可在工作线程调用（线程内自初始化
+    // COM），供"后台提取图标 + 主线程 update 刷新"的绘制路径使用；
+    // 主线程调用同样安全
+    static QImage extractShellImage(const QString &target);
+
 private:
     IconExtractor() = default;
 
-    QPixmap extractShellIcon(const QString &target);
     QPixmap placeholderIcon(const QString &name);
 
     QHash<QString, QPixmap> m_appCache;
