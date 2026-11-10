@@ -101,7 +101,14 @@ void BoxModule::init(AppServices &services)
             }
             if (!Settings::instance().organizerEnabled())
                 Settings::instance().setOrganizerEnabled(true);
-            m_store->addBox(name, dir, x, y);
+            const QString id = m_store->addBox(name, dir, x, y);
+            if (id.isEmpty()) {
+                // addBox 失败（校验拒绝/目录创建失败）返回空 id：如实报错，
+                // 不再回 ok:true 让模型误以为建盒成功（B-8）
+                done(QJsonObject{{"ok", false},
+                                 {"error", QStringLiteral("收纳盒创建失败（目录无法创建？）")}});
+                return;
+            }
             QTimer::singleShot(0, QCoreApplication::instance(),
                                [this] { applyVisibility(); });
             done(QJsonObject{{"ok", true},

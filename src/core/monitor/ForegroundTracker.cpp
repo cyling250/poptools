@@ -70,19 +70,30 @@ void ForegroundTracker::start()
 {
     if (m_active)
         return;
-    m_active = true;
 #ifdef Q_OS_WIN
     Q_ASSERT(!g_tracker && "ForegroundTracker 目前只支持单实例");
     g_tracker = this;
     // WINEVENT_OUTOFCONTEXT：回调投递到安装线程（主线程）的消息循环
     g_eventHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                                   nullptr, winEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+    if (!g_eventHook) {
+        // 装钩失败（无障碍服务被禁/安全策略等，P2-10）：回滚为未激活并
+        // 告警——静默失败会让时间线与键入文本全无前台上下文（app/title
+        // 恒空）且无从排查（对照 GlobalKeyboardHook 的失败回退）
+        g_tracker = nullptr;
+        qWarning("ForegroundTracker: SetWinEventHook(EVENT_SYSTEM_FOREGROUND) 失败 err=%lu",
+                 GetLastError());
+        return;
+    }
+    m_active = true;
     // 启动即补发当前前台窗口（首个输入之前就有上下文）
     if (HWND fg = GetForegroundWindow()) {
         QMetaObject::invokeMethod(this, "onForegroundWindow", Qt::QueuedConnection,
                                   Q_ARG(qlonglong,
                                         static_cast<qlonglong>(reinterpret_cast<quintptr>(fg))));
     }
+#else
+    m_active = true;
 #endif
 }
 

@@ -280,6 +280,28 @@ void GoodyModule::ensureWindow()
     connect(m_window, &GoodyWindow::sendRequested, this, &GoodyModule::sendMessage);
     connect(m_window, &GoodyWindow::stopRequested, this, [this] { m_client->abort(); });
     connect(m_window, &GoodyWindow::sessionCleared, this, [this] {
+        // 工具执行期清空（B-2）：会话清空后，剩余/在途工具结果若继续回填
+        // 会留下孤儿 tool 序列（之后每轮请求被 API 整包拒绝且无法自愈）。
+        // 收束本轮：放弃剩余工具（按拒绝语义补审计），在途回调经 epoch
+        // 失配丢弃；窗口侧工具期已禁用清空按钮，此处是兜底
+        if (m_toolPhase) {
+            ++m_toolEpoch;
+            for (const QJsonValue &tc : m_pendingToolCalls) {
+                const QJsonObject fn =
+                    tc.toObject().value(QStringLiteral("function")).toObject();
+                m_perm->audit(m_registry->fromApiName(
+                                  fn.value(QStringLiteral("name")).toString()),
+                              QJsonDocument::fromJson(fn.value(QStringLiteral("arguments"))
+                                                          .toString()
+                                                          .toUtf8())
+                                  .object(),
+                              QStringLiteral("denied"), false);
+            }
+            m_pendingToolCalls = QJsonArray{};
+            m_toolPhase = false;
+            if (m_window)
+                m_window->showErrorLine(QStringLiteral("工具执行已随会话清空中止"));
+        }
         m_session->clear();
         m_session->save();
     });
@@ -388,9 +410,13 @@ void GoodyModule::sendMessage(const QString &text)
     // 工具执行期禁发新消息（busy 只覆盖请求在途，不覆盖工具执行与确认
     // 等待）：此时 assistant(tool_calls) 与其 tool 结果尚未配对完成，新
     // user 消息插进中间会让请求序列非法（API 400），旧工具结果还会以
-    // 新回合的名义交错执行
-    if (m_toolPhase)
+    // 新回合的名义交错执行。守卫分支必须给用户可见反馈——文字已从输入
+    // 框清空，静默 return 会让用户无感丢失（B-3）
+    if (m_toolPhase) {
+        if (m_window)
+            m_window->showErrorLine(QStringLiteral("工具执行中，请等当前操作完成后再发送"));
         return;
+    }
     if (Settings::instance().assistantApiKey().trimmed().isEmpty()) {
         ensureWindow();
         m_window->showErrorLine(
@@ -435,17 +461,24 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
     QJsonObject msg = assistantMessage;
     if (!ok)
         msg.remove(QStringLiteral("tool_calls"));
+    // 本地中止标记（LlmClient 插入，无任何消费方）不随会话回传：网关对
+    // message 内非标准字段的容忍度无文档承诺，剥除后请求体只含标准字段
+    msg.remove(QStringLiteral("aborted"));
     m_session->append(msg);
     m_session->saveSoon();
 
     if (!ok) {
         m_toolPhase = false; // 中止收束工具执行期守卫
+        if (m_window)
+            m_window->setToolPhase(false);
         return; // 失败/中止不再走工具链
     }
 
     const QJsonArray toolCalls = assistantMessage.value(QStringLiteral("tool_calls")).toArray();
     if (toolCalls.isEmpty()) {
         m_toolPhase = false; // 普通回答，回合结束
+        if (m_window)
+            m_window->setToolPhase(false);
         return;
     }
 
@@ -460,12 +493,16 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         }
         m_session->saveSoon();
         m_toolPhase = false;
-        if (m_window)
+        if (m_window) {
+            m_window->setToolPhase(false);
             m_window->showErrorLine(QStringLiteral("工具调用轮次过多（>%1），已停止。")
                                         .arg(kMaxToolRounds));
+        }
         return;
     }
     m_toolPhase = true; // 进入工具执行期（sendMessage 守卫到结果回填完毕）
+    if (m_window)
+        m_window->setToolPhase(true); // 工具期禁用「清空」（防孤儿 tool 序列）
     m_pendingToolCalls = toolCalls;
     processNextToolCall();
 }
@@ -501,8 +538,11 @@ void GoodyModule::processNextToolCall()
                                      {"error", QStringLiteral("无聊天窗交互，已拒绝")}});
         return;
     }
+    const qint64 epoch = m_toolEpoch; // 会话清空收束代数：失配即过期回调
     m_window->promptPermission(name, summarizeArgs(args),
-                               [this, id, name, args](bool allowed, bool always) {
+                               [this, id, name, args, epoch](bool allowed, bool always) {
+                                   if (epoch != m_toolEpoch)
+                                       return; // 会话已清空收束：丢弃，不回填结果
                                    if (always && allowed) {
                                        m_perm->grantAlways(name);
                                        Settings::instance().setAssistantAlwaysAllowTools(
@@ -523,7 +563,10 @@ void GoodyModule::executeToolCall(const QString &toolCallId, const QString &name
                                   const QJsonObject &args)
 {
     m_perm->audit(name, args, QStringLiteral("allowed"), true);
-    m_registry->invoke(name, args, [this, toolCallId](const QJsonObject &result) {
+    const qint64 epoch = m_toolEpoch; // 会话清空收束代数：失配即过期回调
+    m_registry->invoke(name, args, [this, toolCallId, epoch](const QJsonObject &result) {
+        if (epoch != m_toolEpoch)
+            return; // 会话已清空收束：在途结果丢弃（避免孤儿 tool 入会话）
         toolCallDone(toolCallId, result);
     });
 }
@@ -539,8 +582,11 @@ void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &res
                  : QStringLiteral("✗ 失败：%1"))
                 .arg(summarizeResult(result)));
     }
-    if (m_pendingToolCalls.isEmpty())
+    if (m_pendingToolCalls.isEmpty() && m_toolPhase) {
         m_toolPhase = false; // 结果全部回填，工具执行期结束
+        if (m_window)
+            m_window->setToolPhase(false);
+    }
     processNextToolCall();
 }
 

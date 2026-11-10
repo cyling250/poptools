@@ -9,6 +9,33 @@
 
 namespace poptools {
 
+namespace {
+// 采集上限：边读边计数，累计达上限后只排空管道不再缓存——不再全量
+// 缓冲后截断（Get-Content huge.log 曾无界吃内存）。结果侧仍按 16KB/8KB
+// 截断回传（LLM 上下文体量约束）
+constexpr qint64 kMaxCaptureBytes = 2 * 1024 * 1024;
+
+// 排空指定通道进 buf（循环读，单块 64KB）；超限后继续排空但不缓存
+//（管道滞留会卡死子进程）
+void drainChannel(QProcess *proc, QProcess::ProcessChannel channel, QByteArray *buf,
+                  bool *cut, qint64 cap)
+{
+    proc->setReadChannel(channel);
+    forever {
+        const QByteArray chunk = proc->read(64 * 1024);
+        if (chunk.isEmpty())
+            break;
+        if (buf->size() >= cap) {
+            *cut = true;
+            continue;
+        }
+        buf->append(chunk.left(cap - buf->size()));
+        if (buf->size() >= cap)
+            *cut = true;
+    }
+}
+} // namespace
+
 ToolDef makeShellRunTool()
 {
     ToolDef d;
@@ -49,6 +76,12 @@ ToolDef makeShellRunTool()
             }
         };
 
+        // 流式采集缓冲与截断标记（生命周期跨 readyRead/finished，用 shared_ptr 挂住）
+        auto outBuf = std::make_shared<QByteArray>();
+        auto errBuf = std::make_shared<QByteArray>();
+        auto outCut = std::make_shared<bool>(false);
+        auto errCut = std::make_shared<bool>(false);
+
         auto *proc = new QProcess(); // 无父对象：完成后 deleteLater 自清
         proc->setWorkingDirectory(QDir::homePath());
         // 输出编码：控制台代码页不可控（中文 Windows 常为 GBK），先在会话内
@@ -56,11 +89,29 @@ ToolDef makeShellRunTool()
         const QString fullCmd = QStringLiteral(
             "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ")
             + command;
+        // 边读边计数：readyRead 循环排空，累计达 2MB 上限即停止缓存
+        QObject::connect(proc, &QProcess::readyReadStandardOutput, proc,
+                         [proc, outBuf, outCut] {
+                             drainChannel(proc, QProcess::StandardOutput, outBuf.get(),
+                                          outCut.get(), kMaxCaptureBytes);
+                         });
+        QObject::connect(proc, &QProcess::readyReadStandardError, proc,
+                         [proc, errBuf, errCut] {
+                             drainChannel(proc, QProcess::StandardError, errBuf.get(),
+                                          errCut.get(), kMaxCaptureBytes);
+                         });
         QObject::connect(proc, &QProcess::finished, proc,
-                         [proc, once](int exitCode, QProcess::ExitStatus st) {
+                         [proc, once, outBuf, errBuf, outCut, errCut](int exitCode,
+                                                                      QProcess::ExitStatus st) {
+                             // 收尾再排一次：进程终止后管道内的残余数据可能晚于
+                             // 最后一次 readyRead 到达
+                             drainChannel(proc, QProcess::StandardOutput, outBuf.get(),
+                                          outCut.get(), kMaxCaptureBytes);
+                             drainChannel(proc, QProcess::StandardError, errBuf.get(),
+                                          errCut.get(), kMaxCaptureBytes);
                              QJsonObject r;
-                             const QString out = QString::fromUtf8(proc->readAllStandardOutput());
-                             const QString err = QString::fromUtf8(proc->readAllStandardError());
+                             const QString out = QString::fromUtf8(*outBuf);
+                             const QString err = QString::fromUtf8(*errBuf);
                              r.insert(QStringLiteral("ok"),
                                       st == QProcess::NormalExit && exitCode == 0);
                              r.insert(QStringLiteral("exitCode"), exitCode);
@@ -68,6 +119,9 @@ ToolDef makeShellRunTool()
                                  r.insert(QStringLiteral("output"), out.left(16 * 1024));
                              if (!err.isEmpty())
                                  r.insert(QStringLiteral("stderr"), err.left(8 * 1024));
+                             if (*outCut || *errCut)
+                                 r.insert(QStringLiteral("note"),
+                                          QStringLiteral("输出超过 2MB，超出部分已丢弃"));
                              if (st == QProcess::CrashExit)
                                  r.insert(QStringLiteral("error"),
                                           QStringLiteral("进程被终止（超时或崩溃）"));

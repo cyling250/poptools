@@ -34,10 +34,11 @@ QString groupExcerpt(const TextGroup &g)
     QString joined = g.chunks.join(QStringLiteral(" "));
     if (joined.size() > kExcerptChars)
         joined = joined.left(kExcerptChars) + QStringLiteral("…");
+    // 多参单次 arg：一次替换 %1-%4，键入/OCR 文本里的 %N 不被后续 arg
+    // 二次展开（链式 arg 曾把字数注入含 %3 的标题段）
     return QStringLiteral("[%1 — %2] 共%3字：%4")
-        .arg(g.app, g.title.left(60))
-        .arg(g.totalChars)
-        .arg(joined.replace(QLatin1Char('\n'), QStringLiteral("⏎")));
+        .arg(g.app, g.title.left(60), QString::number(g.totalChars),
+             joined.replace(QLatin1Char('\n'), QStringLiteral("⏎")));
 }
 } // namespace
 

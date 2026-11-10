@@ -40,12 +40,21 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
             return;
         }
         const QString stream = args.value(QStringLiteral("stream")).toString(QStringLiteral("all"));
+        // 流名白名单：stream 原样拼进日志路径，白名单外（含 "../" 穿越
+        // 片段）一律拒绝——否则该 readOnly 工具可读盘上任意 .jsonl 文件
         QStringList streams;
         if (stream == QLatin1String("all"))
             streams << QStringLiteral("timeline") << QStringLiteral("keys")
                     << QStringLiteral("ocrtext");
-        else
+        else if (stream == QLatin1String("timeline") || stream == QLatin1String("keys")
+                 || stream == QLatin1String("ocrtext"))
             streams << stream;
+        else {
+            done(QJsonObject{{"ok", false},
+                             {"error",
+                              QStringLiteral("stream 仅支持 timeline/keys/ocrtext/all")}});
+            return;
+        }
         const int maxLines = qBound(1, args.value(QStringLiteral("max_lines")).toInt(200), 500);
 
         const QPointer<QObject> anchor(ctx);

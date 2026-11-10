@@ -50,6 +50,7 @@ private:
     std::function<void(int, const QString &)> m_done;
     int m_processed = 0;
     QString m_lastError;
+    bool m_busy = false;      // 重入闸门：processPending/runForDate 全入口统一拒绝并发轮次
 };
 
 } // namespace poptools

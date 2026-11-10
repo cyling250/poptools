@@ -65,12 +65,18 @@ void ActivityMonitorModule::applyRunningState()
         startMonitor();
     else if (!want && m_store)
         stopMonitor();
-    else if (want && m_store
-             && Settings::instance().monitorRetentionDays() != m_appliedRetentionDays) {
-        // 保留天数改动即时生效（原实现从未接线，恒为默认 14 天）：重启
-        // store——prune 只在 start 时执行，毫秒级开销
-        stopMonitor();
-        startMonitor();
+    else if (want && m_store) {
+        // 参数变化即时生效：保留天数 / 空闲阈值 / OCR 快照开关任一改动都
+        // 重启监控——三项均在 start 时注入（prune 只在 store start 时执行，
+        // idle 阈值在 monitor 构造时注入，OCR 链按开关装配），重启路径经
+        // stop() 的 flushBlocking，不丢缓冲
+        const Settings &s = Settings::instance();
+        if (s.monitorRetentionDays() != m_appliedRetentionDays
+            || s.monitorIdleThresholdSec() != m_appliedIdleThresholdSec
+            || s.monitorOcrSnapshot() != m_appliedOcrSnapshot) {
+            stopMonitor();
+            startMonitor();
+        }
     }
     if (m_trayAction)
         m_trayAction->setText(want ? QStringLiteral("活动监控：运行中（点击暂停）")
@@ -106,7 +112,8 @@ void ActivityMonitorModule::startMonitor()
     m_composer->setMaskPasswords(s.monitorMaskPasswords());
 
     m_activity = new InputActivityMonitor(this);
-    m_activity->setIdleThresholdSec(s.monitorIdleThresholdSec());
+    m_appliedIdleThresholdSec = s.monitorIdleThresholdSec();
+    m_activity->setIdleThresholdSec(m_appliedIdleThresholdSec);
 
     m_kbHook = new GlobalKeyboardHook(this);
     m_tracker = new ForegroundTracker(this);
@@ -167,6 +174,7 @@ void ActivityMonitorModule::startMonitor()
             });
 
     // ---- 中文上屏 OCR 快照链（可选：设置开关 + 共享 OCR 引擎可用） ----
+    m_appliedOcrSnapshot = s.monitorOcrSnapshot();
     if (s.monitorOcrSnapshot() && m_services && m_services->ocr) {
         m_imeDetector = new ImeCommitDetector(this);
         m_ocrPipeline = new SnapshotOcrPipeline(m_services->ocr, this);

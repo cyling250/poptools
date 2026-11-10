@@ -61,7 +61,9 @@ private:
     ImeCommitDetector *m_imeDetector = nullptr;   // OCR 快照链（可选）
     SnapshotOcrPipeline *m_ocrPipeline = nullptr; // 上屏 → 截图 → OCR → 增量
     QTimer *m_tick = nullptr;
-    int m_appliedRetentionDays = -1; // 最近一次启动注入 store 的保留天数（变化时重启）
+    int m_appliedRetentionDays = -1;     // 最近一次启动注入 store 的保留天数（变化时重启）
+    int m_appliedIdleThresholdSec = -1;  // 最近一次启动注入 monitor 的空闲阈值（变化时重启）
+    bool m_appliedOcrSnapshot = false;   // 最近一次启动装配 OCR 链的开关（变化时重启）
 };
 
 } // namespace poptools

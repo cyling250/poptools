@@ -162,7 +162,10 @@ QJsonObject WorkingMemory::completeTask(const QString &id, const QString &summar
         safeTitle = QStringLiteral("task");
     const QString path = m_archiveDir + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd")
         + QLatin1Char('-') + safeTitle + QStringLiteral(".md");
-    QFile md(path);
+    // 归档原子写（QSaveFile，B-9①）：直写曾半截留档；写失败时任务保留在
+    // 工作集可重试，不再静默丢档（原实现 open 失败也照常移除并删任务文件）
+    QSaveFile md(path);
+    bool archived = false;
     if (md.open(QIODevice::WriteOnly | QIODevice::Text)) {
         md.write(QStringLiteral("# %1\n\n- 开始：%2\n- 结束：%3\n- 目标：%4\n\n## 收尾摘要\n\n%5\n\n## 过程笔记\n")
                      .arg(t->title,
@@ -173,6 +176,12 @@ QJsonObject WorkingMemory::completeTask(const QString &id, const QString &summar
                      .toUtf8());
         for (const QString &n : t->notes)
             md.write(QStringLiteral("- %1\n").arg(n).toUtf8());
+        archived = md.commit();
+    }
+    if (!archived) {
+        return QJsonObject{{"ok", false},
+                           {"error",
+                            QStringLiteral("归档写入失败（任务已保留，可重试）：%1").arg(path)}};
     }
 
     // 从工作集移除（上下文释放）+ 删任务文件
@@ -195,11 +204,14 @@ QString WorkingMemory::promptBlock() const
         return QString();
     QStringList lines;
     for (const Task &t : m_tasks) {
+        // 多参单次 arg（B-9②）：一次替换 %1-%4，此后不再对含用户文本的
+        // 结果调 arg——标题/目标里的 %N 保持字面（链式 arg 曾把笔记数
+        // 注入含 %4 的标题段）
         lines << QStringLiteral("- [%1] %2%3（进度笔记 %4 条）")
                      .arg(t.id, t.title,
                           t.goal.isEmpty() ? QString()
-                                           : QStringLiteral("：") + t.goal.left(60))
-                     .arg(t.notes.size());
+                                           : QStringLiteral("：") + t.goal.left(60),
+                          QString::number(t.notes.size()));
     }
     return QStringLiteral(
         "当前挂起的工作任务（开工前先看这里，命中即续用 task.start；完成后 task.complete 归档释放）：\n%1")

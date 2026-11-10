@@ -82,6 +82,8 @@ private:
     QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
     int m_toolRounds = 0;          // 单次用户消息的工具回合计数（防失控循环）
     bool m_toolPhase = false;      // 工具执行期（tool_calls 回填中）：sendMessage 守卫
+    qint64 m_toolEpoch = 0;        // 会话清空收束代数（清空时 +1）：在途工具/
+                                   // 确认回调按代数失配丢弃，防孤儿 tool 入会话
 };
 
 } // namespace poptools

@@ -36,10 +36,24 @@ void BoxStore::load()
     m_boxes.clear();
 
     QFile file(m_filePath);
-    if (file.open(QIODevice::ReadOnly)) {
-        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        fromJson(doc.object().value("boxes").toArray());
+    if (!file.open(QIODevice::ReadOnly))
+        return; // 首次使用：空仓库
+    const QByteArray raw = file.readAll();
+    file.close();
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isObject()) {
+        // 数据损坏（非 JSON/半截文件）：先把原件备份为 .bad 再空载——否则
+        // 之后的任意一次 save 都会用空列表覆盖原文件，盒子清单永久丢失
+        const QString badPath = m_filePath + QStringLiteral(".bad");
+        QFile::remove(badPath);
+        if (QFile::copy(m_filePath, badPath))
+            qWarning("收纳盒数据损坏，原件已备份为 %s", qUtf8Printable(badPath));
+        else
+            qWarning("收纳盒数据损坏，且备份失败：%s", qUtf8Printable(m_filePath));
+        return;
     }
+    fromJson(doc.object().value("boxes").toArray());
 }
 
 void BoxStore::save()
@@ -81,9 +95,10 @@ QString BoxStore::addBox(const QString &name, const QString &dir, int x, int y)
         cleanDir = QDir(dirInput).absolutePath();
     }
 
-    // 目录不存在时创建（存在则直接用——收纳已有的文件夹）
-    if (!QFileInfo::exists(cleanDir))
-        QDir().mkpath(cleanDir);
+    // 目录不存在时创建（存在则直接用——收纳已有的文件夹）；创建失败
+    //（盘不可写/路径非法）返回空 id——调用方（托盘/工具）据此报失败
+    if (!QFileInfo::exists(cleanDir) && !QDir().mkpath(cleanDir))
+        return QString();
 
     // 名称去重（盒子标题，同目录名不再强绑）
     QSet<QString> used;
@@ -197,44 +212,6 @@ bool BoxStore::setBoxCollapsed(const QString &id, bool collapsed)
     return false;
 }
 
-// ---------- 解散 ----------
-
-// 解散：目录内容全部移回桌面，随后删除盒子与腾空的目录。
-// 有条目移动失败时不删盒子（文件留在原处），返回失败清单。
-QStringList BoxStore::dissolveBox(const QString &id)
-{
-    for (const DesktopBox &box : m_boxes) {
-        if (box.id != id)
-            continue;
-
-        const QString desktop = QStandardPaths::writableLocation(
-            QStandardPaths::DesktopLocation);
-        QDir dir(box.dir);
-        QStringList failures;
-        const QFileInfoList entries =
-            dir.entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot,
-                              QDir::DirsFirst | QDir::Name);
-        for (const QFileInfo &info : entries) {
-            const QString target = uniqueTargetPath(desktop, info.fileName());
-            if (QFile::rename(info.filePath(), target))
-                continue;
-            // 跨盘移动：复制 + 删除兜底
-            if (QFile::copy(info.filePath(), target) && QFile::remove(info.filePath()))
-                continue;
-            failures << info.fileName();
-        }
-        if (!failures.isEmpty())
-            return failures; // 有失败：盒子与剩余文件原样保留
-
-        // 目录已腾空 → 删空目录（删除失败时仅遗留空文件夹，无害不删）
-        QDir().rmdir(box.dir);
-
-        removeBox(id); // save + changed
-        return {};
-    }
-    return {};
-}
-
 // ---------- 文件收纳操作 ----------
 
 QString BoxStore::uniqueTargetPath(const QString &dir, const QString &fileName)
@@ -255,21 +232,38 @@ QString BoxStore::uniqueTargetPath(const QString &dir, const QString &fileName)
     }
 }
 
+// 单条目移动：rename 优先，失败（跨盘）走复制+删除兜底。纯 FS 操作，
+// 无共享状态，可在工作线程调用
+static bool moveEntryIntoDir(const QFileInfo &info, const QString &dir)
+{
+    const QString target = BoxStore::uniqueTargetPath(dir, info.fileName());
+    if (QFile::rename(info.filePath(), target))
+        return true;
+    return QFile::copy(info.filePath(), target) && QFile::remove(info.filePath());
+}
+
 QStringList BoxStore::moveUrlsIntoDir(const QString &dir, const QList<QUrl> &urls)
 {
     QStringList failures;
     for (const QUrl &url : urls) {
-        const QString path = url.toLocalFile();
-        const QFileInfo info(path);
+        const QFileInfo info(url.toLocalFile());
         if (!info.exists() || !info.isFile())
             continue; // 目录条目/无效项跳过（盒子内可手动整理）
-        const QString target = uniqueTargetPath(dir, info.fileName());
-        if (QFile::rename(path, target))
-            continue;
-        // 跨盘移动：rename 失败时复制 + 删除兜底
-        if (QFile::copy(path, target) && QFile::remove(path))
-            continue;
-        failures << info.fileName();
+        if (!moveEntryIntoDir(info, dir))
+            failures << info.fileName();
+    }
+    return failures;
+}
+
+QStringList BoxStore::moveDirContents(const QString &fromDir, const QString &toDir)
+{
+    QStringList failures;
+    const QFileInfoList entries =
+        QDir(fromDir).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot,
+                                    QDir::DirsFirst | QDir::Name);
+    for (const QFileInfo &info : entries) {
+        if (!moveEntryIntoDir(info, toDir))
+            failures << info.fileName(); // 子目录跨盘无法复制兜底，与原行为一致
     }
     return failures;
 }

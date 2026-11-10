@@ -60,10 +60,10 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     title->setObjectName("goodyTitle");
     headerLay->addWidget(title);
     headerLay->addStretch();
-    auto *clearBtn = new QPushButton(QStringLiteral("清空"), header);
-    clearBtn->setObjectName("goodyHeaderBtn");
-    clearBtn->setToolTip(QStringLiteral("清空当前会话（记忆与日志不受影响）"));
-    headerLay->addWidget(clearBtn);
+    m_clearBtn = new QPushButton(QStringLiteral("清空"), header);
+    m_clearBtn->setObjectName("goodyHeaderBtn");
+    m_clearBtn->setToolTip(QStringLiteral("清空当前会话（记忆与日志不受影响）"));
+    headerLay->addWidget(m_clearBtn);
     auto *closeBtn = new QPushButton(QStringLiteral("✕"), header);
     closeBtn->setObjectName("goodyHeaderBtn");
     closeBtn->setFixedSize(26, 24);
@@ -142,7 +142,7 @@ GoodyWindow::GoodyWindow(QWidget *parent)
         emit sendRequested(text);
     });
     connect(closeBtn, &QPushButton::clicked, this, &QWidget::hide);
-    connect(clearBtn, &QPushButton::clicked, this, [this] {
+    connect(m_clearBtn, &QPushButton::clicked, this, [this] {
         m_bubbles.clear();
         renderTranscript();
         emit sessionCleared();
@@ -363,6 +363,15 @@ void GoodyWindow::setBusy(bool on)
     m_busy = on;
     m_sendBtn->setText(on ? QStringLiteral("停止") : QStringLiteral("发送"));
     m_input->setEnabled(true); // busy 时仍可输入下一条，但 Enter 不发送
+}
+
+void GoodyWindow::setToolPhase(bool on)
+{
+    // 工具执行期（含权限确认等待）禁用「清空」：会话清空后剩余工具结果
+    // 继续回填会留下孤儿 tool 序列，之后每轮请求被 API 整包拒绝
+    m_clearBtn->setEnabled(!on);
+    m_clearBtn->setToolTip(on ? QStringLiteral("工具执行中，暂不可清空会话")
+                              : QStringLiteral("清空当前会话（记忆与日志不受影响）"));
 }
 
 } // namespace poptools

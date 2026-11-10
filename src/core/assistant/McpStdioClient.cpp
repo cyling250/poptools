@@ -163,12 +163,10 @@ void McpStdioClient::listTools(
         return;
     }
     const int id = m_nextId++;
-    auto timer = new QTimer(this);
-    timer->setSingleShot(true);
-    connect(timer, &QTimer::timeout, this, [this, timer] { timer->deleteLater(); });
-    m_pending.insert(id, [this, done, timer](const QJsonObject &result) {
-        timer->stop();
-        timer->deleteLater();
+    // 看门狗用下方 singleShot 实现（B-7：原此处有一个从未 start 的死代码
+    // QTimer，仅在 pending 回调里 deleteLater——超时路径不经过回调，每个
+    // 超时请求泄漏一个；直接删除，回调不再持有定时器）
+    m_pending.insert(id, [this, done](const QJsonObject &result) {
         if (result.contains(QStringLiteral("error"))) {
             done(false, {},
                  result.value(QStringLiteral("error"))

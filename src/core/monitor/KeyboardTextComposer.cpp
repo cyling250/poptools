@@ -65,8 +65,12 @@ void KeyboardTextComposer::onKeyEvent(int vk, int scan, bool extended, bool down
         return;
     }
 
-    // Ctrl/Alt 组合键是快捷键而非"写内容"，不记录
-    if (m_ctrl || m_alt)
+    // Ctrl/Alt 组合键是快捷键而非"写内容"，不记录。例外：AltGr 字符键
+    //（Windows 上表现为 Ctrl+Alt 同按，@ € \ 等，P2-6 原实现被整体吞掉）——
+    // 放行到下方流程：密码段记占位符；普通段交 ToUnicodeEx 按修饰态翻译，
+    // 产出可打印字符才记录（真快捷键多半得控制码/无产出，自然过滤）
+    const bool altGr = m_ctrl && m_alt;
+    if ((m_ctrl || m_alt) && !altGr)
         return;
 
     if (m_maskPasswords && m_maskedNow) {

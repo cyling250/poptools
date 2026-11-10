@@ -9,9 +9,11 @@
 #include "app/FeatureRegistry.h"
 #include "core/assistant/ChatSession.h"
 #include "core/assistant/DailyAggregator.h"
+#include "core/assistant/FsTool.h"
 #include "core/assistant/LlmClient.h"
 #include "core/assistant/McpStdioClient.h"
 #include "core/assistant/MemoryStore.h"
+#include "core/assistant/MonitorQueryTool.h"
 #include "core/assistant/PermissionManager.h"
 #include "core/assistant/Scheduler.h"
 #include "core/assistant/ToolRegistry.h"
@@ -1378,6 +1380,293 @@ private slots:
         s.setDailyTask(QStringLiteral("t"), QTime(23, 59), [&runs] { ++runs; }); // 改时刻
         s.tick(); // 当天已跑过：不得重复触发
         QCOMPARE(runs, 1);
+    }
+
+    // ============================================================
+    // Round2 审查修复回归
+    // ============================================================
+
+    // ---- ChatSession 回归（P0-3 补强）：混合历史（纯问答 + 大小不一的
+    //      工具组）+ 头部孤儿 tool 脏数据——截断点落在组中间时整组淘汰，
+    //      孤儿 tool 自愈删除；配对完整性是断言点（R1 用例为固定 3 条组
+    //      恰好整除，未触发这两条路径） ----
+    void chat_session_trim_mixed_groups_mid_cut()
+    {
+        ChatSession s(QStringLiteral("trim-mixed-unused.json"));
+        s.setSystemPrompt(QStringLiteral("sys"));
+        // 人为塞一条孤儿 tool（无前置 assistant 的旧脏数据），排最旧
+        s.appendToolResult(QStringLiteral("orphan0"), QJsonObject{{"ok", true}});
+        for (int i = 0; i < 5; ++i) {
+            s.append(QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
+            if (i % 2 == 0) { // 工具组（3 条）
+                s.append(QJsonObject{
+                    {"role", "assistant"},
+                    {"content", QString()},
+                    {"tool_calls", QJsonArray{QJsonObject{
+                        {"id", QStringLiteral("c%1").arg(i)},
+                        {"type", QStringLiteral("function")},
+                        {"function", QJsonObject{{"name", QStringLiteral("fs_read")},
+                                                 {"arguments", QStringLiteral("{}")}}}}}}});
+                s.appendToolResult(QStringLiteral("c%1").arg(i), QJsonObject{{"ok", true}});
+            } else { // 纯问答（2 条）
+                s.append(QJsonObject{{"role", "assistant"}, {"content", QStringLiteral("ok")}});
+            }
+        }
+        // 继续追加普通问答对直到溢出：总量 1(sys)+1(孤儿)+13+16×2 = 47 > 41
+        for (int i = 0; i < 16; ++i) {
+            s.append(QJsonObject{{"role", "user"}, {"content", QStringLiteral("p%1").arg(i)}});
+            s.append(QJsonObject{{"role", "assistant"},
+                                 {"content", QStringLiteral("r%1").arg(i)}});
+        }
+
+        const QJsonArray msgs = s.messages();
+        QCOMPARE(msgs.first().toObject().value("role").toString(), QStringLiteral("system"));
+        QVERIFY(msgs.size() <= 41);
+        // 孤儿自愈：最旧的孤儿 tool（orphan0）已被单条淘汰
+        for (const QJsonValue &v : msgs)
+            QVERIFY(v.toObject().value("tool_call_id").toString()
+                    != QStringLiteral("orphan0"));
+        // 配对完整性：tool 必有前置 assistant(tool_calls)；tool_calls 必有
+        // 后继 tool（截断点落组中间 = 整组淘汰，不得拆散）
+        for (int i = 1; i < msgs.size(); ++i) {
+            const QJsonObject o = msgs.at(i).toObject();
+            const QString role = o.value(QStringLiteral("role")).toString();
+            if (role == QLatin1String("tool"))
+                QVERIFY(msgs.at(i - 1).toObject().contains(QStringLiteral("tool_calls")));
+            if (o.contains(QStringLiteral("tool_calls")))
+                QVERIFY(i + 1 < msgs.size()
+                        && msgs.at(i + 1).toObject().value("role").toString()
+                            == QLatin1String("tool"));
+        }
+    }
+
+    // ---- BoxStore 回归（P2-13）：损坏 JSON → 先备份 .bad 再空载；后续
+    //      save 正常重写主文件，备份不被清除 ----
+    void box_store_load_corrupt_backup()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("boxes.json");
+        const QByteArray raw = "{\"version\":1,\"boxes\":[ broken";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(raw);
+        }
+
+        BoxStore store(path);
+        store.load(); // 损坏 → 空载 + 备份
+        QVERIFY(store.boxes().isEmpty());
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw); // 原件逐字节保留
+        }
+
+        // 之后的 save 覆盖主文件；.bad 备份仍在
+        QVERIFY(!store.addBox(QStringLiteral("a"), dir.filePath("a"), 0, 0).isEmpty());
+        QVERIFY(QFileInfo::exists(path + QStringLiteral(".bad")));
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw);
+        }
+    }
+
+    // ---- BoxStore 回归（B-1）：moveDirContents（解散搬运的纯 FS 部分，
+    //      工作线程可调）——文件与子目录整体迁出、目录腾空 ----
+    void box_move_dir_contents()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString src = dir.filePath("src");
+        const QString dst = dir.filePath("dst");
+        QVERIFY(QDir().mkpath(src + "/nested") && QDir().mkpath(dst));
+        QFile f1(src + "/a.txt");
+        QVERIFY(f1.open(QIODevice::WriteOnly) && f1.write("1") > 0);
+        f1.close();
+        QFile f2(src + "/nested/b.txt");
+        QVERIFY(f2.open(QIODevice::WriteOnly) && f2.write("2") > 0);
+        f2.close();
+
+        const QStringList failures = BoxStore::moveDirContents(src, dst);
+        QVERIFY(failures.isEmpty());
+        QVERIFY(QFileInfo::exists(dst + "/a.txt"));
+        QVERIFY(QFileInfo::exists(dst + "/nested/b.txt")); // 子目录随 rename 整体迁出
+        QCOMPARE(QDir(src).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 0);
+    }
+
+    // ---- MonitorQueryTool 回归（P2-2）：stream 白名单——白名单外（含
+    //      "../" 穿越片段）拒绝，不拼日志路径；合法流照常返回 ----
+    void monitor_query_stream_whitelist()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const QString dayDir = base.path() + QLatin1Char('/')
+            + QDate::currentDate().toString("yyyy-MM-dd");
+        QVERIFY(QDir().mkpath(dayDir));
+        {
+            QFile f(dayDir + QStringLiteral("/keys.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            f.write("{\"ts\":1,\"text\":\"hello\"}\n");
+        }
+
+        const ToolDef d = makeMonitorQueryTool(base.path(), this);
+
+        QJsonObject bad;
+        d.fn(QJsonObject{{"stream", QStringLiteral("../../evil")}},
+             [&bad](const QJsonObject &r) { bad = r; });
+        QVERIFY(!bad.value("ok").toBool(true)); // 同步拒绝路径
+        QVERIFY(bad.value("error").toString().contains(QStringLiteral("stream")));
+
+        QJsonObject got;
+        d.fn(QJsonObject{{"stream", QStringLiteral("keys")}},
+             [&got](const QJsonObject &r) { got = r; });
+        QTRY_VERIFY(got.value("ok").toBool()); // 线程池读取 → 主线程队列交付
+        QCOMPARE(got.value("streams").toObject().value("keys").toObject()
+                     .value("lines").toArray().size(), 1);
+    }
+
+    // ---- FsTool 回归（P2-5）：fs.write / fs.move(overwrite) 的目录目标
+    //      明确报错（原实现落到误导性的打开/移动失败文案） ----
+    void fs_tools_dir_target_rejected()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString sub = dir.filePath("sub");
+        QVERIFY(QDir().mkpath(sub));
+        QFile src(dir.filePath("a.txt"));
+        QVERIFY(src.open(QIODevice::WriteOnly) && src.write("x") > 0);
+        src.close();
+
+        ToolDef writeTool, moveTool;
+        for (const ToolDef &t : makeFsTools()) {
+            if (t.name == QStringLiteral("fs.write"))
+                writeTool = t;
+            if (t.name == QStringLiteral("fs.move"))
+                moveTool = t;
+        }
+        QVERIFY(writeTool.fn && moveTool.fn);
+
+        QJsonObject got;
+        writeTool.fn(QJsonObject{{"path", sub}, {"content", "x"}},
+                     [&got](const QJsonObject &r) { got = r; });
+        QVERIFY(!got.value("ok").toBool(true));
+        QVERIFY(got.value("error").toString().contains(QStringLiteral("目录")));
+
+        QJsonObject got2;
+        moveTool.fn(QJsonObject{{"src", dir.filePath("a.txt")},
+                                {"dst", sub},
+                                {"overwrite", true}},
+                    [&got2](const QJsonObject &r) { got2 = r; });
+        QVERIFY(!got2.value("ok").toBool(true));
+        QVERIFY(got2.value("error").toString().contains(QStringLiteral("目录")));
+        QVERIFY(QFileInfo::exists(dir.filePath("a.txt"))); // 源未被动过
+    }
+
+    // ---- KeyboardTextComposer 回归（P2-6/P2-7）：AltGr（Ctrl+Alt 同按）
+    //      不再整体吞掉（masked 路径记占位符，不依赖布局翻译，可确定性
+    //      断言）；setMasked 值变化时先冲刷旧段，● 段与明文不同段 ----
+    void keyboard_composer_altgr_and_masked_transition()
+    {
+        constexpr int kVkControl = 0x11, kVkMenu = 0x12;
+        KeyboardTextComposer c;
+        struct Seg
+        {
+            QString text;
+            bool masked = false;
+        };
+        QList<Seg> segs;
+        connect(&c, &KeyboardTextComposer::textReady,
+                [&](const QString &, const QString &, const QString &text, bool masked) {
+                    segs.append({text, masked});
+                });
+        c.setWindowContext(QStringLiteral("a.exe"), QStringLiteral("t"));
+        auto key = [&c](int vk, bool down = true) { c.onKeyEvent(vk, 0, false, down); };
+        const QString bullet = QString(QChar(0x25CF));
+
+        // masked → unmasked：值变化先 flush，旧 ●● 段先行发出
+        c.setMasked(true);
+        key(0x41);
+        key(0x41);
+        c.setMasked(false);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.at(0).text, bullet + bullet);
+        QVERIFY(segs.at(0).masked);
+        key(0x41);
+        c.flush();
+        QCOMPARE(segs.size(), 2);
+        QCOMPARE(segs.at(1).text, QStringLiteral("a"));
+        QVERIFY(!segs.at(1).masked);
+
+        // AltGr 组合期：masked 路径照记占位符（P2-6 修复前被 m_ctrl||m_alt
+        // 守卫吞掉）
+        segs.clear();
+        c.setMasked(true);
+        key(kVkControl);
+        key(kVkMenu);
+        key(0x41);
+        key(kVkMenu, false);
+        key(kVkControl, false);
+        c.flush();
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.at(0).text, bullet);
+        QVERIFY(segs.at(0).masked);
+        c.setMasked(false);
+
+        // 纯 Ctrl 快捷键仍不记录（守卫保留）
+        segs.clear();
+        key(kVkControl);
+        key(0x43);
+        key(kVkControl, false);
+        c.flush();
+        QCOMPARE(segs.size(), 0);
+    }
+
+    // ---- WorkingMemory 回归（B-9②）：promptBlock 多参单次 arg——标题/
+    //      目标里的 %N 保持字面，笔记数不再注入标题段 ----
+    void working_memory_promptblock_no_arg_injection()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        WorkingMemory work(base.path());
+        work.startTask(QStringLiteral("完成度%4检查%2项"), QStringLiteral("目标%1x"));
+        const QString block = work.promptBlock();
+        QVERIFY(block.contains(QStringLiteral("完成度%4检查%2项")));
+        QVERIFY(block.contains(QStringLiteral("目标%1x")));
+        QVERIFY(block.contains(QStringLiteral("进度笔记 0 条")));
+        QVERIFY(!block.contains(QStringLiteral("完成度0检查"))); // 数字未进标题
+        QVERIFY(!block.contains(QStringLiteral("进度笔记 目标"))); // 无错位注入
+    }
+
+    // ---- WorkingMemory 回归（B-9①）：归档写失败（同名目录占住归档路径）
+    //      → 明确报 ok:false，任务保留在工作集、任务文件不删（不再静默
+    //      丢档） ----
+    void working_memory_archive_failure_keeps_task()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        WorkingMemory work(base.path());
+        const QJsonObject t1 = work.startTask(QStringLiteral("归档失败任务"), {});
+        const QString id = t1.value("id").toString();
+        // 预置同名目录占住归档文件路径 → QSaveFile open 必然失败
+        const QString collide =
+            base.path() + QStringLiteral("/memory/archive/")
+            + QDate::currentDate().toString("yyyy-MM-dd") + QLatin1Char('-')
+            + QStringLiteral("归档失败任务") + QStringLiteral(".md");
+        QVERIFY(QDir().mkpath(collide));
+
+        const QJsonObject done = work.completeTask(id, QStringLiteral("摘要"));
+        QVERIFY(!done.value("ok").toBool(true));
+        QVERIFY(done.value("error").toString().contains(QStringLiteral("归档")));
+        QCOMPARE(work.openCount(), 1); // 任务保留（可重试）
+        QVERIFY(QFileInfo::exists(base.path() + QStringLiteral("/memory/working/")
+                                  + id + QStringLiteral(".json")));
+        // 移走占位目录后重试成功
+        QVERIFY(QDir().rmdir(collide));
+        const QJsonObject retry = work.completeTask(id, QStringLiteral("摘要"));
+        QVERIFY(retry.value("ok").toBool());
+        QCOMPARE(work.openCount(), 0);
     }
 };
 

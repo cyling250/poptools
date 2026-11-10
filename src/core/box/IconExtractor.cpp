@@ -63,13 +63,15 @@ QImage imageFromHIcon(HICON icon)
         bi.biBitCount = 32;
         bi.biCompression = BI_RGB;
 
-        QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+        // 目标格式必须是非预乘 ARGB32：GetDIBits 写入的是非预乘 BGRA
+        //（第 4 字节 = 图标 alpha 原值）。直接构造 Premultiplied 格式会让
+        // convertToFormat 成为 no-op（P2-1：未归一预乘 → 半透明像素发黑晕）
+        QImage img(w, h, QImage::Format_ARGB32);
         HDC hdc = GetDC(nullptr);
         GetDIBits(hdc, info.hbmColor, 0, h, img.bits(), reinterpret_cast<BITMAPINFO *>(&bi),
                   DIB_RGB_COLORS);
         ReleaseDC(nullptr, hdc);
-        // 预乘 alpha：jumbo 图标的 alpha 通道为非预乘，QImage 需归一
-        result = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        result = img.convertToFormat(QImage::Format_ARGB32_Premultiplied); // 真转换：归一预乘
     } else if (info.hbmMask) {
         // 无颜色位图（单色图标）：用掩码生成黑色剪影，至少保证有内容
         BITMAP bmMask = {};

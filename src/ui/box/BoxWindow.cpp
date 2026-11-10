@@ -135,6 +135,19 @@ void BoxWindow::refresh()
         m_items = entries.mid(0, m_rows * m_cols); // 几行几列的容量截断
     }
 
+    // 图标缓存以当前条目键集裁剪（B-6）：文件移出盒子后旧键不再存在——
+    // 不清会让缓存只增不减；同名替换文件的陈旧图标随键删除自然失效
+    QSet<QString> liveKeys;
+    for (const QFileInfo &info : m_items)
+        if (!info.isDir())
+            liveKeys.insert(QDir::toNativeSeparators(info.filePath()));
+    for (auto it = m_iconCache.begin(); it != m_iconCache.end();) {
+        if (!liveKeys.contains(it.key()))
+            it = m_iconCache.erase(it);
+        else
+            ++it;
+    }
+
     prefetchIcons();
     applyGeometry();
 }
@@ -554,11 +567,43 @@ void BoxWindow::contextMenuEvent(QContextMenuEvent *event)
         });
         menu.addSeparator();
         menu.addAction(QStringLiteral("移出到桌面"), this, [this, info] {
+            if (m_moveInFlight) {
+                emit storageError(QStringLiteral("上一次整理还在进行中，请稍候"));
+                return;
+            }
+            // 移出也走线程池（跨盘时 rename 失败退化为整份复制），与拖放/
+            // 解散共用 m_moveInFlight 串行，完成回主线程刷新 + 气泡报错
             const QString desktop = QStandardPaths::writableLocation(
                 QStandardPaths::DesktopLocation);
-            const QString target = BoxStore::uniqueTargetPath(desktop, info.fileName());
-            if (!QFile::rename(info.filePath(), target))
-                emit storageError(QStringLiteral("无法移出 %1").arg(info.fileName()));
+            m_moveInFlight = true;
+            update();
+            QPointer<BoxWindow> self(this);
+            const QString path = info.filePath();
+            QThreadPool::globalInstance()->start([self, path, desktop] {
+                QStringList failures;
+                const QFileInfo moving(path);
+                const QString target = BoxStore::uniqueTargetPath(desktop, moving.fileName());
+                if (!QFile::rename(path, target)) {
+                    // 跨盘移动：复制 + 删除兜底（目录无法复制，保持报错）
+                    if (moving.isDir()
+                        || !(QFile::copy(path, target) && QFile::remove(path)))
+                        failures << moving.fileName();
+                }
+                if (!self)
+                    return; // 窗口已销毁：文件已移完，仅省去刷新
+                QMetaObject::invokeMethod(
+                    self.data(),
+                    [self, failures] {
+                        if (!self)
+                            return;
+                        self->m_moveInFlight = false;
+                        if (!failures.isEmpty())
+                            emit self->storageError(QStringLiteral("无法移出 %1")
+                                                        .arg(failures.join(QStringLiteral("、"))));
+                        self->refresh();
+                    },
+                    Qt::QueuedConnection);
+            });
         });
         menu.exec(event->globalPos());
         refresh();
@@ -583,14 +628,40 @@ void BoxWindow::contextMenuEvent(QContextMenuEvent *event)
     QWidget::contextMenuEvent(event);
 }
 
-// 解散：仓库层移动文件 → 失败转气泡；盒子随 changed 自动关窗
+// 解散：目录内容全部移回桌面 → 盒子删除、空目录清理。搬运是磁盘 IO
+//（跨盘大文件触发复制兜底，与拖放收纳同型），禁入主线程（红线1/B-1）：
+// 挪线程池，完成回主线程收尾（删盒走仓库层，changed 广播驱动关窗）
 void BoxWindow::dissolve()
 {
-    const QStringList failures = m_store->dissolveBox(m_boxId);
-    if (!failures.isEmpty())
-        emit storageError(QStringLiteral("有文件未能移回桌面（%1），"
-                                         "盒子已保留。")
-                              .arg(failures.join(QStringLiteral("、"))));
+    const QString dir = m_dir;
+    const QString desktop =
+        QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    m_moveInFlight = true;
+    update();
+    QPointer<BoxWindow> self(this);
+    QThreadPool::globalInstance()->start([self, dir, desktop] {
+        const QStringList failures = BoxStore::moveDirContents(dir, desktop);
+        if (!self)
+            return; // 窗口已销毁：文件已移完，仅省去收尾
+        QMetaObject::invokeMethod(
+            self.data(),
+            [self, failures, dir] {
+                if (!self)
+                    return;
+                self->m_moveInFlight = false;
+                if (!failures.isEmpty()) {
+                    // 有失败：盒子与剩余文件原样保留（解散可重试）
+                    emit self->storageError(QStringLiteral("有文件未能移回桌面（%1），"
+                                                           "盒子已保留。")
+                                                .arg(failures.join(QStringLiteral("、"))));
+                    self->refresh();
+                    return;
+                }
+                QDir().rmdir(dir); // 目录已腾空 → 删空目录（失败仅遗留空目录，无害）
+                self->m_store->removeBox(self->m_boxId); // save + changed → 窗口自动关
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 // ---------- 拖拽收纳 ----------
@@ -624,6 +695,14 @@ void BoxWindow::dropEvent(QDropEvent *event)
     update();
     if (urls.isEmpty())
         return;
+    // 防重入（B-5）：上一次移动仍在后台执行时丢弃本次拖放——两个 worker
+    // 并发跑 moveUrlsIntoDir 会各自看到同名目标不存在，撞同一落点报错。
+    // 与解散/移出共用 m_moveInFlight，三者天然互斥
+    if (m_moveInFlight) {
+        event->ignore();
+        emit storageError(QStringLiteral("上一次整理还在进行中，请稍候再拖放"));
+        return;
+    }
     event->acceptProposedAction();
     // 磁盘 IO 禁入主线程（红线1，跨盘大文件会触发复制兜底）：移动挪
     // 线程池，期间条目区显示"收纳中"，完成后回主线程刷新 + 气泡报错

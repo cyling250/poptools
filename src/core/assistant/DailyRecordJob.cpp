@@ -83,6 +83,13 @@ bool DailyRecordJob::isPendingDay(const QString &monitorDir, const QString &date
 void DailyRecordJob::processPending(bool includeToday,
                                     const std::function<void(int, const QString &)> &done)
 {
+    // 重入闸门（P2-8）：启动补账/定时/手动三条入口共用 m_queue/m_done，
+    // 一轮在跑（异步 buildDigestAsync/LLM 阶段）时再触发会覆写队列与
+    // 回调——统一拒绝
+    if (m_busy) {
+        done(0, QStringLiteral("上一轮总结还在进行中"));
+        return;
+    }
     const QDate today = QDate::currentDate();
     QDir dir(m_monitorDir);
     m_queue.clear();
@@ -100,13 +107,16 @@ void DailyRecordJob::processPending(bool includeToday,
     m_done = done;
     m_processed = 0;
     m_lastError.clear();
+    m_busy = true;
     runNext();
 }
 
 void DailyRecordJob::runForDate(const QString &date,
                                 const std::function<void(bool, const QString &)> &done)
 {
-    if (m_client->busy()) {
+    // 与 processPending 共用同一闸门：m_client->busy 只覆盖 LLM 在途，
+    // buildDigestAsync（线程池）阶段不体现在 busy 上
+    if (m_busy || m_client->busy()) {
         done(false, QStringLiteral("上一个总结还在生成中"));
         return;
     }
@@ -115,9 +125,11 @@ void DailyRecordJob::runForDate(const QString &date,
         return;
     }
     const QString dayDir = m_monitorDir + QLatin1Char('/') + date;
+    m_busy = true;
     DailyAggregator::buildDigestAsync(dayDir, kDigestBudget, this,
                                       [this, date, done](bool ok, const QString &digest) {
                                           if (!ok) {
+                                              m_busy = false; // 提前失败：复位闸门
                                               done(false, QStringLiteral("该日无活动日志"));
                                               return;
                                           }
@@ -133,6 +145,7 @@ void DailyRecordJob::runForDate(const QString &date,
 void DailyRecordJob::runNext()
 {
     if (m_queue.isEmpty()) {
+        m_busy = false; // 回调链终点：整轮收束，复位重入闸门
         if (m_done)
             m_done(m_processed, m_lastError);
         return;

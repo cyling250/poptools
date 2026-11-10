@@ -59,15 +59,14 @@ public:
     // 折叠/展开（折叠 = 只留标题横条，宽度不变）
     bool setBoxCollapsed(const QString &id, bool collapsed);
 
-    // 解散收纳盒：目录内全部条目移回桌面（重名自动加序号），随后
-    // 删除盒子与已腾空的目录。有移动失败的条目时不删盒子，返回
-    // 失败文件名列表；全部成功返回空列表。
-    QStringList dissolveBox(const QString &id);
-
     // ---- 文件收纳操作（供窗口层调用） ----
     // 把一批文件/目录移动进 dir（重名自动加 "(2)" 序号），
     // 返回失败条目的文件名列表（跨盘移动走复制+删除兜底）
     static QStringList moveUrlsIntoDir(const QString &dir, const QList<QUrl> &urls);
+    // 把 fromDir 内全部条目（含子目录）移入 toDir（解散收纳盒的搬运用）。
+    // 纯文件系统操作、不触碰仓库状态，可在工作线程调用；返回失败文件名
+    // 列表（有失败时调用方保留现场）
+    static QStringList moveDirContents(const QString &fromDir, const QString &toDir);
     // 目标目录内生成不重名的落点路径
     static QString uniqueTargetPath(const QString &dir, const QString &fileName);
 

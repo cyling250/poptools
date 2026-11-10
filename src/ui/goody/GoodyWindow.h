@@ -41,6 +41,8 @@ public:
 
     void setBusy(bool on);
     bool isBusy() const { return m_busy; }
+    // 工具执行期标志（模块注入）：期间禁用「清空」按钮（防孤儿 tool 序列）
+    void setToolPhase(bool on);
 
 signals:
     void sendRequested(const QString &text);
@@ -71,6 +73,7 @@ private:
     QTextBrowser *m_transcript = nullptr;
     QPlainTextEdit *m_input = nullptr;
     QPushButton *m_sendBtn = nullptr;
+    QPushButton *m_clearBtn = nullptr;
     QWidget *m_permBar = nullptr;
     QLabel *m_permText = nullptr;
     QPushButton *m_permAllow = nullptr;

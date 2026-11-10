@@ -22,7 +22,8 @@ namespace poptools {
 //   * 中文输入法组合期记录的是拼音字母（LL 钩子拿不到上屏中文），
 //     最终中文由 OCR 快照管线补齐（ocrtext 流，source=ocr）；
 //   * 死键（Dead Key）组合音标暂不还原；Ctrl/Alt 组合键（快捷键）
-//     不记录——记录的是"写了什么"，不是"按了什么"。
+//     不记录——记录的是"写了什么"，不是"按了什么"。例外：AltGr
+//     （Ctrl+Alt 同按）按字符键交翻译流程，产出可打印字符照记。
 // ============================================================
 class KeyboardTextComposer : public QObject
 {
@@ -33,8 +34,16 @@ public:
     void setMaskPasswords(bool on) { m_maskPasswords = on; }
 
 public slots:
-    // 外部注入的密码框判定结果（每个键事件前由模块刷新）
-    void setMasked(bool on) { m_maskedNow = on; }
+    // 外部注入的密码框判定结果（每个键事件前由模块刷新）。仅在值变化时
+    // 冲刷旧段（P2-7）：● 段与后续明文不得混入同一段（段级 masked 标记
+    // 以段为单位）——每键都会调本函数，无变化时不得刷
+    void setMasked(bool on)
+    {
+        if (on == m_maskedNow)
+            return;
+        flush();
+        m_maskedNow = on;
+    }
 
     // 前台窗口上下文变化（切窗）；上下文变化前先冲刷旧段
     void setWindowContext(const QString &app, const QString &title);

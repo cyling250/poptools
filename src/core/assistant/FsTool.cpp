@@ -37,6 +37,27 @@ bool recyclePath(const QString &path)
     return false;
 #endif
 }
+
+// 回收站可用性预检（按目标所在驱动器，P2-4）：无回收站的卷（U 盘/网络
+// 位置等）上 FOF_ALLOWUNDO 会静默退化为永久删除——与工具"非永久删除"
+// 的描述相悖，预检失败即拒绝执行。UNC 路径保守拒绝
+bool recycleBinAvailable(const QString &path)
+{
+#ifdef Q_OS_WIN
+    const QString abs = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+    if (abs.startsWith(QLatin1String("\\\\")))
+        return false;
+    const QString root = abs.left(3); // "C:\"
+    if (!abs.contains(QLatin1Char(':')) || !root.endsWith(QLatin1Char('\\')))
+        return false;
+    SHQUERYRBINFO rb = {};
+    rb.cbSize = sizeof(rb);
+    return SUCCEEDED(SHQueryRecycleBin(reinterpret_cast<const wchar_t *>(root.utf16()), &rb));
+#else
+    Q_UNUSED(path);
+    return false;
+#endif
+}
 } // namespace
 
 QList<ToolDef> makeFsTools()
@@ -151,6 +172,13 @@ QList<ToolDef> makeFsTools()
                 path = QDir::homePath() + path.mid(1);
             const QString content = args.value(QStringLiteral("content")).toString();
             const bool append = args.value(QStringLiteral("append")).toBool(false);
+            // 目录目标明确拒绝（P2-5）：往下走只会得到误导性的打开失败文案
+            if (QFileInfo(path).isDir()) {
+                done(QJsonObject{{"ok", false},
+                                 {"error",
+                                  QStringLiteral("目标是目录，无法作为文件写入：%1").arg(path)}});
+                return;
+            }
             QDir().mkpath(QFileInfo(path).absolutePath());
             if (append) {
                 QFile f(path);
@@ -207,8 +235,17 @@ QList<ToolDef> makeFsTools()
                                  {"error", QStringLiteral("目标已存在（传 overwrite=true 覆盖）：%1").arg(dst)}});
                 return;
             }
-            if (QFileInfo::exists(dst))
+            if (QFileInfo::exists(dst)) {
+                // 目录目标明确拒绝（P2-5）：remove 对目录恒失败，随后 rename
+                // 失败只剩"跨盘/被占用？"的误导文案
+                if (QFileInfo(dst).isDir()) {
+                    done(QJsonObject{{"ok", false},
+                                     {"error",
+                                      QStringLiteral("目标是目录，拒绝覆盖：%1").arg(dst)}});
+                    return;
+                }
                 QFile::remove(dst);
+            }
             const bool moved = QFile::rename(src, dst);
             done(QJsonObject{{"ok", moved},
                              {"error", moved ? QString()
@@ -221,7 +258,9 @@ QList<ToolDef> makeFsTools()
         ToolDef d;
         d.name = QStringLiteral("fs.delete");
         d.readOnly = false;
-        d.description = QStringLiteral("把文件/目录移入回收站（非永久删除）。删除前必须向用户确认目标。");
+        d.description = QStringLiteral(
+            "把文件/目录移入回收站（非永久删除）。删除前必须向用户确认目标。"
+            "所在卷没有可用回收站时拒绝执行（不会退化为永久删除）。");
         d.parameters = QJsonObject{
             {"type", QStringLiteral("object")},
             {"properties",
@@ -234,6 +273,16 @@ QList<ToolDef> makeFsTools()
                 path = QDir::homePath() + path.mid(1);
             if (!QFileInfo::exists(path)) {
                 done(QJsonObject{{"ok", false}, {"error", QStringLiteral("不存在：%1").arg(path)}});
+                return;
+            }
+            // 回收站预检（P2-4）：无回收站的卷上 FO_DELETE 会静默永久删除，
+            // 与"非永久删除"承诺相悖——拒绝执行并回错误
+            if (!recycleBinAvailable(path)) {
+                done(QJsonObject{
+                    {"ok", false},
+                    {"error",
+                     QStringLiteral("目标所在卷没有可用回收站，执行将变为永久删除，已拒绝：")
+                         + path}});
                 return;
             }
             done(QJsonObject{{"ok", recyclePath(path)},
