@@ -17,7 +17,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 add_library(poptools_ui_shared STATIC
     shared/DesktopStack.cpp
     shared/DesktopStack.h
-    shared/DesktopPin.h
 )
 target_link_libraries(poptools_ui_shared PUBLIC
     poptools_core
@@ -116,7 +115,7 @@ target_link_libraries(poptools_ui_calendar PUBLIC
 )
 target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
-# ---- 桌面收纳盒功能（贴桌分类卡片；DesktopPin.h 为贴桌共享头） ----
+# ---- 桌面收纳盒功能（贴桌分类卡片） ----
 add_library(poptools_ui_box STATIC
     box/BoxWindow.cpp
     box/BoxWindow.h

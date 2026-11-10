@@ -4,9 +4,12 @@
 #include <QPixmap>
 #include <QImage>
 #include <QPoint>
+#include <QSharedPointer>
 #include <QSize>
 #include <QString>
 #include <QTimer>
+
+#include <atomic>
 
 namespace poptools {
 
@@ -29,8 +32,10 @@ class PinWindow : public QWidget
 public:
     explicit PinWindow(QWidget *parent = nullptr);
 
-    // 将截图贴到屏幕上：保存到默认文件夹 + 按 globalTopLeft 定位（内容左上角）+ 置顶显示
-    void pin(const QPixmap &pixmap, const QPoint &globalTopLeft);
+    // 将截图贴到屏幕上：保存到默认文件夹 + 按 globalTopLeft 定位（内容左上角）+ 置顶显示。
+    // sourceDpr：内容源屏的 devicePixelRatio（截图链路可提供；纯剪贴板图源屏未知传 0，
+    // 维持旧行为按张贴屏 dpr 反推逻辑尺寸）
+    void pin(const QPixmap &pixmap, const QPoint &globalTopLeft, qreal sourceDpr = 0.0);
 
 signals:
     // 右键菜单「识别文字 / 翻译」：携带贴图内容（物理分辨率），
@@ -53,12 +58,14 @@ private:
     void remakeShadow();              // 按当前内容尺寸重算投影轮廓
     QImage makeShadow(const QSize &content) const; // 生成内容矩形的高斯模糊投影
 
-    QPixmap m_pixmap;      // 贴图内容（物理分辨率，dpr = 张贴屏幕的 dpr）
+    QPixmap m_pixmap;      // 贴图内容（物理分辨率，dpr = 内容源屏 dpr，未知时为张贴屏 dpr）
     QSize m_baseSize;      // 贴图原始逻辑尺寸（缩放基准）
     QPoint m_dragOffset;   // 拖动时鼠标相对窗口左上角偏移
     bool m_dragging = false;
     qreal m_scale = 1.0;   // 缩放比例
-    QString m_savedPath;   // 本次贴图保存的文件路径（销毁时删除）
+    QString m_savedPath;   // 本次贴图保存的文件路径（落盘前预登记，销毁时删除）
+    QSharedPointer<std::atomic_bool> m_saveAborted; // 落盘中止标记：销毁先于落盘完成时
+                                                    // 置位，worker 落盘后补删文件防复活
     QImage m_shadow;       // 预生成的投影轮廓（Format_Alpha8，窗口大小）
     QTimer m_shadowDebounce; // 投影重算防抖：滚轮连滚只在停歇 50ms 后重算轮廓
 

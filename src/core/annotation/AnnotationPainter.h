@@ -44,11 +44,18 @@ public:
     // 折线顶点按相对坐标映射，文字按高度等比缩放字号。
     // xFlip / yFlip 表示对应轴发生镜像翻转（控制点拖过对侧边），
     // 此时沿该轴按"新边界反方向"映射，产生 Visio 式镜像缩放。
+    // mosaicPreview=true（拖拽中间帧）跳过马赛克整幅重采样：绘制端按目标
+    // 矩形拉伸显示起始图（COW 零拷贝），拖拽结束再以默认值重算一次定稿
+    // （R3 #24：SmoothTransformation 高频全图缩放禁入主线程）
     static AnnotationItem scaledItem(const AnnotationItem &src, const QRectF &newBounds,
-                                     bool xFlip = false, bool yFlip = false);
+                                     bool xFlip = false, bool yFlip = false,
+                                     bool mosaicPreview = false);
 
-    // 计算点到单条标注的最短距离（命中检测用）
-    static qreal distanceToItem(const QPointF &pos, const AnnotationItem &it);
+    // 计算点到单条标注的最短距离（命中检测用）。tol 为命中容差：矩形类
+    // 判"点在边界附近/内部"时使用（此前内部硬编码 6px 忽略调用方容差），
+    // 折线类返回原始几何距离，由调用方与 tol 比较
+    static qreal distanceToItem(const QPointF &pos, const AnnotationItem &it,
+                                qreal tol = 6.0);
 
     // 标注可编辑控制点（按类型返回：矩形类 8 角/边中点，线段类 2 端点）
     static QVector<Handle> handlesFor(const AnnotationItem &it);
@@ -59,8 +66,10 @@ public:
     // 拖动控制点 h 到 pos 后的新标注（基于 start 快照）：
     //   - 线段类：P0/P1 直接改端点
     //   - 矩形类：被拖动边跟随鼠标，越过对侧起始边时镜像翻转（尺寸不小于 minSize）
+    // mosaicPreview：拖拽中间帧传 true 跳过马赛克重采样（见 scaledItem）
     static AnnotationItem resizedItem(const AnnotationItem &start, Handle h,
-                                      const QPointF &pos, qreal minSize);
+                                      const QPointF &pos, qreal minSize,
+                                      bool mosaicPreview = false);
 
 private:
     // 计算点到线段的最短距离（QLineF 在 Qt6 中无 distanceToPoint）

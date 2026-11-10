@@ -76,7 +76,13 @@ QString SelectionTranslator::readClipboardText() const
     if (h) {
         const wchar_t *data = static_cast<const wchar_t *>(GlobalLock(h));
         if (data) {
-            text = QString::fromWCharArray(data);
+            // 畸形剪贴板数据可能不含 NUL 结尾，fromWCharArray 无界读取会越界
+            //（R3 #27）：以 GlobalSize 为字节上限找 NUL，找不到即按上限截断
+            const SIZE_T maxChars = GlobalSize(h) / sizeof(wchar_t);
+            int len = 0;
+            while (size_t(len) < maxChars && data[len] != L'\0')
+                ++len;
+            text = QString::fromWCharArray(data, len);
             GlobalUnlock(h);
         }
     }

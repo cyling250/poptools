@@ -20,6 +20,7 @@
 #include "core/assistant/WorkingMemory.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
+#include "core/annotation/AnnotationPainter.h"
 #include "core/box/BoxStore.h"
 #include "core/calendar/CalendarStore.h"
 #include "core/calendar/LunarCalendar.h"
@@ -30,6 +31,7 @@
 #include "core/monitor/InputActivityMonitor.h"
 #include "core/monitor/KeyboardTextComposer.h"
 #include "core/monitor/SnapshotOcrPipeline.h"
+#include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
@@ -116,6 +118,93 @@ private slots:
         QCOMPARE(c.items.size(), 0);
         QVERIFY(!c.canUndo());
         QVERIFY(!c.canRedo());
+    }
+
+    void canvas_undo_stack_capped()
+    {
+        // 撤销栈上限 20 步 FIFO 淘汰（R3 #6）：长会话全量快照不再无界增长
+        AnnotationCanvas c;
+        AnnotationItem it{};
+        it.rect = QRectF(0, 0, 10, 10);
+        for (int i = 0; i < 25; ++i)
+            c.addItem(it); // 每次入撤销栈
+
+        for (int i = 0; i < 20; ++i) {
+            QVERIFY(c.canUndo());
+            c.undo();
+        }
+        QVERIFY(!c.canUndo()); // 最早的 5 个快照已被淘汰（空态不再可回退）
+        QCOMPARE(c.items.size(), 5);
+
+        // 重做链完整：上限内淘汰的只是撤销历史，重做仍能回到最新
+        for (int i = 0; i < 20; ++i) {
+            QVERIFY(c.canRedo());
+            c.redo();
+        }
+        QVERIFY(!c.canRedo());
+        QCOMPARE(c.items.size(), 25);
+    }
+
+    // ---- AnnotationPainter：马赛克缩放预览帧跳过重采样（R3 #24） ----
+    void mosaic_scaled_preview_skips_resample()
+    {
+        AnnotationItem it{};
+        it.type = AnnotationType::Mosaic;
+        it.rect = QRectF(0, 0, 100, 100);
+        it.mosaicImage = QImage(200, 200, QImage::Format_ARGB32);
+        it.mosaicImage.fill(Qt::red);
+
+        // 预览帧（拖拽中间帧）：mosaicImage 保持起始图原样（COW 零拷贝，
+        // 绘制端按目标矩形拉伸），不做整幅 SmoothTransformation
+        const AnnotationItem preview =
+            AnnotationPainter::scaledItem(it, QRectF(0, 0, 50, 50), false, false, true);
+        QCOMPARE(preview.mosaicImage.size(), QSize(200, 200));
+
+        // 定稿帧（松手）：随框等比缩放到新边界
+        const AnnotationItem finalItem =
+            AnnotationPainter::scaledItem(it, QRectF(0, 0, 50, 50), false, false, false);
+        QCOMPARE(finalItem.mosaicImage.size(), QSize(100, 100));
+    }
+
+    // ---- AnnotationPainter：富文本项可重复绘制（布局缓存路径，R3 #25） ----
+    void rich_text_draw_repeated_no_crash()
+    {
+        AnnotationItem it{};
+        it.type = AnnotationType::Text;
+        it.html = QStringLiteral("<span style=\"font-size:20px\">Hello <b>World</b></span>");
+        it.font = QFont(QStringLiteral("Arial"), 12);
+        it.color = Qt::black;
+        it.rect = QRectF(0, 0, 200, 40);
+        QImage img(200, 40, QImage::Format_ARGB32);
+        img.fill(Qt::white);
+        QPainter p(&img);
+        AnnotationPainter::drawOne(p, it); // 首次：建文档入缓存
+        AnnotationPainter::drawOne(p, it); // 再次：命中缓存，输出一致
+        p.end();
+    }
+
+    // ---- RapidOcrService：OCR 行序重排（半行高容差同行判定，R3 #8） ----
+    void ocr_reading_order_half_row_tolerance()
+    {
+        // 同一文本行的 y 微差（≤半行高）不拆行：行内按 left 排
+        QVector<OcrBox> boxes;
+        OcrBox a; a.rect = QRect(200, 100, 50, 20); a.text = QStringLiteral("B");
+        OcrBox b; b.rect = QRect(10, 103, 40, 20); b.text = QStringLiteral("A"); // 与 a 同行（top 微差 3px）
+        OcrBox c; c.rect = QRect(0, 140, 30, 20); c.text = QStringLiteral("C");  // 下一行
+        boxes << a << b << c;
+        sortOcrBoxesReadingOrder(boxes);
+        QCOMPARE(boxes[0].text, QStringLiteral("A"));
+        QCOMPARE(boxes[1].text, QStringLiteral("B"));
+        QCOMPARE(boxes[2].text, QStringLiteral("C"));
+
+        // 超出半行高容差（|Δtop| > 行高中点）：按上下行排序
+        QVector<OcrBox> twoLines;
+        OcrBox low; low.rect = QRect(0, 100 + 20, 30, 20); low.text = QStringLiteral("low");
+        OcrBox high; high.rect = QRect(0, 100, 30, 20); high.text = QStringLiteral("high");
+        twoLines << low << high;
+        sortOcrBoxesReadingOrder(twoLines);
+        QCOMPARE(twoLines[0].text, QStringLiteral("high"));
+        QCOMPARE(twoLines[1].text, QStringLiteral("low"));
     }
 
     // ---- Languages ----
@@ -336,6 +425,30 @@ private slots:
         s.setApiBaseUrl(QStringLiteral("https://example.com/v1"));
         Settings s2(dir.filePath("test.ini"));
         QCOMPARE(s2.apiBaseUrl(), QStringLiteral("https://example.com/v1"));
+    }
+
+    void settings_hotkey_modifiers_validated()
+    {
+        // 修饰键合法性校验（R3 #13，热键只能手改 INI，无 UI 校验）：
+        // 只认 MOD_ALT|MOD_CONTROL|MOD_SHIFT|MOD_WIN 的非零组合，
+        // 0（无修饰键全局吞键）与含未知位回退默认
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Settings s(dir.filePath("test_mod.ini"));
+
+        s.setSelectionTranslateHotKey(0x58, 0x0007);
+        QCOMPARE(s.selectionTranslateHotKeyModifiers(), quint32(0x0007));
+        s.setSelectionTranslateHotKey(0x58, 0);
+        QCOMPARE(s.selectionTranslateHotKeyModifiers(), quint32(0x0007));
+        s.setSelectionTranslateHotKey(0x58, 0x10 /* 未知位 */);
+        QCOMPARE(s.selectionTranslateHotKeyModifiers(), quint32(0x0007));
+
+        s.setAssistantHotKey(0x47, 0x0003);
+        QCOMPARE(s.assistantHotKeyModifiers(), quint32(0x0003));
+        s.setAssistantHotKey(0x47, 0x8 /* MOD_WIN 单独使用合法 */);
+        QCOMPARE(s.assistantHotKeyModifiers(), quint32(0x8));
+        s.setAssistantHotKey(0x47, 0x4000 /* MOD_NOREPEAT 等未知位 */);
+        QCOMPARE(s.assistantHotKeyModifiers(), quint32(0x0003));
     }
 
     // ---- 桌面日历：农历换算（已知锚点日期） ----

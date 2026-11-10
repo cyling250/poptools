@@ -54,7 +54,20 @@ public:
     void clear();
 
 private:
-    QVector<QVector<AnnotationItem>> m_undoStack; // 历史快照
+    // 压撤销栈并做上限淘汰（R3 #6）：快照是 COW 浅拷贝日常便宜，但马赛克项
+    // 被缩放后旧大缓冲被历史快照钉住不释放，长会话内存单调增长——FIFO 淘汰
+    // 最老快照。淘汰安全性：旧缓冲可能同时被当前列表/其他快照共享，QVector
+    // 引用计数保证仅当不再被任何一方引用时才真正释放（含 mosaicImage）
+    void pushUndo(const QVector<AnnotationItem> &snapshot)
+    {
+        m_undoStack.push_back(snapshot);
+        while (m_undoStack.size() > kMaxUndoSteps)
+            m_undoStack.removeFirst();
+    }
+
+    static constexpr int kMaxUndoSteps = 20; // 撤销步数上限（FIFO 淘汰）
+
+    QVector<QVector<AnnotationItem>> m_undoStack; // 历史快照（上限 kMaxUndoSteps）
     QVector<QVector<AnnotationItem>> m_redoStack;
 };
 

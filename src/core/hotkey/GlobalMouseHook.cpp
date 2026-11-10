@@ -55,12 +55,24 @@ void GlobalMouseHook::start()
 {
     if (m_active)
         return;
-    m_active = true;
 #ifdef Q_OS_WIN
     g_hookConsumers.insert(this);
     if (!g_hook)
+    {
         g_hook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, GetModuleHandle(nullptr), 0);
+        if (!g_hook)
+        {
+            // 安装失败必须可见（R3 #20）：此前 m_active=true 但钩子未装，
+            // "点击外部关闭"静默失效。不占消费名额、不置运行态，
+            // isRunning() 如实反映钩子状态
+            qWarning("GlobalMouseHook: SetWindowsHookEx(WH_MOUSE_LL) failed, error %lu",
+                     GetLastError());
+            g_hookConsumers.remove(this);
+            return;
+        }
+    }
 #endif
+    m_active = true;
 }
 
 void GlobalMouseHook::stop()

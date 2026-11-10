@@ -6,7 +6,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QPointer>
 #include <QStandardPaths>
+#include <QThreadPool>
 #include <QUuid>
 
 #include <algorithm>
@@ -22,11 +24,13 @@ constexpr int kOcrIdleRecycleMs = 3 * 60 * 1000;
 
 // ---- 辅助函数 ----
 
-// 四边形四个角 → 最小外接 QRect（取 min/max 的 x/y）
+// 四边形四个角 → 最小外接 QRect（取 min/max 的 x/y）；全部点非法时返回空矩形
+//（调用方跳过。此前会返回 x=INT_MAX 的垃圾矩形，R3 #22）
 static QRect quadToRect(const QJsonArray &box)
 {
     // box: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
     int minX = INT_MAX, minY = INT_MAX, maxX = INT_MIN, maxY = INT_MIN;
+    bool anyValid = false;
     for (const QJsonValue &pt : box)
     {
         const QJsonArray p = pt.toArray();
@@ -38,8 +42,11 @@ static QRect quadToRect(const QJsonArray &box)
             minY = std::min(minY, y);
             maxX = std::max(maxX, x);
             maxY = std::max(maxY, y);
+            anyValid = true;
         }
     }
+    if (!anyValid)
+        return QRect();
     return QRect(minX, minY, maxX - minX, maxY - minY);
 }
 
@@ -59,10 +66,10 @@ RapidOcrService::RapidOcrService(QObject *parent)
             return;
         if (m_process)
             m_process->kill(); // 触发 CrashExit finished，收尾路径不会重复报错
-        fail(QStringLiteral("OCR 识别超时（20 秒无响应），引擎已重启，请重试"));
+        fail(QStringLiteral("OCR 引擎无响应已终止（20 秒超时），请重试"));
     });
 
-    // 空闲自动回收：识别完成即开表（finishRequest），新请求即停（sendImage）。
+    // 空闲自动回收：识别完成即开表（finishRequest），新请求即停（recognizeBoxes）。
     // 超时 kill 子进程——CrashExit 处理器里 m_busy 为 false，不会误报
     m_idleTimer = new QTimer(this);
     m_idleTimer->setSingleShot(true);
@@ -87,6 +94,9 @@ void RapidOcrService::finishRequest()
 
 void RapidOcrService::fail(const QString &msg)
 {
+    if (!m_busy)
+        return; // 异步启动化后失败来自事件处理器（errorOccurred/看门狗等），
+                // 防止同一请求双重收尾、ocrBoxesFinished 双发
     finishRequest();
     emit ocrBoxesFinished(false, QVector<OcrBox>(), msg);
 }
@@ -112,10 +122,10 @@ bool RapidOcrService::available() const
     return QFileInfo::exists(exe);
 }
 
-void RapidOcrService::ensureProcess()
+void RapidOcrService::startEngine()
 {
-    if (m_process && m_process->state() == QProcess::Running)
-        return;
+    if (m_process && m_process->state() != QProcess::NotRunning)
+        return; // Running/Starting：已有实例在途（Starting → started 后发送命令）
 
     if (!m_process)
     {
@@ -134,12 +144,25 @@ void RapidOcrService::ensureProcess()
                                       QStringLiteral("OCR 引擎进程意外退出"));
             }
         });
+        // 启动失败（如引擎 exe 缺失）异步透出。旧实现 waitForStarted(5000) 最坏
+        // 阻塞主线程 5 秒（红线 1），改为事件驱动，超时兜底见下方看门狗
+        QObject::connect(m_process, &QProcess::errorOccurred, this,
+                         [this](QProcess::ProcessError error)
+        {
+            if (error == QProcess::FailedToStart && m_busy)
+                fail(QStringLiteral("无法启动 OCR 引擎进程"));
+        });
+        // 引擎就绪：发送识别命令（m_busy 防护：启动期间请求已被超时等路径收尾时不再发送）
+        QObject::connect(m_process, &QProcess::started, this, [this]
+        {
+            if (m_busy)
+                writeCommand();
+        });
     }
 
     const QString exePath = engineDir() + QStringLiteral("/RapidOCR-json.exe");
-    const QString workDir = engineDir();
 
-    m_process->setWorkingDirectory(workDir);
+    m_process->setWorkingDirectory(engineDir());
     // 固定简中配置（det/cls/rec/字典）——与原 PaddleOCR-json 空参数默认行为对齐；
     // 6 语言 rec 模型随包分发，语言切换为后续可选项（引擎按启动参数加载单套）
     m_process->start(exePath, QStringList{
@@ -149,12 +172,10 @@ void RapidOcrService::ensureProcess()
                          QStringLiteral("--rec=ch_PP-OCRv3_rec_infer.onnx"),
                          QStringLiteral("--keys=dict_chinese.txt"),
                      }, QProcess::ReadWrite);
-    // 等待进程启动（不等待初始化完成，模型加载在后台进行）
-    if (!m_process->waitForStarted(5000))
-    {
-        fail(QStringLiteral("无法启动 OCR 引擎进程"));
-        return;
-    }
+    // 启动阶段同样开表（不等待初始化完成，模型加载在后台进行）：启动挂死时
+    // 看门狗 kill + 超时报错，m_busy 不可能永久卡真（started 后 writeCommand 重开表）
+    m_timeoutTimer->start();
+    m_idleTimer->stop();
 }
 
 void RapidOcrService::recognizeBoxes(const QImage &image)
@@ -162,32 +183,46 @@ void RapidOcrService::recognizeBoxes(const QImage &image)
     if (m_busy || image.isNull())
         return;
     m_busy = true;
-    sendImage(image);
-}
 
-void RapidOcrService::sendImage(const QImage &image)
-{
-    // 保存图片到临时文件
+    // 临时文件路径计算（纯字符串）留主线程；mkpath + PNG 编码落盘挪线程池
+    // （红线 1：磁盘 IO 与大图编码禁入主线程，整幅选区 PNG 可秒级阻塞）。
+    // QPointer 交付模式（SnapshotOcrPipeline/DailyAggregator 先例）：服务销毁后
+    // 在途任务不得访问悬垂对象；image 按值捕获（COW）不受调用方后续改动影响
     cleanupTemp();
     const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    QDir().mkpath(tempDir);
     m_tempFile = tempDir + QStringLiteral("/poptools_ocr_")
                  + QUuid::createUuid().toString(QUuid::WithoutBraces)
                  + QStringLiteral(".png");
-    if (!image.save(m_tempFile, "PNG"))
+    QPointer<RapidOcrService> self(this);
+    QThreadPool::globalInstance()->start([self, image, path = m_tempFile, tempDir] {
+        QDir().mkpath(tempDir);
+        const bool ok = image.save(path, "PNG");
+        if (!self)
+        {
+            QFile::remove(path); // 服务已销毁：临时图即弃，不留 %TEMP% 垃圾
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, ok] {
+            if (!self)
+                return;
+            self->onTempImageReady(ok);
+        }, Qt::QueuedConnection);
+    });
+}
+
+// worker 落盘完成回主线程：成功则启动引擎（异步）发送命令，失败统一报错
+void RapidOcrService::onTempImageReady(bool ok)
+{
+    if (!ok)
     {
         fail(QStringLiteral("无法写入 OCR 临时图片文件"));
         return;
     }
+    startEngine();
+}
 
-    // 确保进程运行
-    ensureProcess();
-    if (!m_process || m_process->state() != QProcess::Running)
-    {
-        fail(QStringLiteral("OCR 引擎未运行"));
-        return;
-    }
-
+void RapidOcrService::writeCommand()
+{
     // 发送命令 (管道模式：JSON 命令 + 换行符；经 QJsonDocument 构造保证路径转义)
     const QByteArray cmd = QJsonDocument(
                                QJsonObject{{QStringLiteral("image_path"), m_tempFile}})
@@ -195,7 +230,7 @@ void RapidOcrService::sendImage(const QImage &image)
                            + '\n';
     m_buffer.clear();
     m_process->write(cmd);
-    m_timeoutTimer->start(); // 识别超时看门狗开表
+    m_timeoutTimer->start(); // 识别超时看门狗开表（重开：启动阶段已计一部分）
     m_idleTimer->stop();     // 有活跃请求：暂停空闲回收倒计时
 }
 
@@ -242,6 +277,8 @@ void RapidOcrService::onReadyRead()
                 if (!boxArr.isEmpty())
                 {
                     const QRect r = quadToRect(boxArr);
+                    if (r.isNull())
+                        continue; // 四角全非法：跳过，不产出垃圾框
                     const double score = item.value(QStringLiteral("score")).toDouble();
                     OcrBox b;
                     b.rect = r;

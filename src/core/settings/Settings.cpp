@@ -20,6 +20,14 @@ static QSettings autoStartRegistry()
                      QSettings::NativeFormat);
 }
 
+// 热键修饰键合法性（R3 #13，对照 vk 的 0x01-0xFE 校验）：热键无设置 UI，
+// 只能手改 INI——0（无修饰键）会全局吞键，含未知位同理非法。
+// 0x1 MOD_ALT | 0x2 MOD_CONTROL | 0x4 MOD_SHIFT | 0x8 MOD_WIN
+static bool validHotkeyModifiers(quint32 mod)
+{
+    return mod != 0 && (mod & ~0xFu) == 0;
+}
+
 Settings &Settings::instance()
 {
     static Settings inst;
@@ -203,7 +211,15 @@ quint32 Settings::selectionTranslateHotKeyVk() const
 
 quint32 Settings::selectionTranslateHotKeyModifiers() const
 {
-    return m_s.value("hotkey/selectionTranslateMod", 0x0007 /* MOD_CONTROL|MOD_ALT|MOD_SHIFT */).toUInt();
+    const quint32 mod =
+        m_s.value("hotkey/selectionTranslateMod", 0x0007 /* MOD_CONTROL|MOD_ALT|MOD_SHIFT */).toUInt();
+    if (!validHotkeyModifiers(mod))
+    {
+        qWarning("Settings: 非法热键修饰键 hotkey/selectionTranslateMod=0x%x，回退默认",
+                 mod);
+        return 0x0007;
+    }
+    return mod;
 }
 
 void Settings::setSelectionTranslateHotKey(quint32 vk, quint32 modifiers)
@@ -420,7 +436,13 @@ quint32 Settings::assistantHotKeyVk() const
 
 quint32 Settings::assistantHotKeyModifiers() const
 {
-    return m_s.value("assistant/hotkeyMod", 0x0003 /* MOD_CONTROL|MOD_ALT */).toUInt();
+    const quint32 mod = m_s.value("assistant/hotkeyMod", 0x0003 /* MOD_CONTROL|MOD_ALT */).toUInt();
+    if (!validHotkeyModifiers(mod))
+    {
+        qWarning("Settings: 非法热键修饰键 assistant/hotkeyMod=0x%x，回退默认", mod);
+        return 0x0003;
+    }
+    return mod;
 }
 
 void Settings::setAssistantHotKey(quint32 vk, quint32 modifiers)

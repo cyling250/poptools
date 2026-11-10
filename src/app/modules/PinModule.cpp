@@ -7,6 +7,7 @@
 #include <QPixmap>
 #include <QPoint>
 #include <QRect>
+#include <QScreen>
 #include <QTimer>
 #include <algorithm>
 
@@ -87,12 +88,22 @@ void PinModule::pinFromClipboard()
     else
         pos = QCursor::pos();
 
+    // 跨屏混合 DPI（R3 #2）：仅当本次 F3 拦截了进行中的截图时，剪贴板内容
+    // 才可确定来自该选区所在屏——以选区左上角所在屏 dpr 作为内容源屏 dpr 传入；
+    // 其余来源（纯剪贴板图）源屏未知，传 0 维持旧行为（PinWindow 按张贴屏反推）
+    qreal sourceDpr = 0.0;
+    if (!captureSel.isEmpty())
+    {
+        if (const QScreen *scr = QGuiApplication::screenAt(captureSel.topLeft()))
+            sourceDpr = scr->devicePixelRatio();
+    }
+
     // 多张贴图并存：每次 F3 创建新实例，互不影响；关闭时（WA_DeleteOnClose）自动销毁
     auto *pin = new PinWindow();
     // 右键「识别文字 / 翻译」：context = pin，窗口销毁自动断连
     connect(pin, &PinWindow::ocrRequested, this, &PinModule::onPinOcrRequested);
     connect(pin, &PinWindow::translateRequested, this, &PinModule::onPinTranslateRequested);
-    pin->pin(img, pos);
+    pin->pin(img, pos, sourceDpr);
 }
 
 // ---- 贴图 OCR / 翻译（结果走托盘气泡 + 剪贴板，不弹交互窗） ----
@@ -140,13 +151,10 @@ void PinModule::onPinOcrFinished(bool ok, const QVector<OcrBox> &boxes, const QS
                                error.isEmpty() ? QStringLiteral("未识别到文字") : error);
         return;
     }
-    // 行序重排（阅读顺序：先上后下、同行先左后右）后拼接
+    // 行序重排（阅读顺序：先上后下、同行先左后右）后拼接——半行高容差
+    // 同行判定抽到 core/ocr 共享（截图翻译同款），见 sortOcrBoxesReadingOrder
     QVector<OcrBox> sorted = boxes;
-    std::sort(sorted.begin(), sorted.end(), [](const OcrBox &a, const OcrBox &b) {
-        if (qAbs(a.rect.top() - b.rect.top()) > qMax(a.rect.height(), b.rect.height()) / 2)
-            return a.rect.top() < b.rect.top();
-        return a.rect.left() < b.rect.left();
-    });
+    sortOcrBoxesReadingOrder(sorted);
     QString text;
     for (const OcrBox &box : sorted) {
         const QString t = box.text.trimmed();

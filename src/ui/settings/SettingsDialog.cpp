@@ -20,6 +20,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QRegularExpressionValidator>
+#include <QRegularExpression>
 #include <QSlider>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -503,7 +505,9 @@ QWidget *SettingsDialog::buildOrganizerPage()
         "标题栏右键：重命名 / 打开目录 / 解散收纳盒（文件移回桌面） / "
         "删除收纳盒（保留磁盘文件）。"));
     hint->setWordWrap(true);
-    hint->setStyleSheet("color: gray; font-size: 12px;");
+    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
+    // T-030 约定：文字不允许灰色）；此处只约束字号
+    hint->setStyleSheet("font-size: 12px;");
     lay->addWidget(hint);
 
     lay->addStretch();
@@ -577,7 +581,9 @@ QWidget *SettingsDialog::buildMonitorPage()
         "日志位置：%LOCALAPPDATA%\\PopTools\\monitor\\<日期>\\（JSONL 文本，可用记事本打开）。\n"
         "托盘菜单可一键启停；Goody 管家（内测中）将基于这些日志生成每日工作记录。"));
     hint->setWordWrap(true);
-    hint->setStyleSheet("color: gray; font-size: 12px;");
+    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
+    // T-030 约定：文字不允许灰色）；此处只约束字号
+    hint->setStyleSheet("font-size: 12px;");
     lay->addWidget(hint);
 
     lay->addStretch();
@@ -641,6 +647,10 @@ QWidget *SettingsDialog::buildGoodyPage()
     m_gdyTimeEdit->setText(Settings::instance().assistantSummaryTime());
     m_gdyTimeEdit->setPlaceholderText(QStringLiteral("22:00"));
     m_gdyTimeEdit->setToolTip(QStringLiteral("每天到点后检查活动日志，为有记录但未总结的日子生成「本日工作记录」"));
+    // 输入即校验 HH:mm（R3 #15）：坏值此前会直写 ini，读端静默回退 22:00 无提示
+    m_gdyTimeEdit->setValidator(
+        new QRegularExpressionValidator(QRegularExpression(QStringLiteral(
+            "^([01]?\\d|2[0-3]):[0-5]\\d$")), m_gdyTimeEdit));
     permForm->addRow(QStringLiteral("每日总结时刻:"), m_gdyTimeEdit);
     m_gdyAutoCheck = new QCheckBox(QStringLiteral("自动生成每日工作记录（启动时补账 + 定时）"), page);
     m_gdyAutoCheck->setChecked(Settings::instance().assistantAutoSummarize());
@@ -661,7 +671,9 @@ QWidget *SettingsDialog::buildGoodyPage()
         "呼出方式：Ctrl+Alt+G 或托盘菜单「Goody 管家」。\n"
         "Key 只保存在本机 PopTools.ini，不会随仓库提交。"));
     hint->setWordWrap(true);
-    hint->setStyleSheet("color: gray; font-size: 12px;");
+    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
+    // T-030 约定：文字不允许灰色）；此处只约束字号
+    hint->setStyleSheet("font-size: 12px;");
     lay->addWidget(hint);
 
     lay->addStretch();

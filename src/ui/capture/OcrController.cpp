@@ -42,7 +42,16 @@ void OcrController::requestTranslate(QWidget *parent)
 {
     m_translateMode = true;
     if (!prepareAndRecognize(parent))
+    {
+        // 失败路径统一收口（R3 #1）：解除面板忙态并清"翻译中…"占位文本，
+        // 否则面板按钮禁用且文案跨截图会话卡死到进程重启。
+        // 成功路径的收口点在翻译完成回包（CaptureWindow 的 translateFinished 处理器）
+        if (m_host.setPanelBusy)
+            m_host.setPanelBusy(false);
+        if (m_host.setPanelTranslateText)
+            m_host.setPanelTranslateText(QString());
         return;
+    }
     // 面板模式：先显示原文（此时尚未有识别结果，等 onBoxesTranslate 填原文）
     if (m_host.showPanel)
         m_host.showPanel(QString());
@@ -55,7 +64,12 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
     if (m_ctx->selectionRect().isEmpty())
         return false;
     if (!m_ocr || m_ocr->busy())
-        return false; // 未注入共享引擎 / 上次识别未结束，忽略重复点击
+    {
+        // 共享 OCR 引擎忙（如贴图识别进行中）：透出原因，避免用户视角"点了没反应"
+        QMessageBox::warning(parent, "文字识别",
+                             "OCR 正在识别其他内容，请稍后再试。");
+        return false;
+    }
     if (!m_ocr->available())
     {
         if (m_host.ocrBusy)
@@ -73,7 +87,11 @@ bool OcrController::prepareAndRecognize(QWidget *parent)
     const QRect physCrop = ScreenCapturer::toPhysicalRect(m_ctx->selectionRect())
                                .translated(-m_ctx->cap->physDesktop.topLeft());
     if (physCrop.isEmpty())
+    {
+        if (m_host.ocrBusy)
+            m_host.ocrBusy(false); // 动效已开表：失败路径必须收口，防扫描线常转
         return false;
+    }
     m_ocrImg = m_ctx->cap->screen.copy(physCrop).toImage();
     m_ocr->recognizeBoxes(m_ocrImg);
     m_ocrPending = true; // 回包归属标记：共享服务的其他消费者（贴图 OCR）回包不再串入
@@ -134,6 +152,9 @@ void OcrController::onBoxes(bool ok, const QVector<OcrBox> &boxes, const QString
     }
 
     // 裁剪图像素坐标 → 选区局部逻辑坐标（按各轴缩放比例换算）
+    if (m_ocrImg.isNull())
+        return; // 会话已结束（releaseSessionResources 已释放）：过期回包丢弃，
+                // 避免以空图做除法产出 NaN 矩形
     const QRect selection = m_ctx->selectionRect();
     const int selW = qMax(1, selection.width());
     const int selH = qMax(1, selection.height());
@@ -183,14 +204,10 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
         return;
     }
 
-    // 按阅读顺序（先从上到下，再从左到右）合并行文本
+    // 按阅读顺序（先从上到下，再从左到右）合并行文本（半行高容差同行判定
+    // 与贴图 OCR 共用一实现，见 sortOcrBoxesReadingOrder）
     QVector<OcrBox> sorted = boxes;
-    std::sort(sorted.begin(), sorted.end(), [](const OcrBox &a, const OcrBox &b)
-              {
-                  if (a.rect.y() != b.rect.y())
-                      return a.rect.y() < b.rect.y();
-                  return a.rect.x() < b.rect.x();
-              });
+    sortOcrBoxesReadingOrder(sorted);
     QString text;
     for (const OcrBox &box : sorted)
     {

@@ -17,7 +17,8 @@ void CaptureModule::init(AppServices &services)
 {
     m_services = &services;
 
-    // 注入共享 OCR 引擎（全局唯一子进程；null 时 CaptureWindow 内部自建兜底）
+    // 注入共享 OCR 引擎（全局唯一子进程；null 属装配缺陷，CaptureWindow
+    // 内 Q_ASSERT 拦截——T-036 批次 D 已删除内部自建兜底，防拉起第二个引擎）
     m_window = new CaptureWindow(services.ocr);
 
     // 捕获完成 → 记录选区位置（F3 贴图定位用）

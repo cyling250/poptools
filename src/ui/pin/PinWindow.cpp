@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QDir>
 #include <QDateTime>
+#include <QThreadPool>
 
 #include "core/settings/Settings.h"
 
@@ -76,21 +77,26 @@ PinWindow::PinWindow(QWidget *parent)
     });
 }
 
-void PinWindow::pin(const QPixmap &pixmap, const QPoint &globalTopLeft)
+void PinWindow::pin(const QPixmap &pixmap, const QPoint &globalTopLeft, qreal sourceDpr)
 {
     m_pixmap = pixmap;
     m_scale = 1.0;
 
-    // 无损 1:1 呈现：记录张贴屏幕的 dpr，绘制时物理像素与屏幕像素一一对应；
+    // 无损 1:1 呈现：记录内容源屏的 dpr，绘制时物理像素与屏幕像素一一对应；
     // 尺寸保持选区原始逻辑尺寸、位置保持选区原始位置，不做任何缩小限制
     // （超大图也原样张贴，需要缩小时可滚轮调整）
     const QScreen *scr = QGuiApplication::screenAt(globalTopLeft);
     const qreal dpr = scr ? scr->devicePixelRatio() : 1.0;
-    m_pixmap.setDevicePixelRatio(dpr);
-    m_baseSize = (QSizeF(pixmap.size()) / dpr).toSize();
+    // 跨屏张贴（R3 #2）：剪贴板位图无 DPR 元数据，内容是源屏物理像素。源屏 dpr
+    // 已知（截图链路传入）时按源屏 dpr 反推逻辑尺寸 = 原选区逻辑尺寸；未知
+    // （纯剪贴板图）维持旧行为按张贴屏 dpr 反推。
+    // TODO(真机验证)：混合 DPI 多屏张贴的实际观感未真机复核
+    const qreal contentDpr = sourceDpr > 0.0 ? sourceDpr : dpr;
+    m_pixmap.setDevicePixelRatio(contentDpr);
+    m_baseSize = (QSizeF(pixmap.size()) / contentDpr).toSize();
 
     remakeShadow();
-    saveToDefaultDir(); // 张贴同时保存到默认文件夹（PNG 无损）
+    saveToDefaultDir(); // 张贴同时保存到默认文件夹（PNG 无损，异步落盘）
 
     // 内容左上角 = globalTopLeft；窗口四周是容纳投影衰减的透明边距
     resize(contentSize() + QSize(kMargin * 2, kMargin * 2));
@@ -106,13 +112,27 @@ void PinWindow::saveToDefaultDir()
     const QString dir = Settings::instance().pinSaveDir();
     if (dir.trimmed().isEmpty())
         return;
-    if (!QDir().mkpath(dir))
-        return;
     const QString name = QStringLiteral("Pin_%1.png")
                              .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz"));
-    const QString path = QDir(dir).filePath(name);
-    if (m_pixmap.save(path)) // PNG：无损落盘
-        m_savedPath = path;
+    // 路径在主线程预登记（销毁菜单即刻可删；落盘失败时 remove 对不存在文件无害）
+    m_savedPath = QDir(dir).filePath(name);
+
+    // PNG 编码 + 落盘挪线程池（红线 1：大图编码与磁盘 IO 禁入主线程，整幅选区
+    // PNG 编码可秒级阻塞）。QPixmap 禁止跨线程，先在主线程转 QImage（一次像素拷贝）；
+    // lambda 只捕值与共享标记、不回投本窗口，窗口先销毁（WA_DeleteOnClose）也无悬垂
+    const QImage img = m_pixmap.toImage();
+    if (img.isNull())
+        return;
+    auto aborted = QSharedPointer<std::atomic_bool>::create(false);
+    m_saveAborted = aborted;
+    QThreadPool::globalInstance()->start([img, dir, path = m_savedPath, aborted] {
+        QDir().mkpath(dir);
+        if (!img.save(path, "PNG"))
+            QFile::remove(path); // 落盘失败：清掉半截文件
+        // 销毁先于落盘完成：删掉刚写出的文件，防"销毁后文件复活"
+        if (aborted->load())
+            QFile::remove(path);
+    });
 }
 
 QSize PinWindow::contentSize() const
@@ -240,8 +260,11 @@ void PinWindow::contextMenuEvent(QContextMenuEvent *event)
         emit translateRequested(m_pixmap);
         return;
     }
-    if (chosen == destroyAct && !m_savedPath.isEmpty())
+    if (chosen == destroyAct && !m_savedPath.isEmpty()) {
+        if (m_saveAborted)
+            m_saveAborted->store(true); // 落盘仍在进行：worker 完成后补删，防文件复活
         QFile::remove(m_savedPath); // 删除默认文件夹中的文件
+    }
     if (chosen == clearAct || chosen == destroyAct)
         close(); // WA_DeleteOnClose → 关闭即销毁本实例，不影响其它贴图
 }

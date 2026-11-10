@@ -30,6 +30,7 @@ bool AnnotationEditor::tryPress(const QPointF &local)
 {
     Q_ASSERT(m_ctx->canvas);
     Q_ASSERT(m_ctx->selectedItem);
+    m_mosaicPreviewFrame = false; // 新按下即新交互（防御：异常路径残留的定稿标记）
     const int selIdx = m_ctx->selectedIndex();
     if (selIdx >= 0 && selIdx < m_ctx->canvas->items.size())
     {
@@ -74,12 +75,14 @@ void AnnotationEditor::drag(const QPointF &local)
 
 void AnnotationEditor::endDrag()
 {
+    finalizeMosaicPreview();
     m_itemActiveHandle = Handle::None;
     // m_itemMoving 保持：选中标注保持选中态，便于连续操作
 }
 
 void AnnotationEditor::stopInteraction()
 {
+    finalizeMosaicPreview();
     m_itemMoving = false;
     m_itemActiveHandle = Handle::None;
 }
@@ -104,7 +107,10 @@ void AnnotationEditor::move(const QPointF &local)
     m_ctx->requestUpdate();
 }
 
-// 拖动选中项控制点：矩形类镜像缩放（拖过对侧翻转），线段类端点编辑
+// 拖动选中项控制点：矩形类镜像缩放（拖过对侧翻转），线段类端点编辑。
+// 马赛克中间帧以预览模式缩放（复用起始图，跳过整幅 SmoothTransformation
+// 重采样——mouseMove 高频全图缩放会占满主线程，R3 #24），松手时
+// finalizeMosaicPreview 从起始几何重算一次定稿
 void AnnotationEditor::resize(const QPointF &local)
 {
     const int selIdx = m_ctx->selectedIndex();
@@ -113,12 +119,35 @@ void AnnotationEditor::resize(const QPointF &local)
     if (m_itemActiveHandle == Handle::None)
         return;
     const AnnotationItem it = AnnotationPainter::resizedItem(m_itemStartGeom,
-                                                             m_itemActiveHandle, local, kMinSize);
+                                                             m_itemActiveHandle, local,
+                                                             kMinSize, /*mosaicPreview=*/true);
+    m_itemLastLocal = local;
+    if (it.type == AnnotationType::Mosaic)
+        m_mosaicPreviewFrame = true;
     if (!m_itemSnapshotted)
     {
         m_ctx->canvas->pushSnapshot();
         m_itemSnapshotted = true;
     }
+    m_ctx->canvas->setItem(selIdx, it);
+    m_ctx->requestUpdate();
+}
+
+// 马赛克缩放定稿：预览帧的 mosaicImage 是起始图（绘制端拉伸显示），
+// 松手/中断时从起始几何按最终矩形重算一次，SmoothTransformation 只做一次
+void AnnotationEditor::finalizeMosaicPreview()
+{
+    if (!m_mosaicPreviewFrame)
+        return;
+    m_mosaicPreviewFrame = false;
+    if (m_itemActiveHandle == Handle::None)
+        return;
+    const int selIdx = m_ctx->selectedIndex();
+    if (selIdx < 0 || selIdx >= m_ctx->canvas->items.size())
+        return;
+    const AnnotationItem it = AnnotationPainter::resizedItem(m_itemStartGeom,
+                                                             m_itemActiveHandle,
+                                                             m_itemLastLocal, kMinSize);
     m_ctx->canvas->setItem(selIdx, it);
     m_ctx->requestUpdate();
 }

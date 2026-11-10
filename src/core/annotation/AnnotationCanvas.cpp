@@ -5,7 +5,7 @@ namespace poptools {
 
 void AnnotationCanvas::addItem(const AnnotationItem &item)
 {
-    m_undoStack.push_back(items);
+    pushUndo(items);
     items.push_back(item);
     m_redoStack.clear();
 }
@@ -22,7 +22,7 @@ void AnnotationCanvas::redo()
 {
     if (m_redoStack.isEmpty())
         return;
-    m_undoStack.push_back(items);
+    pushUndo(items);
     items = m_redoStack.takeLast();
 }
 
@@ -31,9 +31,9 @@ bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
     // 从后往前找最近且距离在容差内的标注
     for (int i = items.size() - 1; i >= 0; --i) {
         const AnnotationItem &it = items[i];
-        qreal d = AnnotationPainter::distanceToItem(pos, it);
+        qreal d = AnnotationPainter::distanceToItem(pos, it, tol);
         if (d <= tol) {
-            m_undoStack.push_back(items);
+            pushUndo(items);
             items.removeAt(i);
             m_redoStack.clear();
             return true;
@@ -45,7 +45,7 @@ bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
 bool AnnotationCanvas::hitTest(const QPointF &pos, qreal tol) const
 {
     for (const AnnotationItem &it : items) {
-        if (AnnotationPainter::distanceToItem(pos, it) <= tol)
+        if (AnnotationPainter::distanceToItem(pos, it, tol) <= tol)
             return true;
     }
     return false;
@@ -55,7 +55,7 @@ int AnnotationCanvas::itemAt(const QPointF &pos, qreal tol) const
 {
     // 从后往前：后绘制的标注优先被选中
     for (int i = items.size() - 1; i >= 0; --i) {
-        if (AnnotationPainter::distanceToItem(pos, items[i]) <= tol)
+        if (AnnotationPainter::distanceToItem(pos, items[i], tol) <= tol)
             return i;
     }
     return -1;
@@ -63,7 +63,7 @@ int AnnotationCanvas::itemAt(const QPointF &pos, qreal tol) const
 
 void AnnotationCanvas::pushSnapshot()
 {
-    m_undoStack.push_back(items);
+    pushUndo(items);
     m_redoStack.clear();
 }
 

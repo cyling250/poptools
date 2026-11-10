@@ -73,6 +73,9 @@ namespace poptools
         { m_translator->translate(text, m_ocrPanel->sourceLang(), m_ocrPanel->targetLang()); };
         ocrHost.setPanelBusy = [this](bool busy)
         { m_ocrPanel->setBusy(busy); };
+        // 文字栏翻译结果区文本（OCR 失败路径清"翻译中…"占位）
+        ocrHost.setPanelTranslateText = [this](const QString &text)
+        { m_ocrPanel->setTranslateText(text); };
         // OCR 扫描动效：点击【文】时选区内的扫描线，提示用户"没卡死"
         ocrHost.ocrBusy = [this](bool busy) {
             if (busy) {
@@ -254,6 +257,7 @@ namespace poptools
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 释放取色缓存
         m_baseScaled = QPixmap(); // 释放底图缩放缓存（约 8-33MB，空闲期不留驻）
+        m_ocrCtrl->releaseSessionResources(); // 释放 OCR 选区大图缓存（红线 5，与上面两处并列）
         m_smartDetectTimer.stop(); // 停止智能框选检测
         m_ocrScanning = false; // 停止 OCR 扫描动效
         m_ocrScanTimer.stop();

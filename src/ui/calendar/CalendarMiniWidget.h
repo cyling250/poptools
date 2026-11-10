@@ -35,6 +35,7 @@ signals:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message,
                      qintptr *result) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;

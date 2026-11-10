@@ -110,7 +110,7 @@ public:
     // 输入空闲阈值（秒）：超过即判定离开，时间线段以最后输入时刻收尾
     int monitorIdleThresholdSec() const;
     void setMonitorIdleThresholdSec(int sec);
-    // 日志保留天数（0 = 永久；过期日目录随启动清理）
+    // 日志保留天数（钳制 1-3650，非法手改回退 1；过期日目录随启动清理）
     int monitorRetentionDays() const;
     void setMonitorRetentionDays(int days);
     // 中文上屏 OCR 快照（输入法上屏→截前台窗口→OCR→记增量→删图）

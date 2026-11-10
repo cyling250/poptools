@@ -9,6 +9,8 @@
 #include <QByteArray>
 #include <QTimer>
 
+#include <algorithm>
+
 namespace poptools {
 
 // OCR 文本框行（复用旧接口类型，保持与 OcrController 的兼容）
@@ -18,6 +20,44 @@ struct OcrBox
     QString text;    // 行文本
     qreal conf = 0;  // 置信度 0-100
 };
+
+// 按阅读顺序重排 OCR 文本框（先上后下，同一行内先左后右）。
+// 同行判定用"半行高容差"：与行首框 top 相差不超过两框行高中点视为同一行——
+// 引擎对同一文本行的多个框 y 常有数像素微差，严格相等比较会错误拆行。
+// 共享小函数（R3 #8）：OcrController（截图翻译）与 PinModule（贴图 OCR）
+// 两处行序拼接统一调用，不再各写一份。实现为"按 top 排序后逐行分组"而非
+// 两两比较谓词——带容差的比较谓词不满足严格弱序，std::sort 属未定义行为
+inline void sortOcrBoxesReadingOrder(QVector<OcrBox> &boxes)
+{
+    std::sort(boxes.begin(), boxes.end(), [](const OcrBox &a, const OcrBox &b) {
+        if (a.rect.top() != b.rect.top())
+            return a.rect.top() < b.rect.top();
+        return a.rect.left() < b.rect.left();
+    });
+    int lineStart = 0;
+    while (lineStart < boxes.size())
+    {
+        const int anchorTop = boxes[lineStart].rect.top();
+        const int anchorH = qMax(1, boxes[lineStart].rect.height());
+        int lineEnd = lineStart + 1; // 行区间 [lineStart, lineEnd)
+        while (lineEnd < boxes.size())
+        {
+            const int h = qMax(1, boxes[lineEnd].rect.height());
+            if (qAbs(boxes[lineEnd].rect.top() - anchorTop)
+                > qMax(anchorH, h) / 2)
+                break; // 与行首框超出半行高容差：新行
+            ++lineEnd;
+        }
+        if (lineEnd - lineStart > 1)
+        {
+            std::sort(boxes.begin() + lineStart, boxes.begin() + lineEnd,
+                      [](const OcrBox &a, const OcrBox &b) {
+                          return a.rect.left() < b.rect.left();
+                      });
+        }
+        lineStart = lineEnd;
+    }
+}
 
 // 基于 RapidOCR-json（onnxruntime，hiroi-sora）的 OCR 服务（QProcess 子进程调用）。
 //
@@ -48,11 +88,15 @@ signals:
     void ocrBoxesFinished(bool ok, const QVector<OcrBox> &boxes, const QString &error);
 
 private:
-    // 确保子进程启动并初始化完成
-    void ensureProcess();
+    // 异步启动子进程（started 信号到达后 writeCommand；启动失败经
+    // errorOccurred → fail）。Running/Starting 在途时直接复用
+    void startEngine();
 
-    // 保存图片到临时文件，通过 stdin 发送命令
-    void sendImage(const QImage &image);
+    // worker 落盘完成回主线程：成功则启动引擎发送命令，失败统一报错
+    void onTempImageReady(bool ok);
+
+    // 通过 stdin 发送命令（临时图片路径已在 m_tempFile）
+    void writeCommand();
 
     // 处理 stdout 数据（按行分割 JSON）
     void onReadyRead();

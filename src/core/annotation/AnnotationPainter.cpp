@@ -1,5 +1,6 @@
 #include "AnnotationPainter.h"
 
+#include <QCache>
 #include <QLineF>
 #include <QtMath>
 #include <QTextDocument>
@@ -7,6 +8,31 @@
 #include <QPalette>
 
 namespace poptools {
+
+namespace {
+
+// 富文本布局缓存（R3 #25）：drawOne 对同一 Text 项每帧新建 QTextDocument 并
+// 解析 HTML，拖动/重绘期间逐帧重复。按 (html + 字体) 键缓存已布局文档——
+// 键含完整内容，天然无失效时机问题；颜色经 PaintContext 调色板传入，不改文档
+// 状态。仅限 GUI 线程使用（drawOne 全部调用点均在主线程）
+QTextDocument *cachedRichTextDoc(const QString &html, const QFont &font)
+{
+    static QCache<QString, QTextDocument> cache;
+    if (cache.maxCost() == 0)
+        cache.setMaxCost(32); // 文字标注数量少，32 份布局上限足够
+    const QString key = html + QLatin1Char('\n') + font.toString();
+    if (QTextDocument *doc = cache.object(key))
+        return doc;
+    auto *doc = new QTextDocument;
+    doc->setDefaultFont(font);
+    doc->setHtml(html);
+    doc->setDocumentMargin(0);
+    doc->setTextWidth(-1); // 不换行（与 QTextEdit::NoWrap 输入所见一致）
+    cache.insert(key, doc, 1);
+    return doc;
+}
+
+} // namespace
 
 qreal AnnotationPainter::pointToSegmentDist(const QPointF &p, const QPointF &a, const QPointF &b)
 {
@@ -33,7 +59,7 @@ QRectF AnnotationPainter::itemBounds(const AnnotationItem &it)
 }
 
 AnnotationItem AnnotationPainter::scaledItem(const AnnotationItem &src, const QRectF &newBounds,
-                                             bool xFlip, bool yFlip)
+                                             bool xFlip, bool yFlip, bool mosaicPreview)
 {
     AnnotationItem it = src;
     const QRectF oldBounds = itemBounds(src);
@@ -87,30 +113,37 @@ AnnotationItem AnnotationPainter::scaledItem(const AnnotationItem &src, const QR
     }
     if (it.type == AnnotationType::Mosaic && !it.mosaicImage.isNull()
         && oldBounds.width() > 0 && oldBounds.height() > 0) {
-        // 马赛克图像随框等比缩放，避免多次缩放后质量严重下降
-        it.mosaicImage = it.mosaicImage.scaled(
-            qMax(1, qRound(it.mosaicImage.width() * newBounds.width() / oldBounds.width())),
-            qMax(1, qRound(it.mosaicImage.height() * newBounds.height() / oldBounds.height())),
-            Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        // 马赛克图像随框等比缩放，避免多次缩放后质量严重下降。
+        // 拖拽中间帧（mosaicPreview=true）跳过重采样：drawImage 按目标矩形
+        // 拉伸绘制，直接复用起始图（COW 零拷贝）即可预览——SmoothTransformation
+        // 对整幅大图双线性滤波，mouseMove 高频调用会持续占满主线程（R3 #24）；
+        // 拖拽结束由 AnnotationEditor 以默认参数重算一次，Smooth 只做一次定稿
+        if (!mosaicPreview) {
+            it.mosaicImage = it.mosaicImage.scaled(
+                qMax(1, qRound(it.mosaicImage.width() * newBounds.width() / oldBounds.width())),
+                qMax(1, qRound(it.mosaicImage.height() * newBounds.height() / oldBounds.height())),
+                Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
     }
     return it;
 }
 
-qreal AnnotationPainter::distanceToItem(const QPointF &pos, const AnnotationItem &it)
+qreal AnnotationPainter::distanceToItem(const QPointF &pos, const AnnotationItem &it, qreal tol)
 {
     qreal d = 1e9;
     switch (it.type) {
     case AnnotationType::Rect:
     case AnnotationType::Ellipse:
     case AnnotationType::Text: {
-        // 命中测试：点在图形边界附近（取外接矩形外扩 tol）
-        const bool inside = it.rect.adjusted(-6, -6, 6, 6).contains(pos);
+        // 命中测试：点在图形边界附近（取外接矩形外扩 tol——此前硬编码 6px
+        // 忽略调用方容差，与折线类语义不一致，R3 #23）
+        const bool inside = it.rect.adjusted(-tol, -tol, tol, tol).contains(pos);
         d = inside
                 ? qMin(qAbs(pos.x() - it.rect.left()), qMin(qAbs(pos.x() - it.rect.right()),
                                                             qMin(qAbs(pos.y() - it.rect.top()),
                                                                  qAbs(pos.y() - it.rect.bottom()))))
                 : 1e9;
-        if (inside && d > 6)
+        if (inside && d > tol)
             d = 0; // 点在框内（填充/文本区域）
         break;
     }
@@ -203,7 +236,8 @@ static bool resizeAxis(qreal &minEdge, qreal &maxEdge, qreal anchor, qreal edge,
 }
 
 AnnotationItem AnnotationPainter::resizedItem(const AnnotationItem &start, Handle h,
-                                              const QPointF &pos, qreal minSize)
+                                              const QPointF &pos, qreal minSize,
+                                              bool mosaicPreview)
 {
     // 线段类：端点编辑（只改变该端点，长度与指向自由）
     if (h == Handle::P0 || h == Handle::P1) {
@@ -246,7 +280,7 @@ AnnotationItem AnnotationPainter::resizedItem(const AnnotationItem &start, Handl
     }
 
     const QRectF newBounds(left, top, right - left, bottom - top);
-    return scaledItem(start, newBounds, xFlip, yFlip);
+    return scaledItem(start, newBounds, xFlip, yFlip, mosaicPreview);
 }
 
 void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
@@ -339,17 +373,14 @@ void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
             }
         } else {
             // 富文本（含多字号片段）：按与输入框一致的布局渲染
-            // （不换行：宽=最长行、高=总行高；body 无颜色 → 用标注色兜底）
-            QTextDocument doc;
-            doc.setDefaultFont(it.font);
-            doc.setHtml(it.html);
-            doc.setDocumentMargin(0);
-            doc.setTextWidth(-1); // 不换行（与 QTextEdit::NoWrap 输入所见一致）
+            // （不换行：宽=最长行、高=总行高；body 无颜色 → 用标注色兜底）。
+            // 文档经 cachedRichTextDoc 复用（每帧解析 HTML 是热点，R3 #25）
+            QTextDocument *doc = cachedRichTextDoc(it.html, it.font);
             QAbstractTextDocumentLayout::PaintContext ctx;
             ctx.palette.setColor(QPalette::Text, it.color);
             p.save();
             p.translate(it.rect.topLeft());
-            doc.documentLayout()->draw(&p, ctx);
+            doc->documentLayout()->draw(&p, ctx);
             p.restore();
         }
         break;

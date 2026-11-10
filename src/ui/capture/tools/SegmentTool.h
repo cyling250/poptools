@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include "ToolBase.h"
 
 namespace poptools {
@@ -29,6 +31,11 @@ public:
     void onRelease(const QPointF &local) override
     {
         m_end = local;
+        // 最小长度门槛（R3 #10）：单击未拖动不提交——零长线段是"隐形项"，
+        // 零长箭头方向未定义会画出乱箭头（误点点子请用笔刷工具）
+        const QPointF d = m_end - m_start;
+        if (std::hypot(d.x(), d.y()) < 2.0)
+            return;
         commitItem(m_ctx, draftItem());
     }
 

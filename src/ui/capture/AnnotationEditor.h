@@ -43,6 +43,7 @@ private:
     Handle handleAt(const AnnotationItem &it, const QPointF &pos) const;
     void move(const QPointF &local);
     void resize(const QPointF &local);
+    void finalizeMosaicPreview(); // 马赛克缩放预览定稿（见 resize 实现）
 
     CaptureContext *m_ctx;
 
@@ -52,6 +53,8 @@ private:
     QPointF m_itemStartPos;                       // 按下时的鼠标（局部坐标）
     QRectF m_itemStartBounds;                     // 按下时的标注外接矩形
     AnnotationItem m_itemStartGeom;               // 按下时的标注几何快照
+    QPointF m_itemLastLocal;                      // 缩放中最后一次鼠标位置（定稿重算用）
+    bool m_mosaicPreviewFrame = false;            // 马赛克缩放中间帧待定稿（R3 #24）
 };
 
 } // namespace poptools

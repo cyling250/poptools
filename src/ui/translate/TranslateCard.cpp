@@ -293,7 +293,14 @@ void TranslateCard::setSourceText(const QString &text)
 
 void TranslateCard::moveNearCursor()
 {
-    const QRect screenGeo = QGuiApplication::screenAt(QCursor::pos())->availableGeometry();
+    // screenAt 对屏幕几何外的光标位置返回空（极少数情况）：回退主屏，
+    // 与文件内 refit() 的同款判空保持一致
+    const QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return;
+    const QRect screenGeo = screen->availableGeometry();
     QPoint pos = QCursor::pos() + QPoint(12, 12);
     if (pos.x() + width() > screenGeo.right())
         pos.setX(screenGeo.right() - width());

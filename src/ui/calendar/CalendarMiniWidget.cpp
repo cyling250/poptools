@@ -217,6 +217,14 @@ void CalendarMiniWidget::showEvent(QShowEvent *event)
     });
 }
 
+void CalendarMiniWidget::hideEvent(QHideEvent *event)
+{
+    QWidget::hideEvent(event);
+    // 退出守护表（R3 #19）：隐藏后不再需要 Z 序守护——attach 与 detach
+    // 配对，否则守护定时器为不可见窗口永不停表（每秒一次 FindWindowW 空转）
+    desktopstack::detach(this);
+}
+
 void CalendarMiniWidget::paintEvent(QPaintEvent * /*event*/)
 {
     QPainter p(this);

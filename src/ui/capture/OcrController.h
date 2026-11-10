@@ -26,6 +26,8 @@ struct OcrHostCallbacks
     std::function<void(bool)> ocrBusy;
     // 文字栏翻译忙状态（OCR/翻译进行中禁用翻译按钮）
     std::function<void(bool)> setPanelBusy;
+    // 文字栏翻译结果区文本（失败路径清"翻译中…"占位，避免残留）
+    std::function<void(const QString &)> setPanelTranslateText;
     // 面板模式：显示文字栏（参数为 OCR 识别文字，可为空串先占位）
     std::function<void(const QString &)> showPanel;
     // 【译】模式：识别完成后自动翻译
@@ -50,6 +52,10 @@ public:
 
     void request(QWidget *parent); // 检查状态 + 裁剪选区图像 + 启动识别
     void requestTranslate(QWidget *parent); // 识别并翻译：结果显示到文字栏面板（原始+翻译）
+
+    // 会话级资源释放：清掉传给 OCR 的选区大图缓存（4K 选区约 33MB，
+    // 红线 5：会话级大缓冲退出即清空，先例 m_baseScaled）。退出截图时调用
+    void releaseSessionResources() { m_ocrImg = QImage(); }
 
 private:
     bool prepareAndRecognize(QWidget *parent); // 公共准备（检查状态 + 裁剪 + 启动识别）；不可用返回 false
