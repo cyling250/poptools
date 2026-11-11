@@ -10,6 +10,7 @@
 #include "../AppServices.h"
 #include "core/hotkey/GlobalMouseHook.h"
 #include "core/monitor/ActivityStore.h"
+#include "core/monitor/ClipboardListener.h"
 #include "core/monitor/ForegroundTracker.h"
 #include "core/monitor/GlobalKeyboardHook.h"
 #include "core/monitor/ImeCommitDetector.h"
@@ -162,7 +163,8 @@ void ActivityMonitorModule::startMonitor()
                 m_store->append(QStringLiteral("timeline"), o);
             });
 
-    // 前台窗口变化 → 全链换上下文（状态机 / 文本 / 上屏检测 / OCR 基线）
+    // 前台窗口变化 → 全链换上下文（状态机 / 文本 / 上屏检测 / OCR 基线 /
+    // 剪贴板事件归属）
     connect(m_tracker, &ForegroundTracker::foregroundChanged, this,
             [this](quintptr hwnd, const QString &app, const QString &title) {
                 m_activity->setWindowContext(hwnd, app, title);
@@ -171,9 +173,12 @@ void ActivityMonitorModule::startMonitor()
                     m_imeDetector->reset();
                 if (m_ocrPipeline)
                     m_ocrPipeline->setWindowContext(hwnd, app, title);
+                if (m_clipboard)
+                    m_clipboard->setContext(app, title);
             });
 
-    // ---- 中文上屏 OCR 快照链（可选：设置开关 + 共享 OCR 引擎可用） ----
+    // ---- 中文上屏取文链（可选：设置开关 + 共享 OCR 引擎可用） ----
+    // T-047-UIA：管线内部 UIA-first、截图+OCR 兜底，source 随事件给出
     m_appliedOcrSnapshot = s.monitorOcrSnapshot();
     if (s.monitorOcrSnapshot() && m_services && m_services->ocr) {
         m_imeDetector = new ImeCommitDetector(this);
@@ -181,13 +186,19 @@ void ActivityMonitorModule::startMonitor()
         connect(m_imeDetector, &ImeCommitDetector::commitDetected, m_ocrPipeline,
                 &SnapshotOcrPipeline::onCommitDetected);
         connect(m_ocrPipeline, &SnapshotOcrPipeline::ocrTextReady, this,
-                [this](const QString &app, const QString &title, const QString &text) {
+                [this](const QString &app, const QString &title, const QString &text,
+                       const QString &source) {
                     QJsonObject o = baseEvent(app, title);
                     o.insert("text", text);
-                    o.insert("source", QStringLiteral("ocr"));
+                    o.insert("source", source); // "uia" / "ocr"
                     m_store->append(QStringLiteral("ocrtext"), o);
                 });
     }
+
+    // ---- 剪贴板流（T-047-CLIP：窗口消息监听，随监控开关装卸） ----
+    m_clipboard = new ClipboardListener(m_store, this);
+    if (!m_clipboard->start())
+        qWarning("ActivityMonitorModule: 剪贴板监听启动失败（本流缺失）");
 
     // 鼠标按下 → 活跃度信号
     connect(m_mouseHook, &GlobalMouseHook::mousePressed, this, [this] {
@@ -234,6 +245,7 @@ void ActivityMonitorModule::stopMonitor()
     delete m_activity;
     delete m_imeDetector;
     delete m_ocrPipeline;
+    delete m_clipboard; // stop 内冲账挂起 repeat——须在 store 停止之前
     m_kbHook = nullptr;
     m_tracker = nullptr;
     m_mouseHook = nullptr;
@@ -241,6 +253,7 @@ void ActivityMonitorModule::stopMonitor()
     m_activity = nullptr;
     m_imeDetector = nullptr;
     m_ocrPipeline = nullptr;
+    m_clipboard = nullptr;
     m_store->stop();
     delete m_store;
     m_store = nullptr;

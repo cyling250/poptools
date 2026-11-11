@@ -12,6 +12,7 @@
 #include <algorithm>
 
 #include "../AppServices.h"
+#include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 #include "core/assistant/ToolRegistry.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
@@ -173,6 +174,7 @@ void PinModule::onPinOcrFinished(bool ok, const QVector<OcrBox> &boxes, const QS
     // 仅识别：文本进剪贴板；翻译：以记忆目标语言续翻，译文进剪贴板
     if (!m_ocrThenTranslate) {
         QGuiApplication::clipboard()->setText(text);
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         if (m_services->notify)
             m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("文字已复制到剪贴板"));
         return;
@@ -185,6 +187,7 @@ void PinModule::onTranslateFinished(bool ok, const QString &result, const QStrin
 {
     if (ok) {
         QGuiApplication::clipboard()->setText(result);
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         if (m_services->notify)
             m_services->notify(QStringLiteral("贴图翻译"), QStringLiteral("译文已复制到剪贴板"));
     } else {

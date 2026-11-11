@@ -1,5 +1,6 @@
 #include "OcrPanel.h"
 
+#include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
 #include "ui/ThemeColors.h"
@@ -119,6 +120,7 @@ OcrPanel::OcrPanel(QWidget *parent)
         if (text.isEmpty())
             return;
         QGuiApplication::clipboard()->setText(text);
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         m_copyBtn->setText(QStringLiteral("已复制"));
         QTimer::singleShot(1200, this, [this] {
             m_copyBtn->setText(QStringLiteral("复制译文"));

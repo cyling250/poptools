@@ -69,6 +69,20 @@ bool isPasswordWindow(quintptr hwnd)
     g_cache.insert(hwnd, qMakePair(pwd, now));
     return pwd;
 }
+
+void cacheUiaPassword(quintptr hwnd, bool pwd)
+{
+    // T-047-UIA：UIA 精确判定回写共享缓存（仅主线程调用——onUiaFinished
+    // 在 GUI 线程）。T-047-FIX(P3-5) 注释修正：仅收正判——调用方只在 UIA
+    // 判定为密码框时才回写（pwd 恒为 true），负判不回写是有意保守（防
+    // UIA 负判误开打码豁免）；正判覆盖 Win32 启发式探测不到的自绘密码框
+    if (!hwnd)
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (g_cache.size() > 64)
+        g_cache.clear();
+    g_cache.insert(hwnd, qMakePair(pwd, now));
+}
 #else
 bool isPasswordFocused()
 {
@@ -79,6 +93,12 @@ bool isPasswordWindow(quintptr hwnd)
 {
     Q_UNUSED(hwnd);
     return false;
+}
+
+void cacheUiaPassword(quintptr hwnd, bool pwd)
+{
+    Q_UNUSED(hwnd);
+    Q_UNUSED(pwd);
 }
 #endif
 

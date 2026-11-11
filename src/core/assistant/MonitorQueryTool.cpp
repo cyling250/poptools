@@ -17,7 +17,8 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
     d.readOnly = true;
     d.description = QStringLiteral(
         "查询本机活动监控日志：timeline（窗口时间线，含活跃秒数/键入/点击）、"
-        "keys（键入文本）、ocrtext（中文上屏识别）。用于回答\"我今天做了什么\"、"
+        "keys（键入文本）、ocrtext（中文上屏识别，source=uia/ocr）、"
+        "clipboard（剪贴板复制记录）。用于回答\"我今天做了什么\"、"
         "整理工作记录。stream 传 \"all\" 一次取全部（默认）。");
     d.parameters = QJsonObject{
         {"type", QStringLiteral("object")},
@@ -25,7 +26,7 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
          QJsonObject{{"date", QJsonObject{{"type", QStringLiteral("string")},
                                           {"description", QStringLiteral("日期 YYYY-MM-DD，默认今天")}}},
                      {"stream", QJsonObject{{"type", QStringLiteral("string")},
-                                            {"description", QStringLiteral("timeline/keys/ocrtext/all，默认 all")}}},
+                                            {"description", QStringLiteral("timeline/keys/ocrtext/clipboard/all，默认 all")}}},
                      {"max_lines", QJsonObject{{"type", QStringLiteral("integer")},
                                                {"description", QStringLiteral("每流最多行数，默认 200")}}}}},
     };
@@ -44,15 +45,17 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
         // 片段）一律拒绝——否则该 readOnly 工具可读盘上任意 .jsonl 文件
         QStringList streams;
         if (stream == QLatin1String("all"))
+            // T-047-CLIP：clipboard 流入白名单（含 "all" 全量列表）
             streams << QStringLiteral("timeline") << QStringLiteral("keys")
-                    << QStringLiteral("ocrtext");
+                    << QStringLiteral("ocrtext") << QStringLiteral("clipboard");
         else if (stream == QLatin1String("timeline") || stream == QLatin1String("keys")
-                 || stream == QLatin1String("ocrtext"))
+                 || stream == QLatin1String("ocrtext")
+                 || stream == QLatin1String("clipboard"))
             streams << stream;
         else {
             done(QJsonObject{{"ok", false},
                              {"error",
-                              QStringLiteral("stream 仅支持 timeline/keys/ocrtext/all")}});
+                              QStringLiteral("stream 仅支持 timeline/keys/ocrtext/clipboard/all")}});
             return;
         }
         const int maxLines = qBound(1, args.value(QStringLiteral("max_lines")).toInt(200), 500);

@@ -170,7 +170,10 @@ void RapidOcrService::startEngine()
                          QStringLiteral("--models=models"),
                          QStringLiteral("--det=ch_PP-OCRv3_det_infer.onnx"),
                          QStringLiteral("--cls=ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-                         QStringLiteral("--rec=ch_PP-OCRv3_rec_infer.onnx"),
+                         // T-047-OCR4：rec 切 v4（A/B 定案：小字 CER -50%，
+                         // 时延 +11%，零回归；v4 det 劣化不采用、2x 上采样不采用，
+                         // 依据 temp_scripts/t047_ocr_ab/results/report.md）
+                         QStringLiteral("--rec=rec_ch_PP-OCRv4_infer.onnx"),
                          QStringLiteral("--keys=dict_chinese.txt"),
                      }, QProcess::ReadWrite);
     // 启动阶段同样开表（不等待初始化完成，模型加载在后台进行）：启动挂死时

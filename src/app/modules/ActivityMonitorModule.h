@@ -10,6 +10,7 @@ class QTimer;
 namespace poptools {
 
 class ActivityStore;
+class ClipboardListener;
 class ForegroundTracker;
 class GlobalKeyboardHook;
 class GlobalMouseHook;
@@ -19,13 +20,15 @@ class KeyboardTextComposer;
 class SnapshotOcrPipeline;
 
 // ============================================================
-// 活动监控功能模块：键盘键入记录 + 键鼠活跃时间线 + OCR 快照。
+// 活动监控功能模块：键盘键入记录 + 键鼠活跃时间线 + 取文流 + 剪贴板流。
 //
 // 数据流（全部主线程事件循环，磁盘 IO 在 ActivityStore worker）：
 //   GlobalKeyboardHook::keyEvent ─┬→ KeyboardTextComposer → keys.jsonl
 //                                 └→ InputActivityMonitor ┐
 //   GlobalMouseHook::mousePressed → InputActivityMonitor ├→ timeline.jsonl
 //   ForegroundTracker::foregroundChanged → 两者换窗上下文 ┘
+//   ImeCommitDetector → SnapshotOcrPipeline（UIA-first/OCR 兜底）→ ocrtext.jsonl
+//   ClipboardListener（消息窗口监听，T-047-CLIP）──────→ clipboard.jsonl
 //
 // 开关：Settings monitor/enabled（默认关闭）；托盘项一键启停；
 // 设置页保存后经 settingsChanged 重应用。红线2豁免：开启期间
@@ -59,7 +62,8 @@ private:
     ForegroundTracker *m_tracker = nullptr;
     GlobalMouseHook *m_mouseHook = nullptr; // 仅取"点击"信号喂状态机
     ImeCommitDetector *m_imeDetector = nullptr;   // OCR 快照链（可选）
-    SnapshotOcrPipeline *m_ocrPipeline = nullptr; // 上屏 → 截图 → OCR → 增量
+    SnapshotOcrPipeline *m_ocrPipeline = nullptr; // 上屏 → UIA/截图 OCR → 增量
+    ClipboardListener *m_clipboard = nullptr;     // 剪贴板流（随监控开关装卸）
     QTimer *m_tick = nullptr;
     int m_appliedRetentionDays = -1;     // 最近一次启动注入 store 的保留天数（变化时重启）
     int m_appliedIdleThresholdSec = -1;  // 最近一次启动注入 monitor 的空闲阈值（变化时重启）

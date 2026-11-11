@@ -27,6 +27,14 @@ bool isPasswordFocused();
 // 结论；而按处理时刻的前台查询会漏掉"输完密码立刻切窗"的场景
 bool isPasswordWindow(quintptr hwnd);
 
+// 写入 UIA 的精确判定结果（主线程调用；T-047-UIA）：快照管线的
+// UiaTextReader 以 UIA_IsPasswordPropertyId 判定焦点控件后回写此处，
+// 三流共享同一份前台窗口密码态缓存——键入流打码、OCR 门卫、UIA 流
+// 拦截用同一判定来源，避免 Win32 启发式与 UIA 精确判定打架
+//（浏览器自绘密码框无 ES_PASSWORD 时由此补齐）。elHwnd 为 UIA 元素
+// 原生句柄，可为 0（此时调用方退记前台顶层窗口）
+void cacheUiaPassword(quintptr hwnd, bool pwd);
+
 } // namespace PasswordFieldGuard
 
 } // namespace poptools

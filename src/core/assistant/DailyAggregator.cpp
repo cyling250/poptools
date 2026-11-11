@@ -112,9 +112,49 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
         readGroups(QStringLiteral("keys"), keyGroups);
         readGroups(QStringLiteral("ocrtext"), ocrGroups);
 
+        // ---- clipboard.jsonl：复制文本预览按窗口分组（T-047-CLIP） ----
+        // 只取 kind=="text" 的条目（files/image 无摘要价值）；head/tail
+        // 拼为预览；repeat 行不计（count 已隐含在复制行为里）
+        struct ClipGroup
+        {
+            QString app;
+            QStringList previews;
+            qint64 totalChars = 0;
+        };
+        QVector<ClipGroup> clipGroups;
+        {
+            QFile cf(dayDir + QStringLiteral("/clipboard.jsonl"));
+            if (cf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                while (!cf.atEnd()) {
+                    const QJsonObject o = QJsonDocument::fromJson(cf.readLine()).object();
+                    if (o.value(QStringLiteral("kind")).toString()
+                        != QLatin1String("text"))
+                        continue;
+                    QString preview =
+                        o.value(QStringLiteral("head")).toString();
+                    const QString tail = o.value(QStringLiteral("tail")).toString();
+                    if (!tail.isEmpty())
+                        preview += QStringLiteral("…") + tail;
+                    if (preview.trimmed().isEmpty())
+                        continue;
+                    const QString app = o.value(QStringLiteral("app")).toString();
+                    if (!clipGroups.isEmpty() && clipGroups.last().app == app)
+                        clipGroups.last().previews << preview;
+                    else
+                        clipGroups.append(ClipGroup{app, QStringList{preview}, 0});
+                    if (clipGroups.size() > 200)
+                        break;
+                }
+                for (ClipGroup &g : clipGroups)
+                    for (const QString &p : g.previews)
+                        g.totalChars += p.size();
+            }
+        }
+
         // ---- 组装摘要 ----
         QString digest;
-        if (rows.isEmpty() && keyGroups.isEmpty() && ocrGroups.isEmpty()) {
+        if (rows.isEmpty() && keyGroups.isEmpty() && ocrGroups.isEmpty()
+            && clipGroups.isEmpty()) {
             if (anchor) {
                 QMetaObject::invokeMethod(anchor, [done] { done(false, QString()); },
                                           Qt::QueuedConnection);
@@ -150,6 +190,21 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
             digest += QStringLiteral("\n【中文上屏摘录】（OCR 识别的输入法上屏文字）\n");
             for (int i = 0; i < ocrGroups.size() && i < kMaxGroupRows; ++i)
                 digest += groupExcerpt(ocrGroups.at(i)) + QLatin1Char('\n');
+        }
+        if (!clipGroups.isEmpty()) {
+            digest += QStringLiteral("\n【剪贴板摘录】（复制的文本预览，按窗口）\n");
+            int shownClips = 0;
+            for (int i = 0; i < clipGroups.size() && shownClips < kMaxGroupRows; ++i) {
+                const ClipGroup &g = clipGroups.at(i);
+                QString joined = g.previews.join(QStringLiteral(" "));
+                if (joined.size() > kExcerptChars)
+                    joined = joined.left(kExcerptChars) + QStringLiteral("…");
+                digest += QStringLiteral("[%1] 共%2次复制：%3\n")
+                              .arg(g.app, QString::number(g.previews.size()),
+                                   joined.replace(QLatin1Char('\n'),
+                                                  QStringLiteral("⏎")));
+                ++shownClips;
+            }
         }
 
         // 总量截断（保头部：时间线与早期摘录优先）

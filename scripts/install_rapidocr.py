@@ -39,9 +39,11 @@ ZIP7_VERSION = "24.09"
 ZIP7_MSI = f"7z{ZIP7_VERSION.replace('.', '')}-x64.msi"
 ZIP7_URL = f"https://github.com/ip7z/7zip/releases/download/{ZIP7_VERSION}/{ZIP7_MSI}"
 
-# 语言裁剪：服务启动参数固定简中 v3 配置（det/cls/rec v3 + dict_chinese，见
-# RapidOcrService），仅额外保留英文 rec；以下四套 rec 模型从未被引擎加载，
-# 解压后删除（恢复多语言 = 移除本表后重跑本脚本，或单独下载对应 onnx）
+# 语言裁剪：服务启动参数固定简中配置（det v3 + cls mobile v2.0 + dict_chinese，
+# 见 RapidOcrService；T-047-OCR4 起 rec 已切 v4：rec_ch_PP-OCRv4_infer.onnx）。
+# T-047-FIX(P3-8②) 注释更新：v4 rec 现为主力模型，不在下方裁剪表属正确，勿裁；
+# 以下四套 v3 rec 模型从未被引擎加载，解压后删除（恢复多语言 = 移除本表后
+# 重跑本脚本，或单独下载对应 onnx）
 TRIM_REC_MODELS = [
     "rec_chinese_cht_PP-OCRv3_infer.onnx",
     "rec_japan_PP-OCRv3_infer.onnx",

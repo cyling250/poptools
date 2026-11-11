@@ -1,5 +1,7 @@
 #include "OutputController.h"
 
+#include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
+
 #include <QPainter>
 #include <QFileDialog>
 #include <QClipboard>
@@ -52,6 +54,7 @@ void OutputController::save(QWidget *parent)
 void OutputController::copy()
 {
     QGuiApplication::clipboard()->setPixmap(render());
+    OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除，监控流跳过本条
     m_ctx->exitRequested(); // 复制后退出截图界面（显式操作才退出，防误触）
 }
 

@@ -1,5 +1,15 @@
 #pragma once
 
+#ifdef _WIN32 // Q_OS_WIN 要等 Qt 头才定义，此处用编译器内置宏
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h> // OwnWriteGuard 用例读 GetClipboardSequenceNumber（先于 Qt）
+#endif
+
 #include <QtTest/QtTest>
 
 #include <memory>
@@ -29,10 +39,13 @@
 #include "core/capture/QrScanner.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/monitor/ActivityStore.h"
+#include "core/monitor/ClipboardCodec.h"
 #include "core/monitor/ImeCommitDetector.h"
 #include "core/monitor/InputActivityMonitor.h"
 #include "core/monitor/KeyboardTextComposer.h"
+#include "core/monitor/OwnWriteGuard.h"
 #include "core/monitor/SnapshotOcrPipeline.h"
+#include "core/monitor/UiaTextReader.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
@@ -45,6 +58,7 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPushButton>
@@ -1966,7 +1980,7 @@ private slots:
     }
 
     // ============================================================
-    // R6 测试补齐轮：14 个新用例 + ToolText / 基线助手抽取用例
+    // R6 测试补齐轮：17 个新用例 + ToolText / 基线助手抽取用例
     // ============================================================
 
     // ---- ToolText：参数/结果摘要（抽取自 GoodyModule 成员，行为逐字节不变） ----
@@ -2829,6 +2843,270 @@ private slots:
         d.onKeyEvent(0x41, true);
         d.onKeyEvent(0x20, true);
         QCOMPARE(commits, 1);
+    }
+
+    // ---- ClipboardCodec::looksLikeSecret / maskSecrets：已知前缀命中 ----
+    void secret_mask_hits_known_prefixes()
+    {
+        // 已知前缀 + ≥8 密钥字符 → 命中并整体替换为 [masked]
+        QVERIFY(ClipboardCodec::looksLikeSecret(QStringLiteral("sk-abc12345XYZ")));
+        QVERIFY(ClipboardCodec::looksLikeSecret(QStringLiteral("ghp_0123456789abcdefghij")));
+        QVERIFY(ClipboardCodec::looksLikeSecret(QStringLiteral("AKIAIOSFODNN7EXAMPLE")));
+        QVERIFY(ClipboardCodec::looksLikeSecret(QStringLiteral("xoxb-123456789-abcdefghij")));
+        QVERIFY(ClipboardCodec::looksLikeSecret(QStringLiteral("eyJhbGciOiJIUzI1NiJ9"))); // JWT 头
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("key=") + QStringLiteral("sk-abc12345XYZ")),
+                 QStringLiteral("key=[masked]"));
+
+        // 前缀后不足 8 个密钥字符 → 不打（提到"sk- 开头的笔记"不误伤）
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("sk-")));
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("sk-ab")));
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("ghp_x")));
+
+        // 泛高熵边界：19 位不打（长度不足）；20 位字母数字混合且去重
+        // ≥10 → 打
+        const QString nineteen = QStringLiteral("Ab1Cd2Ef3Gh4Ij5Kl6M");
+        const QString twenty = QStringLiteral("Ab1Cd2Ef3Gh4Ij5Kl6Mn");
+        QCOMPARE(nineteen.size(), 19);
+        QCOMPARE(twenty.size(), 20);
+        QVERIFY(!ClipboardCodec::looksLikeSecret(nineteen));
+        QVERIFY(ClipboardCodec::looksLikeSecret(twenty));
+
+        // Bearer 头：上一 token 为 bearer → 当前 token 打码
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("Bearer 0123456789abcdefgh")),
+                 QStringLiteral("Bearer [masked]"));
+    }
+
+    // ---- ClipboardCodec：良性文本不误打（宁可漏打不多打） ----
+    void secret_mask_ignores_benign_text()
+    {
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("12345678901234567890"))); // 20 纯数字：无字母
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("aaaaaaaaaaaaaaaaaaaa"))); // 去重 <10
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("https://example.com/a/b"))); // 冒号/点号出集
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("2026-11-12T10:30:00Z"))); // 时间戳
+        QVERIFY(!ClipboardCodec::looksLikeSecret(QStringLiteral("中文文本不打码")));
+
+        // 整句原样（含提到 sk- 的中文上下文）
+        const QString sentence = QStringLiteral("今天把 sk- 开头的笔记整理进双周报了");
+        QCOMPARE(ClipboardCodec::maskSecrets(sentence), sentence);
+
+        // 内嵌前缀只在 '=' ':' 引号后认：键值形态打码，普通词不误伤
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("key=sk-abc12345XYZ")),
+                 QStringLiteral("key=[masked]"));
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("task-12345678")),
+                 QStringLiteral("task-12345678")); // "task-" 含 "sk-" 但非边界
+
+        // 短 token / 常规词组不动
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("hello world 12345")),
+                 QStringLiteral("hello world 12345"));
+    }
+
+    // ---- ClipboardCodec：emoji（代理对）跨 200 字符边界 + 中文混排密钥
+    // token（T-047-FIX(P3-8④) 补两断言：以实际行为断言，不改 codec 行为）----
+    void secret_mask_emoji_surrogate_and_cjk_token()
+    {
+        // 😀 = U+1F600，UTF-16 代理对（2 QChar）。构造 199 字符垫片 + emoji
+        //（占 [199,201)，横跨第 200/201 字符边界）+ 内嵌前缀密钥——头/尾
+        // 200 字符切片都会把代理对切半，切片与 token 化不得崩溃
+        const QString emoji = QStringLiteral("\U0001F600");
+        const QString text = QString(199, QLatin1Char('a')) + emoji
+                             + QStringLiteral(" key=sk-abc12345XYZ");
+        QVERIFY(text.mid(199, 1).at(0).isHighSurrogate());
+        QVERIFY(text.mid(200, 1).at(0).isLowSurrogate());
+
+        // 头切片（代理对前半悬在尾）：单 token 无密钥特征 → 原样返回不崩
+        const QString head = text.left(200);
+        QCOMPARE(ClipboardCodec::maskSecrets(head), head);
+        // 尾切片（代理对后半悬在头）：emoji 归入首个 token 原样保留，
+        // 密钥 token 经内嵌前缀规则打码
+        const QString tail = text.right(200);
+        const QString maskedTail = ClipboardCodec::maskSecrets(tail);
+        QVERIFY(maskedTail.endsWith(QStringLiteral(" key=[masked]")));
+        QVERIFY(!maskedTail.contains(QStringLiteral("sk-abc12345XYZ")));
+        // 全文（emoji 完整落在前 token）：前段原样 + 密钥打码
+        QCOMPARE(ClipboardCodec::maskSecrets(text),
+                 QString(199, QLatin1Char('a')) + emoji
+                     + QStringLiteral(" key=[masked]"));
+        // 切片入库形态的事件行构造不崩且打码生效
+        ClipboardCodec::ClipboardPayload p;
+        p.kind = ClipboardCodec::ClipboardPayload::Kind::Text;
+        p.chars = text.size();
+        p.hash = ClipboardCodec::contentHash(text.toUtf8(), text.size());
+        p.head = head;
+        p.tail = tail;
+        const QJsonObject o = ClipboardCodec::buildClipboardEvent(1, p, {}, {});
+        QVERIFY(o.value(QStringLiteral("head")).toString()
+                    .startsWith(QString(199, QLatin1Char('a'))));
+        QVERIFY(!o.value(QStringLiteral("tail")).toString()
+                     .contains(QStringLiteral("sk-abc12345XYZ")));
+
+        // 中文混排密钥 token：密钥字符集外的汉字使整体不判密、也不打码
+        //（宁可漏打不多打；"sk-" 位于 token 首位不构成内嵌前缀边界）
+        const QString mixed = QStringLiteral("sk-abc12345XYZ密");
+        QVERIFY(!ClipboardCodec::looksLikeSecret(mixed));
+        QCOMPARE(ClipboardCodec::maskSecrets(QStringLiteral("复制 ") + mixed),
+                 QStringLiteral("复制 ") + mixed);
+    }
+
+    // ---- ClipboardCodec::buildClipboardEvent：text 事件 JSON 形状 ----
+    void clipboard_event_build_text_shape()
+    {
+        ClipboardCodec::ClipboardPayload p;
+        p.kind = ClipboardCodec::ClipboardPayload::Kind::Text;
+        p.chars = 15;
+        p.hash = QStringLiteral("abcd1234ef567890:15");
+        p.head = QStringLiteral("密钥 sk-abc12345XYZ 在这里");
+        p.tail = QStringLiteral("尾部预览");
+        const QJsonObject o = ClipboardCodec::buildClipboardEvent(
+            1234, p, QStringLiteral("code.exe"), QStringLiteral("main.cpp"));
+
+        QCOMPARE(o.value(QStringLiteral("kind")).toString(), QStringLiteral("text"));
+        QCOMPARE(o.value(QStringLiteral("ts")).toDouble(), 1234.0);
+        QCOMPARE(o.value(QStringLiteral("app")).toString(), QStringLiteral("code.exe"));
+        QCOMPARE(o.value(QStringLiteral("title")).toString(), QStringLiteral("main.cpp"));
+        QCOMPARE(o.value(QStringLiteral("chars")).toDouble(), 15.0);
+        QCOMPARE(o.value(QStringLiteral("hash")).toString(), QStringLiteral("abcd1234ef567890:15"));
+        // 预览落盘前已打码：密钥本体不出现在 head，占位符出现
+        QVERIFY(o.value(QStringLiteral("head")).toString().contains(QStringLiteral("[masked]")));
+        QVERIFY(!o.value(QStringLiteral("head")).toString().contains(QStringLiteral("sk-abc")));
+        QCOMPARE(o.value(QStringLiteral("tail")).toString(), QStringLiteral("尾部预览"));
+    }
+
+    // ---- ClipboardCodec::buildClipboardEvent：files / image 元数据形状 ----
+    void clipboard_event_build_files_and_image()
+    {
+        // HDROP：路径数组 + 截断标志；图片：只记分辨率与估算字节，无内容
+        ClipboardCodec::ClipboardPayload f;
+        f.kind = ClipboardCodec::ClipboardPayload::Kind::Files;
+        f.paths = QStringList{QStringLiteral("E:/a.txt"), QStringLiteral("E:/b.txt")};
+        f.pathsTruncated = true;
+        f.hash = QStringLiteral("aaaabbbbccccdddd:7");
+        const QJsonObject fo = ClipboardCodec::buildClipboardEvent(5, f, {}, {});
+        QCOMPARE(fo.value(QStringLiteral("kind")).toString(), QStringLiteral("files"));
+        const QJsonArray paths = fo.value(QStringLiteral("paths")).toArray();
+        QCOMPARE(paths.size(), 2);
+        QCOMPARE(paths.at(0).toString(), QStringLiteral("E:/a.txt"));
+        QCOMPARE(fo.value(QStringLiteral("pathsTruncated")).toBool(), true);
+        QVERIFY(!fo.contains(QStringLiteral("head")));
+
+        ClipboardCodec::ClipboardPayload im;
+        im.kind = ClipboardCodec::ClipboardPayload::Kind::Image;
+        im.width = 1920;
+        im.height = 1080;
+        im.bytes = 2073600;
+        im.hash = QStringLiteral("1111222233334444:2073600");
+        const QJsonObject io = ClipboardCodec::buildClipboardEvent(6, im, {}, {});
+        QCOMPARE(io.value(QStringLiteral("kind")).toString(), QStringLiteral("image"));
+        QCOMPARE(io.value(QStringLiteral("width")).toInt(), 1920);
+        QCOMPARE(io.value(QStringLiteral("height")).toInt(), 1080);
+        QCOMPARE(io.value(QStringLiteral("bytes")).toDouble(), 2073600.0);
+        QVERIFY(!io.contains(QStringLiteral("head")));  // 不落预览/内容
+        QVERIFY(!io.contains(QStringLiteral("paths")));
+    }
+
+    // ---- ClipboardCodec::ClipboardDeduper：去重与 repeat 冲账时序 ----
+    void clipboard_dedup_repeat_transitions()
+    {
+        ClipboardCodec::ClipboardDeduper d;
+        // 首次复制 A：直接落条目，无 repeat 冲账
+        auto o1 = d.observe(QStringLiteral("A"));
+        QVERIFY(o1.entry);
+        QVERIFY(o1.repeatHash.isEmpty());
+        // 连续重复 A：不追加新行（只内存累计）
+        QVERIFY(!d.observe(QStringLiteral("A")).entry);
+        QVERIFY(!d.observe(QStringLiteral("A")).entry);
+        // 内容变化 → 先冲账 repeat{A,3}（总次数含首条），再落 B 条目
+        auto o4 = d.observe(QStringLiteral("B"));
+        QCOMPARE(o4.repeatHash, QStringLiteral("A"));
+        QCOMPARE(o4.repeatCount, 3);
+        QVERIFY(o4.entry);
+        // 无重复的换内容：只落条目
+        auto o5 = d.observe(QStringLiteral("C"));
+        QVERIFY(o5.repeatHash.isEmpty());
+        QVERIFY(o5.entry);
+        // B 复制两次后收尾：flush 冲账 repeat{B,2} 并复位
+        QVERIFY(d.observe(QStringLiteral("B")).entry);
+        QVERIFY(!d.observe(QStringLiteral("B")).entry);
+        const auto o6 = d.flush();
+        QCOMPARE(o6.repeatHash, QStringLiteral("B"));
+        QCOMPARE(o6.repeatCount, 2);
+        QVERIFY(!o6.entry);
+        QCOMPARE(d.pendingRepeatCount(), 0);
+        QVERIFY(d.flush().repeatHash.isEmpty()); // 复位后再 flush：无效
+    }
+
+    // ---- UiaTextReader::normalize：换行归一 + 对象符剔除 + 限长取尾 ----
+    void uia_text_normalize_and_limit()
+    {
+        using UTR = UiaTextReader;
+        QCOMPARE(UTR::normalize(QStringLiteral("a\r\nb\rc")), QStringLiteral("a\nb\nc"));
+        QCOMPARE(UTR::normalize(QStringLiteral("x") + QChar(0xFFFC) + QStringLiteral("y")),
+                 QStringLiteral("xy"));
+        QCOMPARE(UTR::normalize(QStringLiteral("hi\n")), QStringLiteral("hi"));
+        QVERIFY(UTR::normalize(QString()).isEmpty());
+
+        const QString big = QString(UTR::kMaxChars + 500, QLatin1Char('a'))
+                            + QStringLiteral("TAIL");
+        const QString n = UTR::normalize(big);
+        QCOMPARE(n.size(), UTR::kMaxChars);
+        QVERIFY(n.endsWith(QStringLiteral("TAIL"))); // 限长保留最新输入（尾部）
+    }
+
+    // ---- SnapshotOcrPipeline::diffUiaAdded + 双基线隔离 ----
+    void ocr_uia_sliding_diff_and_dual_baseline()
+    {
+        // 常规三案先走：前缀增长型照旧
+        QCOMPARE(SnapshotOcrPipeline::diffUiaAdded(QStringLiteral("ABCDE"),
+                                                   QStringLiteral("ABCDEfg")),
+                 QStringLiteral("fg"));
+        // 滑动窗口：旧窗口 "ABCDE"、光标推进后新窗口 "CDEFG"/"DEFGH"——
+        // 旧文本非前缀/后缀/子串，靠最长后缀=前缀补解
+        QCOMPARE(SnapshotOcrPipeline::diffUiaAdded(QStringLiteral("ABCDE"),
+                                                   QStringLiteral("CDEFG")),
+                 QStringLiteral("FG"));
+        QCOMPARE(SnapshotOcrPipeline::diffUiaAdded(QStringLiteral("ABCDE"),
+                                                   QStringLiteral("DEFGH")),
+                 QStringLiteral("FGH"));
+        // 无重叠（版面大改）→ 宁缺毋滥返回空
+        QVERIFY(SnapshotOcrPipeline::diffUiaAdded(QStringLiteral("ABCDE"),
+                                                  QStringLiteral("XYZUV"))
+                    .isEmpty());
+
+        // 双基线隔离：同一 hwnd 在 OCR 基线与 UIA 基线各自独立推进，
+        // 互不把对方全量文本当增量
+        QHash<quintptr, QString> ocrBase, uiaBase;
+        SnapshotOcrPipeline::consumeBaselineAdded(ocrBase, 9, QStringLiteral("ocrfull"));
+        const QString uiaAdded = SnapshotOcrPipeline::consumeBaselineAdded(
+            uiaBase, 9, QStringLiteral("uiafulltext"),
+            &SnapshotOcrPipeline::diffUiaAdded);
+        QCOMPARE(uiaAdded, QStringLiteral("uiafulltext")); // UIA 基线首拍全量
+        QCOMPARE(uiaBase.value(9), QStringLiteral("uiafulltext"));
+        QVERIFY(ocrBase.value(9) != uiaBase.value(9));     // 两基线互不污染
+        // UIA 基线二拍：增量正确
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(
+                     uiaBase, 9, QStringLiteral("uiafulltext+more"),
+                     &SnapshotOcrPipeline::diffUiaAdded),
+                 QStringLiteral("+more"));
+    }
+
+    // ---- OwnWriteGuard：自身写入 seq 记录与排除 ----
+    void own_write_guard_seq_membership()
+    {
+        OwnWriteGuard::reset();
+        QVERIFY(!OwnWriteGuard::isSelfWrite(0)); // 0 恒为"非自身"（未写剪贴板）
+        QVERIFY(!OwnWriteGuard::isSelfWrite(-7));
+#ifdef Q_OS_WIN
+        // noteSelfWrite 记录当前会话序列号；期间若有并发写入序列号只会
+        // 单调前移，故检查 s1..s1+3 窗口必有命中
+        const qint64 s1 = static_cast<qint64>(GetClipboardSequenceNumber());
+        OwnWriteGuard::noteSelfWrite();
+        bool hit = false;
+        for (qint64 s = s1; s <= s1 + 3 && !hit; ++s)
+            hit = OwnWriteGuard::isSelfWrite(s);
+        QVERIFY(hit);
+        // reset 后排除生效（记录被清空）
+        OwnWriteGuard::reset();
+        QVERIFY(!OwnWriteGuard::isSelfWrite(s1));
+#endif
     }
 };
 

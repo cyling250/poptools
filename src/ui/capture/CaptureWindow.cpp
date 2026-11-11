@@ -14,6 +14,7 @@
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/QrScanner.h"
 #include "core/capture/SmartRectDetector.h"
+#include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 
 #include "ToolBar.h"
 #include "CaptureContext.h"
@@ -386,6 +387,7 @@ namespace poptools
         }
         const QString text = codes.join(QLatin1Char('\n'));
         QGuiApplication::clipboard()->setText(text);
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         QMessageBox::information(this, QStringLiteral("二维码识别"),
                                  text + QStringLiteral("\n\n—— 内容已复制到剪贴板"));
     }
@@ -435,16 +437,35 @@ namespace poptools
         // 冻结背景糊屏的根因（P-035）。现改为物理原图挂当前屏幕 DPR 元数据后
         // 直接绘制，物理像素与设备像素一一对应，零重采样；每帧不再有大图变换，
         // 悬停/动效的局部重绘仍以本缓存为前提。失效条件：捕获变更（重进截图
-        // 时置空）‖ 逻辑尺寸变更 ‖ DPR 变化（跨屏移动）
+        // 时置空）‖ 逻辑尺寸变更 ‖ DPR 变化（跨屏移动）‖ 物理/逻辑尺寸不匹配
+        // （混合 DPR 多屏 → 每次缓存重建时重判走回退分支，见 R6-B1a）
         const qreal dpr = devicePixelRatioF();
         if (m_basePixmap.isNull() || m_baseDpr != dpr || rect().size() != m_baseLogicalSize)
         {
-            m_basePixmap = m_cap.screen; // 物理分辨率原图（ScreenCapturer 产出，dpr=1）
-            m_basePixmap.setDevicePixelRatio(dpr);
+            // R6-B1a: 混合 DPR 多屏守卫。ScreenCapturer 各屏按自身 DPR 拼接物理图，
+            // 窗口却只有一个 DPR：物理尺寸 ≠ rect()×dpr 时 1:1 直绘会让底图溢出
+            // 被裁剪（窗口 DPR 取低屏）或右/下露底（取高 DPR 屏）。此时回退旧策略：
+            // Smooth 缩到逻辑尺寸且不挂 DPR 元数据，drawPixmap(0,0) 按逻辑尺寸
+            // 铺满窗口——糊但全覆盖；尺寸匹配（单屏/同 DPR，容差吸收 qRound 边缘
+            // 取整）维持 1:1 直绘。守卫在缓存重建时判定，尺寸/DPR 变化自然触发重判
+            const QSize phys = m_cap.screen.size();
+            const bool physMatch = qAbs(phys.width() - rect().width() * dpr) <= 2.0 &&
+                                   qAbs(phys.height() - rect().height() * dpr) <= 2.0;
+            if (physMatch)
+            {
+                m_basePixmap = m_cap.screen; // 物理分辨率原图（ScreenCapturer 产出，dpr=1）
+                m_basePixmap.setDevicePixelRatio(dpr); // 1:1 直绘：物理像素 ↔ 设备像素
+            }
+            else
+            {
+                m_basePixmap = m_cap.screen.scaled(rect().size(), Qt::IgnoreAspectRatio,
+                                                   Qt::SmoothTransformation);
+                m_basePixmap.setDevicePixelRatio(1.0); // 不挂 DPR：按逻辑尺寸铺满窗口
+            }
             m_baseDpr = dpr;
             m_baseLogicalSize = rect().size();
         }
-        p.drawPixmap(0, 0, m_basePixmap); // 底层为原始屏幕画面（1 设备像素 = 1 图像像素）
+        p.drawPixmap(0, 0, m_basePixmap); // 底层为原始屏幕画面（直绘 1:1 / 回退铺满共用此调用点）
 
         if (m_state == State::Idle)
             return;
@@ -935,7 +956,10 @@ namespace poptools
             {
                 const QColor c = screenColorAt(QCursor::pos());
                 if (c.isValid())
+                {
                     QGuiApplication::clipboard()->setText(c.name(QColor::HexRgb).toUpper());
+                    OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
+                }
                 cancel();
             }
         }
@@ -962,6 +986,7 @@ namespace poptools
         const QPixmap result = m_outputCtrl->render();
         const QRect selLogical = m_selection; // 记录选区位置（供 F3 贴图定位）
         QGuiApplication::clipboard()->setPixmap(result);
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         exitCapture();
         emit captured(result, selLogical);
     }
@@ -975,6 +1000,7 @@ namespace poptools
         // 复制当前截图（含标注）到剪贴板，并关闭截图模式；返回选区位置供贴图定位
         const QRect sel = m_selection;
         QGuiApplication::clipboard()->setPixmap(m_outputCtrl->render());
+        OwnWriteGuard::noteSelfWrite(); // T-047-CLIP：自写排除
         exitCapture();
         return sel;
     }

@@ -64,6 +64,10 @@ add_library(poptools_core STATIC
     hotkey/GlobalMouseHook.h
     monitor/ActivityStore.cpp
     monitor/ActivityStore.h
+    monitor/ClipboardCodec.cpp
+    monitor/ClipboardCodec.h
+    monitor/ClipboardListener.cpp
+    monitor/ClipboardListener.h
     monitor/ForegroundTracker.cpp
     monitor/ForegroundTracker.h
     monitor/GlobalKeyboardHook.cpp
@@ -74,10 +78,14 @@ add_library(poptools_core STATIC
     monitor/InputActivityMonitor.h
     monitor/KeyboardTextComposer.cpp
     monitor/KeyboardTextComposer.h
+    monitor/OwnWriteGuard.cpp
+    monitor/OwnWriteGuard.h
     monitor/PasswordFieldGuard.cpp
     monitor/PasswordFieldGuard.h
     monitor/SnapshotOcrPipeline.cpp
     monitor/SnapshotOcrPipeline.h
+    monitor/UiaTextReader.cpp
+    monitor/UiaTextReader.h
     ocr/RapidOcrService.cpp
     ocr/RapidOcrService.h
     settings/Settings.cpp
@@ -98,9 +106,10 @@ target_link_libraries(poptools_core PUBLIC
 )
 
 # Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）、
-# 收纳盒图标提取（shell32：SHGetFileInfo/SHGetImageList）
+# 收纳盒图标提取（shell32：SHGetFileInfo/SHGetImageList）、
+# UIA 取文（ole32：CoInitializeEx/CoCreateInstance；oleaut32：BSTR）
 if(WIN32)
-    target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32)
+    target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32 ole32 oleaut32)
 endif()
 
 # ---- 二维码识别（可选）：zxing-cpp 静态编入（源码由 scripts/install_zxing.py
