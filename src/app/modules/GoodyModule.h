@@ -51,7 +51,8 @@ private:
     void ensureWindow();
     void openChat();
     void registerBuiltinTools();
-    void setupMcp(); // mcp.json 服务器拉起 + 工具桥接（P6）
+    void setupMcp();              // mcp.json 配置装载 + 工具桥接（P6；不 start，R6-C2）
+    void ensureMcpStarted();      // MCP 子进程懒启动（首次打开聊天窗，幂等；R6-C2）
     void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
     void sendMessage(const QString &text);
     void runTurn();
@@ -61,8 +62,8 @@ private:
                          const QJsonObject &args);
     void toolCallDone(const QString &toolCallId, const QJsonObject &result);
     QString buildSystemPrompt() const;
-    QString summarizeArgs(const QJsonObject &args) const;
-    QString summarizeResult(const QJsonObject &result) const;
+    // 工具调用行摘要（summarizeToolArgs/summarizeToolResult）已抽至
+    // core/assistant/ToolText.h（纯自由函数，单测覆盖）
 
     AppServices *m_services = nullptr;
     QAction *m_trayAction = nullptr;
@@ -78,6 +79,7 @@ private:
     MemoryStore *m_memory = nullptr;       // 长期记忆（P5）
     WorkingMemory *m_work = nullptr;       // 瞬时工作记忆（P5）
     QList<McpStdioClient *> m_mcpClients;  // MCP 服务器连接（P6）
+    bool m_mcpStarted = false;             // MCP 子进程是否已懒启动（R6-C2）
 
     QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
     int m_toolRounds = 0;          // 单次用户消息的工具回合计数（防失控循环）

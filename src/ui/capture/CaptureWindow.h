@@ -104,7 +104,11 @@ private:
 
     // 取色放大卡片（Selecting 态）：screen 像素图像懒加载缓存
     mutable QImage m_screenImage;
-    QPixmap m_baseScaled;    // 底图缩放缓存（每轮截图/尺寸变化只算一次；原先每帧全屏平滑缩放）
+    // 底图缓存（R6-B1）：物理原图挂当前屏幕 DPR 元数据后 1:1 直绘，零重采样。
+    // 旧实现缩到逻辑尺寸缓存再被设备像素比放大回去（双重重采样，糊屏根因）
+    QPixmap m_basePixmap;
+    qreal m_baseDpr = 0.0;      // 缓存创建时的窗口 DPR（跨屏移动会变，变则重建）
+    QSize m_baseLogicalSize;    // 缓存创建时的窗口逻辑尺寸（尺寸变更则重建）
     QRect m_lastColorCardRect; // 取色卡片上次绘制矩形（悬停局部重绘用，全局逻辑→窗口坐标）
 
     // ---- OCR 扫描动效（点击【文】时选区内的扫描线，提示用户"没卡死"） ----

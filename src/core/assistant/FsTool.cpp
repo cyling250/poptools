@@ -1,10 +1,14 @@
 #include "FsTool.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSaveFile>
+#include <QThreadPool>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -60,7 +64,7 @@ bool recycleBinAvailable(const QString &path)
 }
 } // namespace
 
-QList<ToolDef> makeFsTools()
+QList<ToolDef> makeFsTools(QObject *ctx)
 {
     QList<ToolDef> tools;
 
@@ -76,36 +80,55 @@ QList<ToolDef> makeFsTools()
                                               {"description", QStringLiteral("目录路径（~ 为主目录）")}}}}},
             {"required", QJsonArray{QStringLiteral("path")}},
         };
-        d.fn = [](const QJsonObject &args, const std::function<void(QJsonObject)> &done) {
+        d.fn = [ctx](const QJsonObject &args, const std::function<void(QJsonObject)> &done) {
             QString path = args.value(QStringLiteral("path")).toString();
             if (path.startsWith(QLatin1Char('~')))
                 path = QDir::homePath() + path.mid(1);
-            QDir dir(path);
-            if (!dir.exists()) {
-                done(QJsonObject{{"ok", false},
-                                 {"error", QStringLiteral("目录不存在：%1").arg(path)}});
-                return;
-            }
-            const QFileInfoList entries =
-                dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::Name);
-            QJsonArray items;
-            int total = 0;
-            for (const QFileInfo &fi : entries) {
-                ++total;
-                if (items.size() >= kMaxListEntries)
-                    break;
-                QJsonObject o{{"name", fi.fileName()},
-                              {"type", fi.isDir() ? QStringLiteral("dir")
-                                                  : QStringLiteral("file")}};
-                if (fi.isFile())
-                    o.insert("size", double(fi.size()));
-                o.insert("mtime", fi.lastModified().toMSecsSinceEpoch());
-                items.append(o);
-            }
-            QJsonObject r{{"ok", true}, {"entries", items}, {"total", total}};
-            if (total > kMaxListEntries)
-                r.insert("note", QStringLiteral("仅返回前 %1 项").arg(kMaxListEntries));
-            done(r);
+            // R6-C1: 枚举挪线程池交付（照 MonitorQueryTool 先例，done 支持异步）。
+            // 原实现在 GUI 线程 entryInfoList 全量物化（LLM 列 System32/
+            // node_modules 类巨目录会卡死主线程），且 readOnly 免确认放行，
+            // 触发门槛极低。枚举改 QDirIterator 有界取样：前 500 项构造
+            // QFileInfo 取属性，之后只迭代文件名计数不 stat；entries/total/
+            // note 响应字段形状不变（代价：条目顺序由名称排序变为目录序）
+            const QPointer<QObject> anchor(ctx);
+            QThreadPool::globalInstance()->start([path, anchor, done] {
+                QDir dir(path);
+                if (!dir.exists()) {
+                    if (anchor)
+                        QMetaObject::invokeMethod(
+                            anchor.data(),
+                            [done, path] {
+                                done(QJsonObject{{"ok", false},
+                                                 {"error", QStringLiteral("目录不存在：%1").arg(path)}});
+                            },
+                            Qt::QueuedConnection);
+                    return;
+                }
+                QJsonArray items;
+                int total = 0;
+                QDirIterator it(path, QDir::AllEntries | QDir::NoDotAndDotDot);
+                while (it.hasNext()) {
+                    it.next();
+                    ++total;
+                    if (items.size() >= kMaxListEntries)
+                        continue; // 取满后只计数，不再 stat
+                    const QFileInfo fi(it.filePath()); // 属性惰性 stat，仅前 500 项发生
+                    QJsonObject o{{"name", fi.fileName()},
+                                  {"type", fi.isDir() ? QStringLiteral("dir")
+                                                      : QStringLiteral("file")}};
+                    if (fi.isFile())
+                        o.insert("size", double(fi.size()));
+                    o.insert("mtime", fi.lastModified().toMSecsSinceEpoch());
+                    items.append(o);
+                }
+                QJsonObject r{{"ok", true}, {"entries", items}, {"total", total}};
+                if (total > kMaxListEntries)
+                    r.insert("note", QStringLiteral("仅返回前 %1 项").arg(kMaxListEntries));
+                // 回主线程交付；锚点（GoodyModule）已销毁则在途结果整体丢弃
+                if (anchor)
+                    QMetaObject::invokeMethod(anchor.data(), [done, r] { done(r); },
+                                              Qt::QueuedConnection);
+            });
         };
         tools << d;
     }

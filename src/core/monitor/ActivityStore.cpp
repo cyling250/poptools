@@ -92,8 +92,6 @@ public slots:
         }
     }
 
-    void finalize() { closeAll(); }
-
 signals:
     void batchWritten();
 

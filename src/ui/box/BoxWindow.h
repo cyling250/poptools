@@ -88,6 +88,7 @@ private:
     QString m_boxId;
     QString m_name;            // 标题快照
     QString m_dir;             // 目录快照
+    bool m_dirExists = false;  // 目录存在性快照（refresh 缓存，paint 只读成员，R6-C3）
     int m_cols = 4;            // 网格列数
     int m_rows = 4;            // 网格行数（可展示行数）
     bool m_collapsed = false;

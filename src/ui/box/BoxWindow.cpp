@@ -118,16 +118,20 @@ void BoxWindow::refresh()
     m_collapsed = box->collapsed;
     setWindowTitle(m_name);
 
+    // R6-C3: 目录存在性只在数据刷新点查一次（QFileInfo::exists 是文件系统
+    // 调用），paintEvent 等高频路径只读本成员
+    m_dirExists = QFileInfo::exists(m_dir);
+
     const QStringList oldWatched = m_watcher->directories();
     if (!oldWatched.isEmpty())
         m_watcher->removePaths(oldWatched);
-    if (QFileInfo::exists(m_dir))
+    if (m_dirExists)
         m_watcher->addPath(m_dir);
 
     m_items.clear();
     m_totalCount = 0;
     m_hoverItem = -1;
-    if (QFileInfo::exists(m_dir)) {
+    if (m_dirExists) {
         const QFileInfoList entries =
             QDir(m_dir).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot,
                                       QDir::DirsFirst | QDir::Name);
@@ -315,7 +319,7 @@ void BoxWindow::paintEvent(QPaintEvent * /*event*/)
         p.setFont(f);
         const QString hint = m_moveInFlight
                                  ? QStringLiteral("收纳中…")
-                                 : (QFileInfo::exists(m_dir)
+                                 : (m_dirExists // R6-C3: 读缓存成员，paint 内不做文件系统调用
                                         ? QStringLiteral("把桌面文件拖进来收纳")
                                         : QStringLiteral("目录不存在，右键标题可重新设置"));
         p.drawText(rect().adjusted(kPad, kPad + kTitleHeight, -kPad, -kPad),

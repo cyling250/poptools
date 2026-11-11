@@ -95,7 +95,14 @@ void SnapshotOcrPipeline::captureNow()
     m_reqHwnd = reinterpret_cast<quintptr>(fg);
     m_reqApp = m_app;
     m_reqTitle = m_title;
-    m_pending = true; // 在途期间新请求一律丢弃（下次上屏自然补拍）
+    // R6-B2: m_pending 不在此置位（原此处过早置 true）——从 captureNow 到
+    // 真正 recognizeBoxes 隔着线程池任务 + 一次排队投递两跳，期间的窗口里
+    // 外来 OCR 消费者（贴图/截图）的回包会经 onOcrFinished 的 m_pending
+    // 门卫被误认作自己的回包：做 diff、写 ocrtext.jsonl 隐私日志并污染
+    // m_lastText 基线。置位挪到排队 lambda 内 busy 检查通过之后、
+    // recognizeBoxes 之前（对齐 OcrController.cpp 先例时序）；期间新请求
+    // 由 kMinCaptureGapMs 限流兜底。req* 上下文留在 captureNow 赋值
+    //（只在 m_pending 门卫通过后被读）
 
     // QPixmap→QImage 必须在 GUI 线程；裁剪与缩放（大图操作）挪线程池。
     // 外层 lambda 以 QPointer 捕获：stopMonitor 直接 delete 管线时在途
@@ -114,10 +121,11 @@ void SnapshotOcrPipeline::captureNow()
             if (!self)
                 return;
             if (!self->m_ocr || self->m_ocr->busy()) {
-                self->m_pending = false; // 引擎忙：丢弃本次
+                // R6-B2: 引擎忙直接丢弃（m_pending 尚未置位，无需复位）
                 return;
             }
-            self->m_ocr->recognizeBoxes(part);
+            self->m_pending = true; // R6-B2: 归属标记紧贴 recognizeBoxes 置位，
+            self->m_ocr->recognizeBoxes(part); // 在途回包才归本管线（门卫语义不变）
         }, Qt::QueuedConnection);
     });
 #endif
@@ -153,14 +161,21 @@ void SnapshotOcrPipeline::onOcrFinished(bool ok, const QVector<OcrBox> &boxes,
     }
     const QString text = lines.join(QLatin1Char('\n'));
 
-    QString added = diffAdded(m_lastText.value(m_reqHwnd), text).trimmed();
-    if (added.size() > kMaxAddedChars)
-        added = added.right(kMaxAddedChars); // 只保留尾部（最新输入）
-    m_lastText.insert(m_reqHwnd, text); // 基线更新与新增无关（无新增也要推进）
-    if (m_lastText.size() > kMaxWindowCache)
-        m_lastText.clear(); // 简单防膨胀：窗口集合本就高频更替
+    const QString added = consumeBaselineAdded(m_lastText, m_reqHwnd, text);
     if (!added.isEmpty())
         emit ocrTextReady(m_reqApp, m_reqTitle, added);
+}
+
+QString SnapshotOcrPipeline::consumeBaselineAdded(QHash<quintptr, QString> &baseline,
+                                                  quintptr hwnd, const QString &text)
+{
+    QString added = diffAdded(baseline.value(hwnd), text).trimmed();
+    if (added.size() > kMaxAddedChars)
+        added = added.right(kMaxAddedChars); // 只保留尾部（最新输入）
+    baseline.insert(hwnd, text); // 基线更新与新增无关（无新增也要推进）
+    if (baseline.size() > kMaxWindowCache)
+        baseline.clear(); // 简单防膨胀：窗口集合本就高频更替
+    return added;
 }
 
 QString SnapshotOcrPipeline::diffAdded(const QString &oldText, const QString &newText)

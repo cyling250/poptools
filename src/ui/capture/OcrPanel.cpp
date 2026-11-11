@@ -234,6 +234,12 @@ void OcrPanel::setBusy(bool busy)
 void OcrPanel::showEvent(QShowEvent *event)
 {
     m_fromCombo->setCurrentIndex(0);
+    // R6-B4: 目标语言双入口失步同步（划词卡片与本面板共用
+    // translateTargetLang 设置，但显示侧此前只在构造时读一次）——按设置
+    // 重读对齐 combo 当前项；同步期 blockSignals 防止 currentTextChanged
+    // 回写设置形成环路。翻译行为本身所见即所得，此处只对齐显示值
+    const QSignalBlocker block(m_toCombo);
+    m_toCombo->setCurrentText(langCodeToDisplay(Settings::instance().translateTargetLang()));
     QWidget::showEvent(event);
 }
 

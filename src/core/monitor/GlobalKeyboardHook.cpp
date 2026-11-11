@@ -56,11 +56,22 @@ GlobalKeyboardHook::~GlobalKeyboardHook()
 
 void GlobalKeyboardHook::start()
 {
+#ifdef Q_OS_WIN
+    // R6-C4: 单消费者防重入由 Q_ASSERT 改运行期防御——Release 构建断言
+    // 失效，第二个实例 start 会不卸旧钩子直接覆盖 g_hook（泄漏）且新旧两钩
+    // 同时回调造成键盘事件翻倍。已有消费者时拒绝激活并告警（m_active 保持
+    // false，调用方按 isRunning() 判断；对照 GlobalMouseHook 安装失败不占
+    // 运行态的写法）
+    if (g_consumer && g_consumer != this) {
+        qWarning("GlobalKeyboardHook: 已有其他消费者 %p，拒绝二次启动",
+                 static_cast<void *>(g_consumer));
+        return;
+    }
+#endif
     if (m_active)
         return;
     m_active = true;
 #ifdef Q_OS_WIN
-    Q_ASSERT(!g_consumer && "GlobalKeyboardHook 目前只支持单消费者");
     g_consumer = this;
     g_hook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, GetModuleHandle(nullptr), 0);
     if (!g_hook) {

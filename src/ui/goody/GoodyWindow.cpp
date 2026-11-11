@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollBar>
@@ -235,32 +236,105 @@ void GoodyWindow::hideEvent(QHideEvent *event)
 void GoodyWindow::applyTheme()
 {
     const ThemeColors c = uiThemeColors(systemSchemeDark());
+    // R6-B3: 关键颜色双通道（照 TranslateCard::applyTheme 模式，P-023 家族
+    // 整改漏网项）——气泡流/输入框/权限条 chrome 此前只有窗口级样式表一条
+    // 颜色通道，故障机（部分 Win10 渲染路径）上失效会黑字落深底不可读。
+    // 现改为：控件内联样式（颜色取 ThemeColors）+ Active/Inactive/Disabled
+    // 三组调色板钉扎双保险；窗口级样式表只保留布局类声明（背景/边框/
+    // 圆角/内边距/悬停底色）。P-022 纪律：QSS 一律 ID 选择器
     setStyleSheet(QStringLiteral(
         "#goodyCard { background: %1; border: 1px solid %2; border-radius: 12px; }"
         "#goodyTitle { color: %3; font-weight: 600; font-size: 13px; }"
         "QPushButton#goodyHeaderBtn { background: transparent; border: none;"
-        "  color: %3; font-size: 12px; padding: 2px 8px; border-radius: 6px; }"
+        "  font-size: 12px; padding: 2px 8px; border-radius: 6px; }"
         "QPushButton#goodyHeaderBtn:hover { background: %4; }"
-        "QTextBrowser#goodyTranscript { background: %5; border: 1px solid %2;"
-        "  border-radius: 8px; padding: 8px; color: %3; font-size: 13px; }"
-        "QPlainTextEdit#goodyInput { background: %5; border: 1px solid %2;"
-        "  border-radius: 8px; padding: 6px; color: %3; font-size: 13px; }"
-        "QPlainTextEdit#goodyInput:focus { border-color: %6; }"
-        "QPushButton#goodySendBtn { background: %6; color: #FFFFFF;"
-        "  border: 1px solid %6; border-radius: 8px; font-weight: 600; }"
-        "QPushButton#goodySendBtn:hover { background: %7; }"
+        "QPushButton#goodySendBtn { background: %5; color: #FFFFFF;"
+        "  border: 1px solid %5; border-radius: 8px; font-weight: 600; }"
+        "QPushButton#goodySendBtn:hover { background: %6; }"
         "QWidget#goodyPermBar { background: %4; border: 1px solid %2;"
         "  border-radius: 8px; }"
-        "QLabel#goodyPermText { color: %3; font-size: 12px; }"
-        "QPushButton#goodyPermBtn, QPushButton#goodyPermDeny { background: %8;"
-        "  border: 1px solid %2; border-radius: 6px; color: %3; padding: 3px 10px; }"
-        "QPushButton#goodyPermDeny:hover { border-color: %9; color: %9; }"
-        "QPushButton#goodyPermAllow { background: %6; color: #FFFFFF;"
-        "  border: 1px solid %6; border-radius: 6px; padding: 3px 10px; }"
+        "QPushButton#goodyPermBtn, QPushButton#goodyPermDeny { background: %7;"
+        "  border: 1px solid %2; border-radius: 6px; padding: 3px 10px; }"
+        "QPushButton#goodyPermDeny:hover { border-color: #E05555; }"
+        "QPushButton#goodyPermAllow { background: %5; border: 1px solid %5;"
+        "  border-radius: 6px; padding: 3px 10px; }"
         "QWidget#goodyGrip { background: transparent; }")
-        .arg(c.cardBg, c.editBorder, c.body, c.ctrlHover, c.editBg, c.accent,
-             c.accentHover, c.ctrlBg, QStringLiteral("#E05555")));
-    renderTranscript(); // 主题切换后重绘（角色色内联在 HTML 中）
+        .arg(c.cardBg, c.editBorder, c.title, c.ctrlHover, c.accent,
+             c.accentHover, c.ctrlBg));
+
+    // 通道一（内联样式）：气泡流/输入框整体颜色声明改写在控件自身
+    m_transcript->setStyleSheet(QStringLiteral(
+        "QTextBrowser#goodyTranscript { color: %1; background: %2;"
+        "  border: 1px solid %3; border-radius: 8px; padding: 8px; font-size: 13px; }")
+        .arg(c.body, c.editBg, c.editBorder));
+    m_input->setStyleSheet(QStringLiteral(
+        "QPlainTextEdit#goodyInput { color: %1; background: %2;"
+        "  border: 1px solid %3; border-radius: 8px; padding: 6px; font-size: 13px; }"
+        "QPlainTextEdit#goodyInput:focus { border-color: %4; }")
+        .arg(c.body, c.editBg, c.editBorder, c.accent));
+    m_permText->setStyleSheet(QStringLiteral(
+        "QLabel#goodyPermText { color: %1; font-size: 12px; }").arg(c.body));
+    for (QPushButton *btn : findChildren<QPushButton *>(QStringLiteral("goodyHeaderBtn")))
+        btn->setStyleSheet(QStringLiteral(
+            "QPushButton#goodyHeaderBtn { color: %1; }").arg(c.body));
+    m_permDeny->setStyleSheet(QStringLiteral(
+        "QPushButton#goodyPermDeny { color: %1; }"
+        "QPushButton#goodyPermDeny:hover { color: #E05555; }").arg(c.body));
+    m_permAlways->setStyleSheet(QStringLiteral(
+        "QPushButton#goodyPermBtn { color: %1; }").arg(c.body));
+    m_permAllow->setStyleSheet(QStringLiteral(
+        "QPushButton#goodyPermAllow { color: #FFFFFF; }"));
+
+    // 通道二（调色板钉扎）：三个组全部钉到主题色，QSS 任何路径失效都有兜底。
+    // 文本区钉 Text/HighlightedText/Base/Window；m_input 另钉 PlaceholderText
+    //（占位字此前依赖系统调色板，深色主题下有不可读风险）；按钮钉
+    // ButtonText/Text；权限提示条 QLabel 钉 Text
+    const QBrush textBrush{QColor(c.body)};
+    const QBrush editBgBrush{QColor(c.editBg)};
+    // 占位字：主题表无占位色，取正文色 47% 透明度（深浅底都可读且别于正文）
+    QColor phColor{QColor(c.body)};
+    phColor.setAlpha(120);
+    const QBrush phBrush{phColor};
+    auto pinEditPalette = [&](QWidget *edit, bool placeholder) {
+        QPalette pal = edit->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::Text, textBrush);
+            pal.setBrush(group, QPalette::HighlightedText, textBrush);
+            pal.setBrush(group, QPalette::Base, editBgBrush);
+            pal.setBrush(group, QPalette::Window, editBgBrush);
+            if (placeholder)
+                pal.setBrush(group, QPalette::PlaceholderText, phBrush);
+        }
+        edit->setPalette(pal);
+        edit->setAutoFillBackground(true);
+    };
+    pinEditPalette(m_transcript, false);
+    pinEditPalette(m_input, true);
+
+    auto pinButtonPalette = [&](QPushButton *btn, const QBrush &brush) {
+        QPalette pal = btn->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled}) {
+            pal.setBrush(group, QPalette::ButtonText, brush);
+            pal.setBrush(group, QPalette::Text, brush);
+        }
+        btn->setPalette(pal);
+    };
+    for (QPushButton *btn : findChildren<QPushButton *>(QStringLiteral("goodyHeaderBtn")))
+        pinButtonPalette(btn, textBrush);
+    for (QPushButton *btn : {m_permDeny, m_permAlways})
+        pinButtonPalette(btn, textBrush);
+    pinButtonPalette(m_permAllow, QBrush{Qt::white});
+    {
+        QPalette pal = m_permText->palette();
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
+                                                 QPalette::Disabled})
+            pal.setBrush(group, QPalette::Text, textBrush);
+        m_permText->setPalette(pal);
+    }
+
+    renderTranscript(); // 主题切换后重绘（内容无颜色标记，配色全走样式/调色板）
 }
 
 // ---- 气泡流渲染 ----

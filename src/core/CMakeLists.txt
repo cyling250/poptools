@@ -33,6 +33,8 @@ add_library(poptools_core STATIC
     assistant/ShellTool.h
     assistant/ToolRegistry.cpp
     assistant/ToolRegistry.h
+    assistant/ToolText.cpp
+    assistant/ToolText.h
     assistant/WorkingMemory.cpp
     assistant/WorkingMemory.h
     annotation/AnnotationCanvas.cpp

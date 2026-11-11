@@ -40,6 +40,13 @@ public:
     // 增量 diff：返回 newText 相对 oldText 的新增部分（纯函数，单测覆盖）
     static QString diffAdded(const QString &oldText, const QString &newText);
 
+    // 基线消费（R6 测试补齐轮自 onOcrFinished 抽出，行为不变；纯函数，
+    // 单测覆盖）：OCR 全文与 baseline[hwnd] 基线做增量 → 新增文本尾部
+    // 300 字符截断（只保留最新输入）→ 基线照常推进（无新增也推进）→
+    // 基线缓存超 32 窗整体清空（防膨胀）。归属门卫与失败退避仍留在槽内
+    static QString consumeBaselineAdded(QHash<quintptr, QString> &baseline,
+                                        quintptr hwnd, const QString &text);
+
 public slots:
     // 上屏信号入口（ImeCommitDetector::commitDetected）：防抖合并
     void onCommitDetected();

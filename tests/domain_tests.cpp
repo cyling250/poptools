@@ -9,6 +9,7 @@
 #include "app/FeatureRegistry.h"
 #include "core/assistant/ChatSession.h"
 #include "core/assistant/DailyAggregator.h"
+#include "core/assistant/DailyRecordJob.h"
 #include "core/assistant/FsTool.h"
 #include "core/assistant/LlmClient.h"
 #include "core/assistant/McpStdioClient.h"
@@ -17,6 +18,7 @@
 #include "core/assistant/PermissionManager.h"
 #include "core/assistant/Scheduler.h"
 #include "core/assistant/ToolRegistry.h"
+#include "core/assistant/ToolText.h"
 #include "core/assistant/WorkingMemory.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
@@ -1756,7 +1758,7 @@ private slots:
         src.close();
 
         ToolDef writeTool, moveTool;
-        for (const ToolDef &t : makeFsTools()) {
+        for (const ToolDef &t : makeFsTools(nullptr)) {
             if (t.name == QStringLiteral("fs.write"))
                 writeTool = t;
             if (t.name == QStringLiteral("fs.move"))
@@ -1961,6 +1963,872 @@ private slots:
         QVERIFY(!clearBtn->isEnabled());
         win.setToolPhase(false);
         QVERIFY(clearBtn->isEnabled());
+    }
+
+    // ============================================================
+    // R6 测试补齐轮：14 个新用例 + ToolText / 基线助手抽取用例
+    // ============================================================
+
+    // ---- ToolText：参数/结果摘要（抽取自 GoodyModule 成员，行为逐字节不变） ----
+    void tool_text_summarize_args_and_result()
+    {
+        // 参数：紧凑 JSON 原样；超 200 字符截断加"…"
+        QCOMPARE(summarizeToolArgs(QJsonObject{{"command", QStringLiteral("git status")}}),
+                 QStringLiteral("{\"command\":\"git status\"}"));
+        const QString longText(250, QLatin1Char('x'));
+        const QString raw = QString::fromUtf8(QJsonDocument(
+            QJsonObject{{"content", longText}}).toJson(QJsonDocument::Compact));
+        QVERIFY(raw.size() > 200);
+        QCOMPARE(summarizeToolArgs(QJsonObject{{"content", longText}}),
+                 raw.left(200) + QStringLiteral("…"));
+
+        // 结果：ok:false 取 error 文案；error 空时"执行失败"
+        QCOMPARE(summarizeToolResult(QJsonObject{{"ok", false},
+                                                 {"error", QStringLiteral("boom")}}),
+                 QStringLiteral("boom"));
+        QCOMPARE(summarizeToolResult(QJsonObject{{"ok", false}}),
+                 QStringLiteral("执行失败"));
+        QCOMPARE(summarizeToolResult(QJsonObject{{"ok", false}, {"error", QString()}}),
+                 QStringLiteral("执行失败"));
+
+        // ok:true：ok 键不出现在摘要；字符串原样；数组/对象值剥壳 JSON
+        QCOMPARE(summarizeToolResult(QJsonObject{{"ok", true},
+                                                 {"text", QStringLiteral("hello")}}),
+                 QStringLiteral("text=hello"));
+        const QString mixed = summarizeToolResult(QJsonObject{
+            {"ok", true},
+            {"list", QJsonArray{1, 2}},
+            {"obj", QJsonObject{{"a", 1}}}});
+        QVERIFY(mixed.contains(QStringLiteral("list=[1,2]")));
+        QVERIFY(mixed.contains(QStringLiteral("obj={\"a\":1}")));
+        QVERIFY(!mixed.contains(QStringLiteral("ok=")));
+
+        // 超 160 字符截断加"…"（8 字符键名 + 300 字符值 + 分隔空格 + 省略号；
+        // 空格在截断判定之前追加，尾部紧随省略号不被 trim）
+        const QString big = summarizeToolResult(QJsonObject{
+            {"ok", true}, {"content", QString(300, QLatin1Char('a'))}});
+        QVERIFY(big.startsWith(QStringLiteral("content=")));
+        QVERIFY(big.endsWith(QStringLiteral("…")));
+        QCOMPARE(big.size(), 310);
+    }
+
+    // ---- SnapshotOcrPipeline::consumeBaselineAdded：基线消费
+    //      （尾部 300 截断 / 无新增也推进 / 超 32 窗整体清空） ----
+    void ocr_consume_baseline_added_states()
+    {
+        // 首拍全量新增超 300 字符 → 只留尾部 300（最新输入）
+        QHash<quintptr, QString> baseline;
+        const QString full = QString(400, QLatin1Char('a'));
+        const QString added = SnapshotOcrPipeline::consumeBaselineAdded(baseline, 1, full);
+        QCOMPARE(added.size(), 300);
+        QCOMPARE(added, QString(300, QLatin1Char('a')));
+
+        // 基线已推进为全文：下次真增量正确返回
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(baseline, 1, full + QStringLiteral("b")),
+                 QStringLiteral("b"));
+
+        // 无新增时基线仍推进（不是"无新增就不记"），下次真增量才对
+        //（新增文本在助手里已 trim：" world" 交由上层，此处回 "world"）
+        QHash<quintptr, QString> b2;
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b2, 7, QStringLiteral("hello")),
+                 QStringLiteral("hello"));
+        QVERIFY(SnapshotOcrPipeline::consumeBaselineAdded(b2, 7, QStringLiteral("hello"))
+                    .isEmpty());
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b2, 7, QStringLiteral("hello world")),
+                 QStringLiteral("world"));
+
+        // 缓存超 32 窗整体清空：下一拍等价首拍（全量返回），旧窗基线一并失效
+        QHash<quintptr, QString> b3;
+        for (quintptr h = 1; h <= 32; ++h)
+            SnapshotOcrPipeline::consumeBaselineAdded(b3, h, QStringLiteral("w%1").arg(h));
+        QCOMPARE(b3.size(), 32);
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b3, 33, QStringLiteral("new")),
+                 QStringLiteral("new"));
+        QVERIFY(b3.isEmpty()); // 整体清空（防膨胀），不是逐窗淘汰
+        QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b3, 1, QStringLiteral("w1-late")),
+                 QStringLiteral("w1-late")); // 清空后旧窗再拍 = 首拍全量
+    }
+
+    // ---- ChatSession::load：非法序列过滤（role 白名单 / 孤儿 tool /
+    //      断组整组丢弃 / 空 tool_calls / 无 role；合法组保序） ----
+    void chat_session_load_filters_illegal_sequence()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("chat/sessions.json");
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+
+        // 合法 version=1 外壳 + 直写脏消息
+        const QByteArray raw =
+            "{\"version\":1,\"messages\":["
+            "{\"role\":\"function\",\"content\":\"旧协议残留\"},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"x\",\"content\":\"孤儿\"},"
+            "{\"role\":\"user\",\"content\":\"u1\"},"
+            "{\"role\":\"assistant\",\"content\":\"断组\",\"tool_calls\":[{\"id\":\"c1\","
+            "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]},"
+            "{\"role\":\"user\",\"content\":\"u2\"},"
+            "{\"role\":\"assistant\",\"content\":\"错配\",\"tool_calls\":[{\"id\":\"c2\","
+            "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"cX\",\"content\":\"id不匹配\"},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"迟到的回应\"},"
+            "{\"role\":\"assistant\",\"content\":\"空数组\",\"tool_calls\":[]},"
+            "{\"role\":\"assistant\",\"content\":\"无有效id\",\"tool_calls\":["
+            "{\"type\":\"function\",\"function\":{\"name\":\"f\"}}]},"
+            "{\"content\":\"无role\"},{},"
+            "{\"role\":\"user\",\"content\":\"u3\"},"
+            "{\"role\":\"assistant\",\"content\":\"配对\",\"tool_calls\":[{\"id\":\"c9\","
+            "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"c9\",\"content\":\"r9\"}"
+            "]}";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(raw);
+        }
+
+        ChatSession s(path);
+        s.load();
+        // 存活：u1 / u2 / u3 + 合法组（assistant+tool）= 5 条
+        QCOMPARE(s.size(), 5);
+        const QJsonArray msgs = s.messages();
+        QCOMPARE(msgs.at(0).toObject().value("content").toString(), QStringLiteral("u1"));
+        QCOMPARE(msgs.at(1).toObject().value("content").toString(), QStringLiteral("u2"));
+        QCOMPARE(msgs.at(2).toObject().value("content").toString(), QStringLiteral("u3"));
+        // 合法 user+assistant(tool_calls)+tool 组原样保序
+        QCOMPARE(msgs.at(3).toObject().value("role").toString(), QStringLiteral("assistant"));
+        QCOMPARE(msgs.at(3).toObject().value("content").toString(), QStringLiteral("配对"));
+        QCOMPARE(msgs.at(4).toObject().value("role").toString(), QStringLiteral("tool"));
+        QCOMPARE(msgs.at(4).toObject().value("tool_call_id").toString(), QStringLiteral("c9"));
+        QVERIFY(msgs.at(4).toObject().value("content").toString()
+                    .contains(QStringLiteral("r9")));
+
+        // 运行期入口护栏：无 role 消息拒收
+        const int before = s.size();
+        s.append(QJsonObject{});
+        QCOMPARE(s.size(), before);
+    }
+
+    // ---- PermissionManager::audit → 注入的 ActivityStore goody 审计流 ----
+    void permission_manager_audit_writes_goody_stream()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const QString dayDir =
+            base.path() + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd");
+
+        ActivityStore store(base.path());
+        store.start();
+        PermissionManager pm(&store);
+
+        const QJsonObject args{{"command", QStringLiteral("git status")}};
+        pm.audit(QStringLiteral("shell.run"), args, QStringLiteral("allowed"), true);
+        store.flushBlocking();
+
+        QFile auditFile(dayDir + QStringLiteral("/audit.jsonl"));
+        QVERIFY(auditFile.open(QIODevice::ReadOnly));
+        const QList<QByteArray> lines = auditFile.readAll().split('\n');
+        QVERIFY(!lines.isEmpty());
+        const QJsonObject first = QJsonDocument::fromJson(lines.first()).object();
+        QCOMPARE(first.value("tool").toString(), QStringLiteral("shell.run"));
+        QCOMPARE(first.value("args").toObject().value("command").toString(),
+                 QStringLiteral("git status"));
+        QCOMPARE(first.value("decision").toString(), QStringLiteral("allowed"));
+        QCOMPARE(first.value("executed").toBool(), true);
+        QVERIFY(first.contains("ts"));
+        QVERIFY(first.value("ts").toDouble() > 0);
+        auditFile.close();
+
+        // 被拒调用同样成行（审计不漏记拒绝）
+        pm.audit(QStringLiteral("fs.write"), QJsonObject{{"path", QStringLiteral("C:/x.txt")}},
+                 QStringLiteral("denied"), false);
+        store.flushBlocking();
+        QVERIFY(auditFile.open(QIODevice::ReadOnly));
+        const QList<QByteArray> lines2 = auditFile.readAll().split('\n');
+        QCOMPARE(lines2.size(), 3); // 两行事件 + 末行换行 split 出的尾空段
+        const QJsonObject second = QJsonDocument::fromJson(lines2.at(1)).object();
+        QCOMPARE(second.value("tool").toString(), QStringLiteral("fs.write"));
+        QCOMPARE(second.value("decision").toString(), QStringLiteral("denied"));
+        QCOMPARE(second.value("executed").toBool(), false);
+        auditFile.close();
+
+        // 无审计存储（单测形态）：audit 不崩、无副作用
+        PermissionManager pmNull(nullptr);
+        pmNull.audit(QStringLiteral("shell.run"), {}, QStringLiteral("allowed"), true);
+    }
+
+    // ---- DailyRecordJob::isPendingDay：补账索引状态机（纯静态，无 LLM） ----
+    void daily_record_is_pending_day_states()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const QString monitorDir = base.path();
+
+        // 无流文件：不待总结
+        QVERIFY(!DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-01")));
+
+        // 只有 meta 无数据流：不待总结
+        const QString d1 = monitorDir + QStringLiteral("/2026-11-01");
+        QVERIFY(QDir().mkpath(d1));
+        {
+            QFile m(d1 + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::WriteOnly));
+            m.write("{\"version\":1,\"summarized\":false}");
+        }
+        QVERIFY(!DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-01")));
+
+        // 有数据无 meta = 肯定没总结过 → 待总结
+        const QString d2 = monitorDir + QStringLiteral("/2026-11-02");
+        QVERIFY(QDir().mkpath(d2));
+        {
+            QFile f(d2 + QStringLiteral("/timeline.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"start\":1}");
+        }
+        QVERIFY(DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-02")));
+
+        // 有数据 + meta summarized:false → 待总结
+        const QString d3 = monitorDir + QStringLiteral("/2026-11-03");
+        QVERIFY(QDir().mkpath(d3));
+        {
+            QFile f(d3 + QStringLiteral("/keys.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"ts\":1,\"text\":\"hi\"}");
+        }
+        {
+            QFile m(d3 + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::WriteOnly));
+            m.write("{\"version\":1,\"summarized\":false}");
+        }
+        QVERIFY(DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-03")));
+
+        // meta summarized:true → 已总结，跳过
+        {
+            QFile m(d3 + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            m.write("{\"version\":1,\"summarized\":true}");
+        }
+        QVERIFY(!DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-03")));
+
+        // 仅 ocrtext 流有数据同样算有数据
+        const QString d4 = monitorDir + QStringLiteral("/2026-11-04");
+        QVERIFY(QDir().mkpath(d4));
+        {
+            QFile f(d4 + QStringLiteral("/ocrtext.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"text\":\"你好\"}");
+        }
+        QVERIFY(DailyRecordJob::isPendingDay(monitorDir, QStringLiteral("2026-11-04")));
+    }
+
+    // ---- ActivityStore：当日 meta 保留 / 无 meta 首建 + 满 64 行阈值自动移交 ----
+    void activity_store_meta_preserved_and_threshold_flush()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const QString dayDir =
+            base.path() + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd");
+
+        // 场景一：预置当日 meta（summarized:true）→ 写入后不被覆盖（补账进度不丢）
+        QVERIFY(QDir().mkpath(dayDir));
+        {
+            QFile m(dayDir + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::WriteOnly));
+            m.write("{\"version\":1,\"summarized\":true}");
+        }
+        {
+            ActivityStore store(base.path());
+            store.start();
+            store.append(QStringLiteral("keys"), QJsonObject{{"ts", 1}});
+            store.flushBlocking();
+        }
+        {
+            QFile m(dayDir + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::ReadOnly));
+            const QJsonObject meta = QJsonDocument::fromJson(m.readAll()).object();
+            QCOMPARE(meta.value("summarized").toBool(), true);
+            QCOMPARE(meta.value("version").toInt(), 1);
+        }
+
+        // 场景二：无 meta → worker 首写自建 summarized:false
+        QTemporaryDir base2;
+        QVERIFY(base2.isValid());
+        const QString dayDir2 =
+            base2.path() + QLatin1Char('/') + QDate::currentDate().toString("yyyy-MM-dd");
+        {
+            ActivityStore store(base2.path());
+            store.start();
+            store.append(QStringLiteral("keys"), QJsonObject{{"ts", 1}});
+            store.flushBlocking();
+            QTRY_VERIFY(QFileInfo::exists(dayDir2 + QStringLiteral("/meta.json")));
+        }
+        {
+            QFile m(dayDir2 + QStringLiteral("/meta.json"));
+            QVERIFY(m.open(QIODevice::ReadOnly));
+            QCOMPARE(QJsonDocument::fromJson(m.readAll()).object()
+                         .value("summarized").toBool(), false);
+        }
+
+        // 场景三：缓冲满 64 行 → 立即移交 worker（不调 flushBlocking）
+        ActivityStore store3(base2.path());
+        store3.start();
+        for (int i = 0; i < 63; ++i)
+            store3.append(QStringLiteral("keys"), QJsonObject{{"i", i}});
+        QCOMPARE(store3.bufferedLines(), 63);
+        store3.append(QStringLiteral("keys"), QJsonObject{{"i", 63}}); // 第 64 行触发
+        QCOMPARE(store3.bufferedLines(), 0);
+        store3.stop();
+    }
+
+    // ---- LlmStreamParser：流内 error 对象 + 双工具按 index 交错分片 ----
+    void llm_stream_parser_error_and_multi_tool_calls()
+    {
+        // 流内业务错误（部分网关 200 后才吐错）：done 置位 + finishReason 记错误
+        LlmStreamParser pErr;
+        pErr.feed("data: {\"error\":{\"message\":\"余额不足\"}}\n\n");
+        QVERIFY(pErr.done());
+        QCOMPARE(pErr.finishReason(), QStringLiteral("error:余额不足"));
+
+        // 两工具按 index 交错分片；第二个从不带 id → 缺 id 补 call_1
+        LlmStreamParser p;
+        p.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+               "{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"fs.read\","
+               "\"arguments\":\"{\\\"path\\\":\\\"x\"}}]}}]}\n\n");
+        p.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+               "{\"index\":1,\"function\":{\"name\":\"fs.write\","
+               "\"arguments\":\"{\\\"path\\\":\\\"y\"}}]}}]}\n\n");
+        p.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+               "{\"index\":0,\"function\":{\"arguments\":\"\\\"}\"}}]}}]}\n\n");
+        p.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+               "{\"index\":1,\"function\":{\"arguments\":\"\\\"}\"}}]},"
+               "\"finish_reason\":\"tool_calls\"}]}\n\n"
+               "data: [DONE]\n\n");
+        QVERIFY(p.done());
+        QCOMPARE(p.finishReason(), QStringLiteral("tool_calls"));
+        const QJsonArray tcs = p.assistantMessage().value("tool_calls").toArray();
+        QCOMPARE(tcs.size(), 2);
+        // 顺序按首次出现的 index 稳定，不因分片交错错乱
+        QCOMPARE(tcs.at(0).toObject().value("id").toString(), QStringLiteral("call_a"));
+        QCOMPARE(tcs.at(0).toObject().value("function").toObject().value("name").toString(),
+                 QStringLiteral("fs.read"));
+        QCOMPARE(tcs.at(0).toObject().value("function").toObject().value("arguments").toString(),
+                 QStringLiteral("{\"path\":\"x\"}"));
+        QCOMPARE(tcs.at(1).toObject().value("id").toString(), QStringLiteral("call_1"));
+        QCOMPARE(tcs.at(1).toObject().value("function").toObject().value("name").toString(),
+                 QStringLiteral("fs.write"));
+        QCOMPARE(tcs.at(1).toObject().value("function").toObject().value("arguments").toString(),
+                 QStringLiteral("{\"path\":\"y\"}"));
+
+        // 无 tool_calls 的普通回答：assistantMessage 不含该键
+        LlmStreamParser pPlain;
+        pPlain.feed("data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n"
+                    "data: [DONE]\n\n");
+        QVERIFY(!pPlain.assistantMessage().contains(QStringLiteral("tool_calls")));
+    }
+
+    // ---- KeyboardTextComposer：满 512 字自动成段（masked 路径，不依赖布局） ----
+    void keyboard_composer_max_run_chars_batch_flush()
+    {
+        KeyboardTextComposer c;
+        struct Seg
+        {
+            QString text;
+            bool masked = false;
+        };
+        QList<Seg> segs;
+        connect(&c, &KeyboardTextComposer::textReady,
+                [&](const QString &, const QString &, const QString &text, bool masked) {
+                    segs.append({text, masked});
+                });
+        c.setWindowContext(QStringLiteral("a.exe"), QStringLiteral("t"));
+        c.setMasked(true); // 每键记 ●：断言确定性不依赖键盘布局
+
+        for (int i = 0; i < 512; ++i)
+            c.onKeyEvent(0x41, 0, false, true); // 连按 512 键
+        QCOMPARE(segs.size(), 1); // 第 512 键即触发成段，不等多拍
+        QCOMPARE(segs.at(0).text, QString(512, QChar(0x25CF)));
+        QVERIFY(segs.at(0).masked);
+
+        c.onKeyEvent(0x41, 0, false, true); // 上限后重新积累
+        c.flush();
+        QCOMPARE(segs.size(), 2);
+        QCOMPARE(segs.at(1).text.size(), 1);
+        QVERIFY(segs.at(1).masked);
+        c.setMasked(false);
+    }
+
+    // ---- McpStdioClient：未启动即调用 → 同步快速失败（不拉子进程） ----
+    void mcp_client_not_ready_fast_fail()
+    {
+        McpStdioClient::ServerConfig cfg;
+        cfg.name = QStringLiteral("fs");
+        cfg.command = QStringLiteral("npx"); // 构造后不 start()
+        McpStdioClient client(cfg);
+        QVERIFY(!client.ready());
+
+        int listCalls = 0;
+        bool listOk = true;
+        QString listErr;
+        client.listTools([&](bool ok, const QJsonArray &, const QString &err) {
+            ++listCalls;
+            listOk = ok;
+            listErr = err;
+        });
+        QCOMPARE(listCalls, 1); // 恰好一次同步回调
+        QVERIFY(!listOk);
+        QVERIFY(listErr.contains(QStringLiteral("未就绪")));
+        QVERIFY(listErr.contains(QStringLiteral("fs"))); // 报错带服务名可定位
+
+        int callCalls = 0;
+        bool callOk = true;
+        QString callErr;
+        client.callTool(QStringLiteral("anything"), {},
+                        [&](bool ok, const QJsonArray &, const QString &err) {
+                            ++callCalls;
+                            callOk = ok;
+                            callErr = err;
+                        });
+        QCOMPARE(callCalls, 1);
+        QVERIFY(!callOk);
+        QVERIFY(callErr.contains(QStringLiteral("未就绪")));
+        QVERIFY(callErr.contains(QStringLiteral("fs")));
+    }
+
+    // ---- MonitorQueryTool：非法日期 / max_lines 截行 / 单行 2000 字符截断 ----
+    void monitor_query_date_maxlines_and_line_truncation()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const QString dayDir = base.path() + QLatin1Char('/') + QStringLiteral("2026-11-08");
+        QVERIFY(QDir().mkpath(dayDir));
+        {
+            QFile f(dayDir + QStringLiteral("/keys.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            f.write("{\"ts\":1,\"text\":\"a\"}\n");
+            f.write("{\"ts\":2,\"text\":\"b\"}\n");
+            f.write("{\"ts\":3,\"text\":\"c\"}\n");
+        }
+
+        const ToolDef d = makeMonitorQueryTool(base.path(), this);
+
+        // 日期形状非法：同步拒绝（不进线程池）
+        QJsonObject bad;
+        d.fn(QJsonObject{{"date", QStringLiteral("2026/11/08")}},
+             [&bad](const QJsonObject &r) { bad = r; });
+        QVERIFY(!bad.value("ok").toBool(true));
+        QVERIFY(bad.value("error").toString().contains(QStringLiteral("日期")));
+
+        // 形状合法但日历非法（2026-13-99）：正则只校形状，按日志缺失容忍
+        // 返回 ok + 空行（现行实现的守卫边界，如实钉住）
+        QJsonObject cal;
+        d.fn(QJsonObject{{"date", QStringLiteral("2026-13-99")}},
+             [&cal](const QJsonObject &r) { cal = r; });
+        QTRY_VERIFY(cal.value("ok").toBool());
+        QCOMPARE(cal.value("streams").toObject().value("keys").toObject()
+                     .value("lines").toArray().size(), 0);
+
+        // max_lines=1：文件 3 行只回 1 行且 truncated 标记
+        QJsonObject got;
+        d.fn(QJsonObject{{"date", QStringLiteral("2026-11-08")},
+                         {"stream", QStringLiteral("keys")},
+                         {"max_lines", 1}},
+             [&got](const QJsonObject &r) { got = r; });
+        QTRY_VERIFY(got.value("ok").toBool());
+        const QJsonObject keys =
+            got.value("streams").toObject().value("keys").toObject();
+        QCOMPARE(keys.value("lines").toArray().size(), 1);
+        QCOMPARE(keys.value("truncated").toBool(), true);
+
+        // 单行超长：>2000 字符的行只回前 2000 字符（防刷屏）
+        {
+            QFile f(dayDir + QStringLiteral("/keys.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text));
+            f.write(QByteArray(3000, 'x') + "\n");
+        }
+        QJsonObject big;
+        d.fn(QJsonObject{{"date", QStringLiteral("2026-11-08")},
+                         {"stream", QStringLiteral("keys")}},
+             [&big](const QJsonObject &r) { big = r; });
+        QTRY_VERIFY(big.value("ok").toBool());
+        const QJsonArray lines =
+            big.value("streams").toObject().value("keys").toObject().value("lines").toArray();
+        QCOMPARE(lines.size(), 1);
+        QCOMPARE(lines.at(0).toString().size(), 2000);
+    }
+
+    // ---- Settings：更多非法值回退 / 钳制 / 术语对平行表 ----
+    void settings_more_fallbacks_and_clamps()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("settings_more.ini");
+        Settings s(ini);
+
+        // 总结时刻：非法手改回退默认 22:00
+        s.setAssistantSummaryTime(QStringLiteral("25:99"));
+        QCOMPARE(s.assistantSummaryTime(), QStringLiteral("22:00"));
+        s.setAssistantSummaryTime(QStringLiteral("abc"));
+        QCOMPARE(s.assistantSummaryTime(), QStringLiteral("22:00"));
+
+        // 权限模式：未知值回退 ask
+        s.setAssistantPermMode(QStringLiteral("bogus"));
+        QCOMPARE(s.assistantPermMode(), QStringLiteral("ask"));
+
+        // 日历背景/文字不透明度：setter 钳制保底与封顶
+        s.setCalendarOpacity(5);
+        QCOMPARE(s.calendarOpacity(), 20);
+        s.setCalendarOpacity(150);
+        QCOMPARE(s.calendarOpacity(), 100);
+        s.setCalendarTextOpacity(1);
+        QCOMPARE(s.calendarTextOpacity(), 30);
+
+        // 非法颜色名 → 默认色
+        s.setCalendarBgColor(QColor(QStringLiteral("not-a-color")));
+        QCOMPARE(s.calendarBgColor(), QColor(QStringLiteral("#FFFFFF")));
+        s.setCalendarAccentColor(QColor(QStringLiteral("nope")));
+        QCOMPARE(s.calendarAccentColor(), QColor(QStringLiteral("#2B6FF2")));
+
+        // 术语对：空对在写入侧剔除，平行表不串位
+        const QList<Settings::TermPair> terms{
+            {QStringLiteral("GPU"), QStringLiteral("显卡")},
+            {QString(), QStringLiteral("空源")},
+            {QStringLiteral("空译"), QString()},
+            {QStringLiteral("LLM"), QStringLiteral("大模型")}};
+        s.setTranslateTerms(terms);
+        const QList<Settings::TermPair> back = s.translateTerms();
+        QCOMPARE(back.size(), 2);
+        QCOMPARE(back.at(0).first, QStringLiteral("GPU"));
+        QCOMPARE(back.at(0).second, QStringLiteral("显卡"));
+        QCOMPARE(back.at(1).first, QStringLiteral("LLM"));
+        QCOMPARE(back.at(1).second, QStringLiteral("大模型"));
+
+        // 读取侧同样钳制（绕过 setter 直写 INI 的手改路径）
+        {
+            QSettings raw(ini, QSettings::IniFormat);
+            raw.setValue("calendar/opacity", 3);       // 低于下限 → 读 20
+            raw.setValue("calendar/textOpacity", 999); // 超上限 → 读 100
+            raw.sync();
+        }
+        QCOMPARE(s.calendarOpacity(), 20);
+        QCOMPARE(s.calendarTextOpacity(), 100);
+    }
+
+    // ---- FsTool：二进制拒读 / 追加写 / fs.list 500 项上限（异步交付） ----
+    void fs_tool_binary_append_and_list_cap()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        ToolDef listTool, readTool, writeTool;
+        for (const ToolDef &t : makeFsTools(this)) { // 异步交付锚点 = 测试对象
+            if (t.name == QStringLiteral("fs.list"))
+                listTool = t;
+            if (t.name == QStringLiteral("fs.read"))
+                readTool = t;
+            if (t.name == QStringLiteral("fs.write"))
+                writeTool = t;
+        }
+        QVERIFY(listTool.fn && readTool.fn && writeTool.fn);
+
+        // 含 \0 的文件 → 拒读"疑似二进制"
+        const QString binPath = dir.filePath(QStringLiteral("bin.dat"));
+        {
+            QFile f(binPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(QByteArray("abc\0def", 7));
+        }
+        QJsonObject readGot;
+        readTool.fn(QJsonObject{{"path", binPath}},
+                    [&readGot](const QJsonObject &r) { readGot = r; });
+        QVERIFY(!readGot.value("ok").toBool(true));
+        QVERIFY(readGot.value("error").toString().contains(QStringLiteral("疑似二进制")));
+
+        // fs.write append:true：追加且原内容保留
+        const QString txtPath = dir.filePath(QStringLiteral("log.txt"));
+        {
+            QFile f(txtPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("line1\n");
+        }
+        QJsonObject appendGot;
+        writeTool.fn(QJsonObject{{"path", txtPath},
+                                 {"content", QStringLiteral("line2\n")},
+                                 {"append", true}},
+                     [&appendGot](const QJsonObject &r) { appendGot = r; });
+        QVERIFY(appendGot.value("ok").toBool());
+        {
+            QFile f(txtPath);
+            QVERIFY(f.open(QIODevice::ReadOnly));
+            // 追加路径带 QIODevice::Text 打开：Windows 下 \n 落盘为 \r\n
+            QCOMPARE(f.readAll(), QByteArray("line1\nline2\r\n"));
+        }
+
+        // 502 个文件的巨目录：entries 封顶 500、total 全量、note 标注
+        const QString bigDir = dir.filePath(QStringLiteral("big"));
+        QVERIFY(QDir().mkpath(bigDir));
+        for (int i = 0; i < 502; ++i) {
+            QFile f(bigDir + QStringLiteral("/f%1.txt").arg(i, 4, 10, QLatin1Char('0')));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("x");
+        }
+        QJsonObject listGot;
+        listTool.fn(QJsonObject{{"path", bigDir}},
+                    [&listGot](const QJsonObject &r) { listGot = r; });
+        QTRY_VERIFY(listGot.value("ok").toBool()); // 线程池枚举 → 主线程队列交付
+        QCOMPARE(listGot.value("entries").toArray().size(), 500);
+        QCOMPARE(listGot.value("total").toInt(), 502);
+        QVERIFY(listGot.value("note").toString().contains(QStringLiteral("仅返回前")));
+    }
+
+    // ---- DailyAggregator：同窗 90s 间隙不合并 + maxChars 预算截断 ----
+    void daily_aggregator_gap_boundary_and_budget()
+    {
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+
+        // 同窗两段间隙 120s（≥90s 合并阈值）：摘要中两行独立，键入不合并
+        const QString dayDir = base.path() + QStringLiteral("/2026-11-08");
+        QVERIFY(QDir().mkpath(dayDir));
+        {
+            QFile tl(dayDir + QStringLiteral("/timeline.jsonl"));
+            QVERIFY(tl.open(QIODevice::WriteOnly | QIODevice::Text));
+            tl.write("{\"start\":1731000000000,\"end\":1731000060000,\"app\":\"code.exe\","
+                     "\"title\":\"main.cpp\",\"activeSec\":60,\"keystrokes\":10,\"clicks\":1}\n");
+            tl.write("{\"start\":1731000180000,\"end\":1731000240000,\"app\":\"code.exe\","
+                     "\"title\":\"main.cpp\",\"activeSec\":60,\"keystrokes\":20,\"clicks\":1}\n");
+        }
+        QString digest;
+        bool ok = false;
+        DailyAggregator::buildDigestAsync(dayDir, 12000, this,
+                                          [&](bool o, QString d) { ok = o; digest = d; });
+        QTRY_VERIFY(ok);
+        QCOMPARE(digest.count(QStringLiteral("code.exe — main.cpp")), 2); // 未合并
+        QVERIFY(digest.contains(QStringLiteral("键入10")));
+        QVERIFY(digest.contains(QStringLiteral("键入20")));
+        QVERIFY(!digest.contains(QStringLiteral("键入30")));
+
+        // maxChars=200：10 个互不相同的窗口必然超限 → 尾部标注且总长有界
+        const QString dayDir2 = base.path() + QStringLiteral("/2026-11-09");
+        QVERIFY(QDir().mkpath(dayDir2));
+        {
+            QFile tl(dayDir2 + QStringLiteral("/timeline.jsonl"));
+            QVERIFY(tl.open(QIODevice::WriteOnly | QIODevice::Text));
+            for (int i = 0; i < 10; ++i) {
+                tl.write(QStringLiteral(
+                             "{\"start\":%1,\"end\":%2,\"app\":\"app%3.exe\","
+                             "\"title\":\"文档%4\",\"activeSec\":60,\"keystrokes\":5,"
+                             "\"clicks\":1}\n")
+                             .arg(1731000000000 + i * 600000)
+                             .arg(1731000000000 + i * 600000 + 60000)
+                             .arg(i)
+                             .arg(i)
+                             .toUtf8());
+            }
+        }
+        QString digest2;
+        bool ok2 = false;
+        DailyAggregator::buildDigestAsync(dayDir2, 200, this,
+                                          [&](bool o, QString d) { ok2 = o; digest2 = d; });
+        QTRY_VERIFY(ok2);
+        QVERIFY(digest2.contains(QStringLiteral("超出预算已截断")));
+        QVERIFY(digest2.size() < 220); // 头部 200 + 截断标注（有界）
+    }
+
+    // ---- BoxStore：网格列/行钳制 + 折叠态持久化 + 直写越界 load 钳回 ----
+    void box_store_layout_clamps_roundtrip()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("boxes.json");
+        BoxStore store(path);
+        store.load();
+        const QString id = store.addBox(QStringLiteral("学习"), dir.filePath("学习"), 60, 120);
+        QVERIFY(!id.isEmpty());
+
+        QVERIFY(store.setBoxCols(id, 0));
+        QCOMPARE(store.boxes().first().cols, 1);
+        QVERIFY(store.setBoxCols(id, 99));
+        QCOMPARE(store.boxes().first().cols, 8);
+        QVERIFY(store.setBoxRows(id, -3));
+        QCOMPARE(store.boxes().first().rows, 1);
+        QVERIFY(store.setBoxRows(id, 50));
+        QCOMPARE(store.boxes().first().rows, 8);
+        QVERIFY(store.setBoxCollapsed(id, true));
+
+        // JSON 往返：钳制值与折叠态持久化
+        BoxStore reloaded(path);
+        reloaded.load();
+        QCOMPARE(reloaded.boxes().size(), 1);
+        QCOMPARE(reloaded.boxes().first().cols, 8);
+        QCOMPARE(reloaded.boxes().first().rows, 8);
+        QCOMPARE(reloaded.boxes().first().collapsed, true);
+
+        // 直写越界 JSON（手改文件路径）：load 钳回合法区间
+        const QByteArray raw =
+            QStringLiteral("{\"version\":1,\"boxes\":[{\"id\":\"x\",\"name\":\"n\","
+                           "\"dir\":\"%1\",\"x\":0,\"y\":0,\"cols\":99,\"rows\":0,"
+                           "\"collapsed\":true}]}")
+                .arg(dir.filePath(QStringLiteral("n")))
+                .toUtf8();
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(raw);
+        }
+        BoxStore reloaded2(path);
+        reloaded2.load();
+        QCOMPARE(reloaded2.boxes().size(), 1);
+        QCOMPARE(reloaded2.boxes().first().cols, 8); // 99 → 上限 8
+        QCOMPARE(reloaded2.boxes().first().rows, 1); // 0 → 下限 1
+        QCOMPARE(reloaded2.boxes().first().collapsed, true);
+    }
+
+    // ---- CalendarStore：条目更新/删除 + 分类回退 + 装载过滤非法条目 ----
+    void calendar_store_update_remove_and_load_filter()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("calendar.json");
+        CalendarStore store(path);
+        store.load();
+        QVERIFY(!store.categories().isEmpty());
+        const QString defId = CalendarStore::defaultCategoryId();
+        const QDate day(2026, 11, 8);
+
+        const QString id = store.addItem(day, defId, QStringLiteral("写周报"), false);
+        QVERIFY(!id.isEmpty());
+
+        // updateItem：改文本/分类/重要并持久化；未知 id false
+        const QString tempCat = store.addCategory(QStringLiteral("临时"), QColor("#ABCDEF"));
+        QVERIFY(!tempCat.isEmpty());
+        QVERIFY(store.updateItem(id, QStringLiteral("写双周报"), tempCat, true));
+        QVERIFY(!store.updateItem(QStringLiteral("no-such-id"), QStringLiteral("x"),
+                                  defId, false));
+        {
+            CalendarStore reloaded(path);
+            reloaded.load();
+            QCOMPARE(reloaded.itemsForDate(day).size(), 1);
+            QCOMPARE(reloaded.itemsForDate(day).at(0).text, QStringLiteral("写双周报"));
+            QCOMPARE(reloaded.itemsForDate(day).at(0).categoryId, tempCat);
+            QCOMPARE(reloaded.itemsForDate(day).at(0).important, true);
+        }
+
+        // removeItem：true → 再删 false
+        QVERIFY(store.removeItem(id));
+        QVERIFY(!store.removeItem(id));
+        QVERIFY(store.itemsForDate(day).isEmpty());
+
+        // 分类回退：未知 id → 默认灰 + "其他"
+        QCOMPARE(store.categoryColor(QStringLiteral("nope")), QColor(0x8A, 0x93, 0xA6));
+        QCOMPARE(store.categoryName(QStringLiteral("nope")), QStringLiteral("其他"));
+
+        // 直写含非法条目的 JSON：缺 text / 坏 date / 缺 id → load 全部跳过
+        const QByteArray raw =
+            "{\"version\":1,\"categories\":[{\"id\":\"c1\",\"name\":\"工作\","
+            "\"color\":\"#123456\"}],\"items\":["
+            "{\"id\":\"ok1\",\"date\":\"2026-11-08\",\"text\":\"合法\",\"category\":\"c1\"},"
+            "{\"id\":\"bad1\",\"date\":\"2026-11-08\",\"category\":\"c1\"},"
+            "{\"id\":\"bad2\",\"date\":\"2026-13-99\",\"text\":\"坏日期\",\"category\":\"c1\"},"
+            "{\"date\":\"2026-11-08\",\"text\":\"缺id\",\"category\":\"c1\"}"
+            "]}";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(raw);
+        }
+        CalendarStore filtered(path);
+        filtered.load();
+        QCOMPARE(filtered.items().size(), 1); // 非法条目全部跳过
+        QCOMPARE(filtered.items().at(0).id, QStringLiteral("ok1"));
+        QCOMPARE(filtered.categories().size(), 1);
+        QCOMPARE(filtered.categories().at(0).name, QStringLiteral("工作"));
+    }
+
+    // ---- 守卫合集：权限模式回退 / 工作记忆 / 长期记忆 / 工具注册 / 调度 ----
+    void misc_guards_pm_memory_registry_scheduler()
+    {
+        // PermissionManager：modeFromSetting 未知回退 Ask；grantAlways 幂等；
+        // revokeAlways 对不在名单的工具 no-op
+        QCOMPARE(int(PermissionManager::modeFromSetting(QStringLiteral("smart"))),
+                 int(PermissionManager::Mode::Smart));
+        QCOMPARE(int(PermissionManager::modeFromSetting(QStringLiteral("bogus"))),
+                 int(PermissionManager::Mode::Ask));
+        PermissionManager pm(nullptr);
+        pm.grantAlways(QStringLiteral("shell.run"));
+        pm.grantAlways(QStringLiteral("shell.run")); // 幂等
+        QCOMPARE(pm.alwaysAllowTools().count(QStringLiteral("shell.run")), 1);
+        pm.revokeAlways(QStringLiteral("fs.write")); // 不在名单：no-op
+        QCOMPARE(pm.alwaysAllowTools().size(), 1);
+        pm.revokeAlways(QStringLiteral("shell.run"));
+        QVERIFY(pm.alwaysAllowTools().isEmpty());
+
+        // WorkingMemory：空标题拒开任务；未知 id 笔记拒收
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        WorkingMemory work(base.path());
+        const QJsonObject emptyTitle =
+            work.startTask(QStringLiteral("   "), QStringLiteral("g"));
+        QVERIFY(!emptyTitle.value("ok").toBool(true));
+        QVERIFY(emptyTitle.value("error").toString().contains(QStringLiteral("标题")));
+        QVERIFY(!work.updateTask(QStringLiteral("no-such-id"), QStringLiteral("n"))
+                     .value("ok").toBool(true));
+
+        // MemoryStore：空内容拒收 → 空 id 且不建条目
+        MemoryStore mem(base.path());
+        QVERIFY(mem.addEntry(QStringLiteral("fact"), {}, QStringLiteral("   ")).isEmpty());
+        QCOMPARE(mem.entries().size(), 0);
+
+        // ToolRegistry：空名 / 空 fn 拒收
+        ToolRegistry reg;
+        ToolDef noName;
+        noName.fn = [](const QJsonObject &, const std::function<void(QJsonObject)> &d) {
+            d({});
+        };
+        reg.registerTool(noName);
+        ToolDef noFn;
+        noFn.name = QStringLiteral("ghost");
+        reg.registerTool(noFn);
+        QVERIFY(!reg.has(QString()));
+        QVERIFY(!reg.has(QStringLiteral("ghost")));
+        QCOMPARE(reg.toolSchemas().size(), 0);
+
+        // Scheduler：非法时刻 / 空 fn 拒注册（只测守卫，不测"未到时不触发"）
+        Scheduler sched;
+        int runs = 0;
+        sched.setDailyTask(QStringLiteral("bad"), QTime(), [&runs] { ++runs; }); // 无效时刻
+        sched.setDailyTask(QStringLiteral("bad"), QTime(0, 0), nullptr);         // 空 fn
+        sched.tick();
+        QCOMPARE(runs, 0);
+        sched.setDailyTask(QStringLiteral("good"), QTime(0, 0), [&runs] { ++runs; });
+        sched.tick(); // 合法注册生效（守卫没有误伤）
+        QCOMPARE(runs, 1);
+    }
+
+    // ---- ImeCommitDetector：up 事件与非字母非确认键忽略 ----
+    void ime_commit_detector_ignores_up_and_other_keys()
+    {
+        ImeCommitDetector d;
+        qint64 clock = 1000000;
+        d.setClock([&clock] { return clock; });
+        bool cjkIme = true;
+        d.setImeGate([&cjkIme] { return cjkIme; });
+
+        int commits = 0;
+        connect(&d, &ImeCommitDetector::commitDetected, [&] { ++commits; });
+
+        // 字母的 up 事件不构成组合期证据：随后的空格不触发
+        d.onKeyEvent(0x41, false);
+        d.onKeyEvent(0x20, true);
+        QCOMPARE(commits, 0);
+
+        // 非字母非确认键（F5 等）被忽略：不触发
+        d.onKeyEvent(0x74, true); // F5
+        d.onKeyEvent(0x20, true);
+        QCOMPARE(commits, 0);
+
+        // 对照：字母 down + 确认键 → 正常触发（守卫没有误伤）
+        d.onKeyEvent(0x41, true);
+        d.onKeyEvent(0x20, true);
+        QCOMPARE(commits, 1);
     }
 };
 

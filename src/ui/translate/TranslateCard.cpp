@@ -478,6 +478,18 @@ void TranslateCard::keyPressEvent(QKeyEvent *event)
     QWidget::keyPressEvent(event);
 }
 
+// R6-B4: 目标语言双入口失步同步——划词卡片与 OCR 文字栏共用
+// translateTargetLang 设置，但显示侧此前只在构造时读一次，另一入口改语言
+// 后本卡片仍显示旧值。每次显示按设置重读对齐 combo 当前项；同步期
+// blockSignals 防止 currentTextChanged 回写设置形成环路。翻译行为本身
+// 所见即所得，此处只对齐显示值
+void TranslateCard::showEvent(QShowEvent *event)
+{
+    const QSignalBlocker block(m_toCombo);
+    m_toCombo->setCurrentText(langCodeToDisplay(Settings::instance().translateTargetLang()));
+    QWidget::showEvent(event);
+}
+
 void TranslateCard::hideEvent(QHideEvent *event)
 {
     // 单例复用：隐藏即清空，覆盖所有退出路径（点击卡片外部 / 关闭按钮 / Esc），

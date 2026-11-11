@@ -23,6 +23,7 @@
 #include "core/assistant/PermissionManager.h"
 #include "core/assistant/ShellTool.h"
 #include "core/assistant/ToolRegistry.h"
+#include "core/assistant/ToolText.h"
 #include "core/hotkey/GlobalHotKey.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
@@ -174,7 +175,7 @@ void GoodyModule::registerBuiltinTools()
         m_registry->registerTool(d);
     }
 
-    for (const ToolDef &d : makeFsTools())
+    for (const ToolDef &d : makeFsTools(this)) // R6-C1: this 作异步交付锚点
         m_registry->registerTool(d);
     m_registry->registerTool(makeShellRunTool());
     if (m_memory && m_work) {
@@ -216,7 +217,8 @@ void GoodyModule::registerBuiltinTools()
     }
 }
 
-// mcp.json 服务器拉起：就绪后 listTools → 注册 mcp__<server>__<tool>。
+// mcp.json 服务器配置装载：建连接对象但不启动（懒启动，见
+// ensureMcpStarted）；就绪后 listTools → 注册 mcp__<server>__<tool>。
 // MCP 是可选能力：无配置文件即零开销
 void GoodyModule::setupMcp()
 {
@@ -284,8 +286,23 @@ void GoodyModule::setupMcp()
                 }
             });
         });
-        client->start();
+        // R6-C2: 不在此 start——子进程常驻内存大（单 server 数十~数百 MB），
+        // 应用启动期并无对话需求，改由 ensureMcpStarted 懒启动
     }
+}
+
+// R6-C2: MCP 子进程懒启动。触发点核对结论：mcp__* 工具在握手完成后才注册
+// 进 ToolRegistry（readyChanged → listTools → registerTool），未启动时 LLM
+// 侧可见工具清单本就不含它们——"首次调用 mcp__* 工具"在未启动状态下不可达，
+// 故唯一可达触发点是打开聊天窗（openChat）。无 mcp.json 时 m_mcpClients
+// 为空，本函数零开销（维持现状）
+void GoodyModule::ensureMcpStarted()
+{
+    if (m_mcpStarted)
+        return;
+    m_mcpStarted = true;
+    for (McpStdioClient *client : m_mcpClients)
+        client->start();
 }
 
 void GoodyModule::ensureWindow()
@@ -337,6 +354,7 @@ void GoodyModule::ensureWindow()
 
 void GoodyModule::openChat()
 {
+    ensureMcpStarted(); // R6-C2: 首次打开聊天窗即拉起 MCP 子进程（幂等）
     ensureWindow();
     if (m_window->isVisible()) {
         m_window->raise();
@@ -387,43 +405,6 @@ QString GoodyModule::buildSystemPrompt() const
                       .arg(m_memory->indexSummary());
     }
     return prompt;
-}
-
-QString GoodyModule::summarizeArgs(const QJsonObject &args) const
-{
-    const QString raw = QString::fromUtf8(
-        QJsonDocument(args).toJson(QJsonDocument::Compact));
-    return raw.size() > 200 ? raw.left(200) + QStringLiteral("…") : raw;
-}
-
-QString GoodyModule::summarizeResult(const QJsonObject &result) const
-{
-    if (!result.value(QStringLiteral("ok")).toBool(true)) {
-        const QString err = result.value(QStringLiteral("error")).toString();
-        return err.isEmpty() ? QStringLiteral("执行失败") : err;
-    }
-    QString summary;
-    for (auto it = result.constBegin(); it != result.constEnd(); ++it) {
-        if (it.key() == QLatin1String("ok"))
-            continue;
-        // 字符串原样；其他类型序列化时去掉数组包装（QJsonValue 无独立序列化，
-        // 套 [..] 后剥壳，避免显示成 {"v":...} 这种多余的包装结构）
-        QString rendered;
-        if (it.value().isString()) {
-            rendered = it.value().toString();
-        } else {
-            rendered = QString::fromUtf8(
-                           QJsonDocument(QJsonArray{it.value()}).toJson(QJsonDocument::Compact))
-                           .trimmed();
-            rendered = rendered.mid(1, rendered.size() - 2); // 剥 [ ]
-        }
-        summary += QStringLiteral("%1=%2 ").arg(it.key(), rendered);
-        if (summary.size() > 160) {
-            summary += QStringLiteral("…");
-            break;
-        }
-    }
-    return summary.trimmed();
 }
 
 void GoodyModule::sendMessage(const QString &text)
@@ -561,7 +542,7 @@ void GoodyModule::processNextToolCall()
 
     if (m_window)
         m_window->appendSystemLine(
-            QStringLiteral("⚙ 调用工具 %1(%2)").arg(name, summarizeArgs(args)));
+            QStringLiteral("⚙ 调用工具 %1(%2)").arg(name, summarizeToolArgs(args)));
 
     const PermissionManager::Decision decision = m_perm->decide(name, args);
     if (decision == PermissionManager::Decision::Allow) {
@@ -576,7 +557,7 @@ void GoodyModule::processNextToolCall()
         return;
     }
     const qint64 epoch = m_toolEpoch; // 会话清空收束代数：失配即过期回调
-    m_window->promptPermission(name, summarizeArgs(args),
+    m_window->promptPermission(name, summarizeToolArgs(args),
                                [this, id, name, args, epoch](bool allowed, bool always) {
                                    if (epoch != m_toolEpoch)
                                        return; // 会话已清空收束：丢弃，不回填结果
@@ -617,7 +598,7 @@ void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &res
             (result.value(QStringLiteral("ok")).toBool(true)
                  ? QStringLiteral("✓ 完成：%1")
                  : QStringLiteral("✗ 失败：%1"))
-                .arg(summarizeResult(result)));
+                .arg(summarizeToolResult(result)));
     }
     if (m_pendingToolCalls.isEmpty() && m_toolPhase) {
         m_toolPhase = false; // 结果全部回填，工具执行期结束

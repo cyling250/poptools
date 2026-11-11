@@ -226,7 +226,7 @@ namespace poptools
         m_smartPressPending = false; // 预高亮点选判定复位
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 取色缓存失效（screen 画面已更新）
-        m_baseScaled = QPixmap(); // 底图缩放缓存失效（screen 画面已更新）
+        m_basePixmap = QPixmap(); // R6-B1: 底图缓存失效（screen 画面已更新）
         m_lastColorCardRect = QRect(); // 取色卡片跟随局部重绘状态复位
         m_smartMousePos = QCursor::pos(); // 检测起点为当前鼠标位置
         m_smartLastPos = m_smartMousePos;
@@ -261,7 +261,7 @@ namespace poptools
         m_smartPressPending = false; // 预高亮点选判定复位
         m_smartPressRect = QRect();
         m_screenImage = QImage(); // 释放取色缓存
-        m_baseScaled = QPixmap(); // 释放底图缩放缓存（约 8-33MB，空闲期不留驻）
+        m_basePixmap = QPixmap(); // R6-B1: 释放底图缓存（约 8-33MB，空闲期不留驻）
         m_ocrCtrl->releaseSessionResources(); // 释放 OCR 选区大图缓存（红线 5，与上面两处并列）
         m_smartDetectTimer.stop(); // 停止智能框选检测
         m_ocrScanning = false; // 停止 OCR 扫描动效
@@ -430,13 +430,21 @@ namespace poptools
     {
         Q_UNUSED(event)
         QPainter p(this);
-        // 底图：物理原图 → 逻辑窗口的平滑缩放结果缓存（每轮截图/尺寸变化只算一次）。
-        // 原先每帧对整幅物理桌面图做 SmoothPixmapTransform，4K 下每帧数十 MB 光栅化，
-        // 是全窗口重绘路径的最大单点成本；悬停/动效的局部重绘必须以本缓存为前提
-        if (m_baseScaled.size() != rect().size())
-            m_baseScaled = m_cap.screen.scaled(size(), Qt::IgnoreAspectRatio,
-                                               Qt::SmoothTransformation);
-        p.drawPixmap(0, 0, m_baseScaled); // 底层为原始屏幕画面（物理分辨率）
+        // R6-B1: 底图 1:1 直绘。旧实现把物理分辨率原图 Smooth 缩到逻辑尺寸缓存，
+        // drawPixmap 时又被设备像素比放大回屏幕——双重重采样，是 150% DPI 下
+        // 冻结背景糊屏的根因（P-035）。现改为物理原图挂当前屏幕 DPR 元数据后
+        // 直接绘制，物理像素与设备像素一一对应，零重采样；每帧不再有大图变换，
+        // 悬停/动效的局部重绘仍以本缓存为前提。失效条件：捕获变更（重进截图
+        // 时置空）‖ 逻辑尺寸变更 ‖ DPR 变化（跨屏移动）
+        const qreal dpr = devicePixelRatioF();
+        if (m_basePixmap.isNull() || m_baseDpr != dpr || rect().size() != m_baseLogicalSize)
+        {
+            m_basePixmap = m_cap.screen; // 物理分辨率原图（ScreenCapturer 产出，dpr=1）
+            m_basePixmap.setDevicePixelRatio(dpr);
+            m_baseDpr = dpr;
+            m_baseLogicalSize = rect().size();
+        }
+        p.drawPixmap(0, 0, m_basePixmap); // 底层为原始屏幕画面（1 设备像素 = 1 图像像素）
 
         if (m_state == State::Idle)
             return;
@@ -1110,7 +1118,16 @@ namespace poptools
         const QImage crop = m_screenImage.copy(src);
         p.save();
         p.setClipPath(cardPath);
-        p.drawImage(zoomRect, crop.scaled(zoomRect.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation));
+        // R6-B1: 按设备像素尺寸做最近邻重采样后挂 DPR 直绘。旧实现缩到逻辑
+        // 尺寸再由绘制系统二次拉伸到设备像素，150% 下 5×1.5=7.5 非整数块宽
+        // 交替不均；一次重采样直绘消除二次插值。Fast（最近邻）是取色卡的
+        // 功能正确选择——色块需要硬边，不能换回 Smooth
+        const qreal zoomDpr = devicePixelRatioF();
+        QPixmap zoomed = QPixmap::fromImage(
+            crop.scaled(zoomRect.size() * zoomDpr, Qt::IgnoreAspectRatio,
+                        Qt::FastTransformation));
+        zoomed.setDevicePixelRatio(zoomDpr);
+        p.drawPixmap(zoomRect.topLeft(), zoomed);
 
         // 十字线：穿过中心像素中线的单像素线，互补色保证可见
         const QPoint off = c - src.topLeft(); // 中心像素在源区域内的偏移
