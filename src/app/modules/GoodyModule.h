@@ -64,6 +64,7 @@ private:
     void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
     void updateWorkingState();   // T-050：busy||toolPhase → workingChanged 去重广播
     void sendMessage(const QString &text);
+    bool turnLocked() const; // busy||工具期 → 会话侧栏/四件套操作锁定（T-050-P2）
     void runTurn();
     void onTurnFinished(bool ok, const QJsonObject &assistantMessage, const QString &error);
     void processNextToolCall();

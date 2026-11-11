@@ -55,6 +55,14 @@ QString LlmStreamParser::feed(const QByteArray &bytes)
         if (!content.isEmpty())
             delta += content;
         m_content += content;
+        // T-050-P2：思考内容增量（reasoning_content）聚合，照 tool_calls 先例；
+        // 逐块暂存 pending，上层经 takeReasoningDelta() 取走后发信号驱动
+        // 思考折叠区实时展示
+        const QString reasoning = deltaObj.value(QStringLiteral("reasoning_content")).toString();
+        if (!reasoning.isEmpty()) {
+            m_reasoning += reasoning;
+            m_reasoningPending += reasoning;
+        }
         // 工具调用分片：按 index 聚合 id/name，arguments 字符串拼接
         const QJsonArray tcs = deltaObj.value(QStringLiteral("tool_calls")).toArray();
         for (const QJsonValue &tc : tcs) {
@@ -77,10 +85,19 @@ QString LlmStreamParser::feed(const QByteArray &bytes)
     return delta;
 }
 
+QString LlmStreamParser::takeReasoningDelta()
+{
+    const QString out = m_reasoningPending;
+    m_reasoningPending.clear();
+    return out;
+}
+
 QJsonObject LlmStreamParser::assistantMessage() const
 {
     QJsonObject msg{{"role", QStringLiteral("assistant")},
                     {"content", m_content}};
+    if (!m_reasoning.isEmpty())
+        msg.insert(QStringLiteral("reasoning"), m_reasoning);
     if (!m_toolCalls.isEmpty()) {
         QJsonArray arr;
         for (int index : m_toolOrder) {
@@ -128,6 +145,10 @@ bool LlmClient::chat(const QString &baseUrl, const QString &apiKey, const QStrin
         const QString delta = m_parser.feed(m_reply->readAll());
         if (!delta.isEmpty())
             emit contentDelta(delta);
+        // T-050-P2：思考增量透传（流式思考折叠区）。局部变量勿与信号同名
+        const QString rDelta = m_parser.takeReasoningDelta();
+        if (!rDelta.isEmpty())
+            emit reasoningDelta(rDelta);
     });
     connect(m_reply, &QNetworkReply::errorOccurred, this, [this](QNetworkReply::NetworkError) {
         // 留给 finished 统一收尾：流可能已出过部分正文

@@ -54,6 +54,7 @@
 #include "ui/desktopband/DesktopBandLogic.h"
 #include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyWindow.h"
+#include "ui/goody/MarkdownRenderer.h" // T-050-P2：流式渲染节流/围栏状态机
 
 #include <QCoreApplication>
 #include <QDate>
@@ -1149,11 +1150,18 @@ private slots:
         {
             QFile f(path);
             QVERIFY(f.open(QIODevice::ReadOnly));
-            QVERIFY(QJsonDocument::fromJson(f.readAll()).object()
-                        .value(QStringLiteral("messages"))
-                        .toArray()
-                        .size()
-                    == 1); // 主文件已重写为合法会话
+            // T-050-P2：会话文件已升级 v2 多会话格式——save 正常重写主文件
+            // 后应含 version 2 与恰一个会话（内含 1 条 user 消息）
+            const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+            const QJsonArray sessions =
+                root.value(QStringLiteral("sessions")).toArray();
+            QCOMPARE(sessions.size(), 1);
+            QCOMPARE(sessions.at(0).toObject()
+                         .value(QStringLiteral("messages"))
+                         .toArray()
+                         .size(),
+                     1); // 主文件已重写为合法会话
         }
 
         // 场景二（P3-1 轮换）：再次损坏 → 旧 .bad 挪为 .bad.old（保留上一
@@ -3616,6 +3624,360 @@ private slots:
         QVERIFY(c.submit());      // 下一事件循环可重新调度
         QVERIFY(c.beginFlush());
         QVERIFY(!c.beginFlush());
+    }
+
+    // ============================================================
+    // T-050-P2：聊天窗重构（MarkdownRenderer / reasoning / 多会话）
+    // ============================================================
+
+    // ---- MarkdownRenderer：流式呈现节流状态机（首块免节流 + 150ms 线） ----
+    void markdown_renderer_throttle()
+    {
+        MarkdownRenderer r;
+        r.begin();
+        // 首块立即呈现（打字机起步不等节流线）
+        const MarkdownRenderStep s1 = r.feed(QStringLiteral("你好"), 0);
+        QVERIFY(s1.present);
+        QVERIFY(!s1.finalize);
+        QCOMPARE(s1.newText, QStringLiteral("你好"));
+        // 节流窗内（150ms 线前）只累积不呈现——禁逐 chunk 重渲染红线
+        QVERIFY(!r.feed(QStringLiteral("世界"), 100).present);
+        QVERIFY(!r.feed(QStringLiteral("！"), 149).present);
+        QCOMPARE(r.streamText(), QStringLiteral("你好世界！"));
+        // 跨过节流线的下一块：积压一次性吐出
+        const MarkdownRenderStep s2 = r.feed(QStringLiteral("Goody"), 150);
+        QVERIFY(s2.present);
+        QCOMPARE(s2.newText, QStringLiteral("世界！Goody"));
+        // finish：冲掉窗口内积压 + 定稿指令；幂等（二次 finish 不再定稿）
+        r.feed(QStringLiteral("尾巴"), 200);
+        const MarkdownRenderStep fin = r.finish();
+        QVERIFY(fin.finalize);
+        QCOMPARE(fin.newText, QStringLiteral("尾巴"));
+        QCOMPARE(r.streamText(), QStringLiteral("你好世界！Goody尾巴"));
+        QVERIFY(!r.finish().finalize);
+        // begin 复位：新一轮从首块免节流重新开始
+        r.begin();
+        const MarkdownRenderStep s3 = r.feed(QStringLiteral("新回合"), 5000);
+        QVERIFY(s3.present);
+        QCOMPARE(s3.newText, QStringLiteral("新回合"));
+    }
+
+    // ---- MarkdownRenderer：代码块完成检测（``` 围栏开合状态机，跨 chunk 半行安全） ----
+    void markdown_renderer_code_fence()
+    {
+        MarkdownRenderer r;
+        r.begin();
+        r.feed(QStringLiteral("看代码：\n"), 0);
+        QVERIFY(!r.inOpenCodeFence());
+        // 围栏行被 chunk 切成两半（"```py" + "thon\n"）：半行不判定
+        r.feed(QStringLiteral("```py"), 0);
+        QVERIFY(!r.inOpenCodeFence());
+        r.feed(QStringLiteral("thon\n"), 0);
+        QVERIFY(r.inOpenCodeFence());
+        // 围栏内容行
+        r.feed(QStringLiteral("int x = 1;\n"), 0);
+        QVERIFY(r.inOpenCodeFence());
+        // 闭栏
+        r.feed(QStringLiteral("```\n"), 0);
+        QVERIFY(!r.inOpenCodeFence());
+        // 单 chunk 内完成开栏 + 定稿落在未闭合围栏内（endedInFence 信息位）
+        r.feed(QStringLiteral("```cpp\nint y;\n"), 0);
+        QVERIFY(r.inOpenCodeFence());
+        const MarkdownRenderStep fin = r.finish();
+        QVERIFY(fin.finalize);
+        QVERIFY(fin.endedInFence);
+        // 缩进围栏（行首 ≤3 空格有效；4 空格非围栏）
+        MarkdownRenderer r2;
+        r2.begin();
+        r2.feed(QStringLiteral("   ```\nabc\n   ```\n"), 0);
+        QVERIFY(!r2.inOpenCodeFence());
+        MarkdownRenderer r3;
+        r3.begin();
+        r3.feed(QStringLiteral("    ```\nabc\n"), 0);
+        QVERIFY(!r3.inOpenCodeFence());
+    }
+
+    // ---- LlmStreamParser：reasoning_content 思考增量聚合（照 tool_calls 先例） ----
+    void llm_parser_reasoning_content()
+    {
+        LlmStreamParser p;
+        const QByteArray chunk1 =
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"思考\"}}]}\n\n"
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"中\","
+            "\"content\":\"你好\"}}]}\n\n";
+        // reasoning 不混入正文增量
+        QCOMPARE(p.feed(chunk1), QStringLiteral("你好"));
+        // 思考增量逐块取走，取走即清零
+        QCOMPARE(p.takeReasoningDelta(), QStringLiteral("思考中"));
+        QCOMPARE(p.takeReasoningDelta(), QString());
+        const QByteArray chunk2 =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"，世界\"}}]}\n\n"
+            "data: [DONE]\n\n";
+        QCOMPARE(p.feed(chunk2), QStringLiteral("，世界"));
+        QVERIFY(p.done());
+        QCOMPARE(p.reasoning(), QStringLiteral("思考中"));
+        // 完成消息带 reasoning 字段（入会话持久化用）
+        const QJsonObject msg = p.assistantMessage();
+        QCOMPARE(msg.value("content").toString(), QStringLiteral("你好，世界"));
+        QCOMPARE(msg.value("reasoning").toString(), QStringLiteral("思考中"));
+        // 纯正文回复不带 reasoning 字段
+        LlmStreamParser plain;
+        plain.feed("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"
+                   "data: [DONE]\n\n");
+        QVERIFY(!plain.assistantMessage().contains(QStringLiteral("reasoning")));
+    }
+
+    // ---- buildChatRequestBody：reasoning 剥离（思考仅本地持久化，不回传网关） ----
+    void llm_request_body_strips_reasoning()
+    {
+        const QJsonArray messages{
+            QJsonObject{{"role", "system"}, {"content", "sys"}},
+            QJsonObject{{"role", "user"}, {"content", "hi"}},
+            QJsonObject{{"role", "assistant"},
+                        {"content", "回答"},
+                        {"reasoning", "内部思考"}},
+            QJsonObject{{"role", "user"}, {"content", "再问"}}};
+        const QJsonObject body =
+            QJsonDocument::fromJson(buildChatRequestBody("m1", messages, {}, true))
+                .object();
+        const QJsonArray sent = body.value("messages").toArray();
+        QCOMPARE(sent.size(), 4);
+        // assistant 的 reasoning 字段被剥离，content 原样保留
+        QVERIFY(!sent.at(2).toObject().contains(QStringLiteral("reasoning")));
+        QCOMPARE(sent.at(2).toObject().value("content").toString(),
+                 QStringLiteral("回答"));
+        // user/system 消息不受影响
+        QCOMPARE(sent.at(1).toObject().value("content").toString(),
+                 QStringLiteral("hi"));
+        QCOMPARE(sent.at(3).toObject().value("content").toString(),
+                 QStringLiteral("再问"));
+        // 无 reasoning 的消息序列走同一路径零改动
+        const QJsonArray bare{QJsonObject{{"role", "user"}, {"content", "x"}}};
+        const QJsonArray sentBare =
+            QJsonDocument::fromJson(buildChatRequestBody("m1", bare, {}, true))
+                .object()
+                .value("messages")
+                .toArray();
+        QCOMPARE(sentBare.size(), 1);
+        QCOMPARE(sentBare.at(0).toObject().value("content").toString(),
+                 QStringLiteral("x"));
+    }
+
+    // ---- ChatSession：assistant reasoning 字段随会话持久化往返 ----
+    void chat_session_reasoning_roundtrip()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("chat/sessions.json");
+        {
+            ChatSession s(path);
+            s.append(QJsonObject{{"role", "user"}, {"content", "hi"}});
+            s.append(QJsonObject{{"role", "assistant"},
+                                 {"content", "答"},
+                                 {"reasoning", "推理链第一段"}});
+            s.save();
+        }
+        ChatSession s2(path);
+        s2.load();
+        QCOMPARE(s2.size(), 2);
+        const QJsonObject a = s2.messages().last().toObject();
+        QCOMPARE(a.value("role").toString(), QStringLiteral("assistant"));
+        QCOMPARE(a.value("reasoning").toString(), QStringLiteral("推理链第一段"));
+        QCOMPARE(a.value("content").toString(), QStringLiteral("答"));
+    }
+
+    // ---- ChatSession：截断（编辑重发）/删除消息域 API（配对组完整性） ----
+    void chat_session_truncate_and_remove()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        ChatSession s(dir.filePath("chat/sessions.json"));
+        s.append(QJsonObject{{"role", "user"}, {"content", "u1"}});
+        s.append(QJsonObject{{"role", "assistant"},
+                             {"content", "a1"},
+                             {"tool_calls", QJsonArray{QJsonObject{
+                                 {"id", "call_1"},
+                                 {"type", "function"},
+                                 {"function", QJsonObject{{"name", "echo"},
+                                                          {"arguments", "{}"}}}}}}});
+        s.appendToolResult("call_1", QJsonObject{{"ok", true}});
+        s.append(QJsonObject{{"role", "user"}, {"content", "u2"}});
+        s.append(QJsonObject{{"role", "assistant"}, {"content", "a2"}});
+        QCOMPARE(s.size(), 5);
+        // 编辑重发：inclusive 截断 u2（下标 3）→ 其后全部丢弃（含自身）
+        s.truncateFrom(3, true);
+        QCOMPARE(s.size(), 3); // u1 / a1(tc) / tool
+        // 删除 assistant(tool_calls)：连带其后配对 tool 回应整组删除（防孤儿序列）
+        QVERIFY(s.removeMessageAt(1));
+        QCOMPARE(s.size(), 1); // 只剩 u1
+        // 越界防御：不动数据
+        QVERIFY(!s.removeMessageAt(99));
+        QVERIFY(!s.removeMessageAt(-1));
+        s.truncateFrom(10, false);
+        QCOMPARE(s.size(), 1);
+        // 中段删除 user：序列保持合法（合法性过滤自愈兜底）
+        QTemporaryDir dir2;
+        QVERIFY(dir2.isValid());
+        ChatSession s2(dir2.filePath("chat/sessions.json"));
+        s2.append(QJsonObject{{"role", "user"}, {"content", "b1"}});
+        s2.append(QJsonObject{{"role", "assistant"}, {"content", "b2"}});
+        s2.append(QJsonObject{{"role", "user"}, {"content", "b3"}});
+        s2.append(QJsonObject{{"role", "assistant"}, {"content", "b4"}});
+        QVERIFY(s2.removeMessageAt(2)); // 删 b3
+        QCOMPARE(s2.size(), 3);
+        QCOMPARE(s2.messages().at(2).toObject().value("content").toString(),
+                 QStringLiteral("b4"));
+        // exclusive 截断（保留 index 本身）：重新生成语义"丢弃最后一条 user
+        // 之后全部"——模块按 truncateFrom(lastUser, false) 调用，保留 user，
+        // 丢弃其后 assistant
+        ChatSession s3(dir2.filePath("chat/other.json"));
+        s3.append(QJsonObject{{"role", "user"}, {"content", "q1"}});
+        s3.append(QJsonObject{{"role", "assistant"}, {"content", "r1"}});
+        s3.truncateFrom(0, false);
+        QCOMPARE(s3.size(), 1);
+        QCOMPARE(s3.messages().last().toObject().value("content").toString(),
+                 QStringLiteral("q1"));
+    }
+
+    // ---- ChatSession：多会话创建/切换/删除边界 + 摘要排序 ----
+    void chat_session_multi_session()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        ChatSession s(dir.filePath("chat/sessions.json"));
+        // 未 load 实例：恒有一个可用默认会话
+        const QString id0 = s.activeSessionId();
+        QVERIFY(!id0.isEmpty());
+        QCOMPARE(s.size(), 0);
+        s.append(QJsonObject{{"role", "user"}, {"content", "第一句"}});
+        QCOMPARE(s.size(), 1);
+        // 新建并切换
+        const QString id1 = s.createSession();
+        QVERIFY(!id1.isEmpty() && id1 != id0);
+        QCOMPARE(s.activeSessionId(), id1);
+        QCOMPARE(s.size(), 0); // 新会话为空
+        s.append(QJsonObject{{"role", "user"}, {"content", "第二会话内容"}});
+        // 切回 id0：消息互不串
+        QVERIFY(s.switchSession(id0));
+        QCOMPARE(s.size(), 1);
+        QCOMPARE(s.messages().at(0).toObject().value("content").toString(),
+                 QStringLiteral("第一句"));
+        // 不存在的 id：切换失败且当前不变
+        QVERIFY(!s.switchSession(QStringLiteral("不存在")));
+        QCOMPARE(s.activeSessionId(), id0);
+        // 删除非当前会话：当前保持
+        QVERIFY(s.deleteSession(id1));
+        QCOMPARE(s.activeSessionId(), id0);
+        QList<ChatSession::SessionSummary> sums = s.sessionSummaries();
+        QCOMPARE(sums.size(), 1);
+        QCOMPARE(sums.first().id, id0);
+        QCOMPARE(sums.first().messageCount, 1);
+        QCOMPARE(sums.first().title, QStringLiteral("第一句")); // 自动标题
+        // 连发新建（同毫秒 updatedAt）：摘要排序稳定不炸
+        const QString idA = s.createSession();
+        const QString idB = s.createSession();
+        QCOMPARE(s.sessionSummaries().size(), 3);
+        // 删除当前会话 → 自动切最近活跃的余下会话
+        QVERIFY(s.switchSession(id0));
+        s.append(QJsonObject{{"role", "user"}, {"content", "再活跃一下"}});
+        QVERIFY(s.deleteSession(id0));
+        QVERIFY(s.activeSessionId() != id0);
+        QVERIFY(s.activeSessionId() == idA || s.activeSessionId() == idB);
+        // 逐个删光 → 域内自动补一个空会话（恒有会话不变量）
+        QVERIFY(s.deleteSession(s.activeSessionId()));
+        QVERIFY(s.deleteSession(s.activeSessionId()));
+        QCOMPARE(s.sessionSummaries().size(), 1);
+        QVERIFY(!s.activeSessionId().isEmpty());
+        QCOMPARE(s.size(), 0);
+    }
+
+    // ---- ChatSession：自动标题生成（首条用户消息截 ~24 字，不花 API） ----
+    void chat_session_auto_title()
+    {
+        // 短句原样
+        QCOMPARE(ChatSession::autoSessionTitle(QStringLiteral("hello 世界")),
+                 QStringLiteral("hello 世界"));
+        // 换行/连续空白折叠
+        QCOMPARE(ChatSession::autoSessionTitle(QStringLiteral("第一行\n第二行")),
+                 QStringLiteral("第一行 第二行"));
+        QCOMPARE(ChatSession::autoSessionTitle(QStringLiteral("a \t b")),
+                 QStringLiteral("a b"));
+        // 30 字长句 → 截 24 字 + 省略号
+        const QString longText = QStringLiteral("一二三四五六七八九十一二三四五六"
+                                                "七八九十一二三四五六七八九十");
+        QCOMPARE(longText.size(), 30);
+        const QString title = ChatSession::autoSessionTitle(longText);
+        QCOMPARE(title.size(), 25); // 24 字 + "…"
+        QVERIFY(title.endsWith(QStringLiteral("…")));
+        QCOMPARE(title.left(24), longText.left(24));
+        // 24 字整（含省略号边界）：不截断不加点
+        QCOMPARE(ChatSession::autoSessionTitle(longText.left(24)), longText.left(24));
+        // 空文本 → 空标题（UI 侧回落"新对话"）
+        QVERIFY(ChatSession::autoSessionTitle(QString()).isEmpty());
+        // 追加路径：会话标题在首条用户消息到达时生成，此后不变
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        ChatSession s(dir.filePath("chat/sessions.json"));
+        s.append(QJsonObject{{"role", "assistant"}, {"content", "先答"}});
+        QVERIFY(s.sessionSummaries().first().title.isEmpty()); // 非用户消息不起题
+        s.append(QJsonObject{{"role", "user"}, {"content", "起标题的这句话"}});
+        QCOMPARE(s.sessionSummaries().first().title,
+                 QStringLiteral("起标题的这句话"));
+        s.append(QJsonObject{{"role", "user"}, {"content", "第二句不改标题"}});
+        QCOMPARE(s.sessionSummaries().first().title,
+                 QStringLiteral("起标题的这句话"));
+        // 清空会话复位标题：下一条用户消息重新起题
+        s.clear();
+        QVERIFY(s.sessionSummaries().first().title.isEmpty());
+        s.append(QJsonObject{{"role", "user"}, {"content", "重新起题"}});
+        QCOMPARE(s.sessionSummaries().first().title, QStringLiteral("重新起题"));
+    }
+
+    // ---- ChatSession::load：v1 旧格式无损迁移为单会话 + 未知版本走损坏路径 ----
+    void chat_session_legacy_migration()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("chat/sessions.json");
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        // v1 单会话文件 → 迁移为单会话（历史保留 + 标题自动生成）
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"version\":1,\"messages\":["
+                    "{\"role\":\"user\",\"content\":\"旧历史第一问\"},"
+                    "{\"role\":\"assistant\",\"content\":\"旧回答\"}]}");
+            f.close();
+        }
+        {
+            ChatSession s(path);
+            s.load();
+            QCOMPARE(s.size(), 2);
+            QCOMPARE(s.messages().at(0).toObject().value("content").toString(),
+                     QStringLiteral("旧历史第一问"));
+            QCOMPARE(s.messages().at(1).toObject().value("content").toString(),
+                     QStringLiteral("旧回答"));
+            QCOMPARE(s.sessionSummaries().first().title,
+                     QStringLiteral("旧历史第一问"));
+            // save 后升级为 v2 多会话格式
+            s.save();
+            QFile f2(path);
+            QVERIFY(f2.open(QIODevice::ReadOnly));
+            const QJsonObject root = QJsonDocument::fromJson(f2.readAll()).object();
+            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+            QCOMPARE(root.value(QStringLiteral("sessions")).toArray().size(), 1);
+        }
+        // 未知版本（99）→ 损坏路径：.bad 备份 + 空载，绝不静默迁移
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("{\"version\":99,\"sessions\":[]}");
+            f.close();
+        }
+        ChatSession s2(path);
+        s2.load();
+        QCOMPARE(s2.size(), 0);
+        QVERIFY(QFile::exists(path + QStringLiteral(".bad")));
     }
 };
 

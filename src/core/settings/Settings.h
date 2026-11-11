@@ -154,9 +154,11 @@ public:
     // 人格附言（用户追加到 Goody 系统提示词末尾）
     QString assistantPersonaAppendix() const;
     void setAssistantPersonaAppendix(const QString &text);
-    // 聊天窗口几何（base64 序列化；空 = 未记忆）
-    QByteArray assistantGeometry() const;
-    void setAssistantGeometry(const QByteArray &state);
+    // 聊天窗口几何（base64 序列化；空 = 未记忆，首开居中弹出）。
+    // T-050-P2 新键：窗口升级为居中卡片聊天窗，几何与旧键（assistant/
+    // geometry，440×600 竖版）解耦，避免旧尺寸撑爆新布局
+    QByteArray assistantWindowGeometry() const;
+    void setAssistantWindowGeometry(const QByteArray &state);
     // 桌面悬浮球（T-050 阶段一）：显示开关与记忆位置。位置为 "x,y" 字符串
     //（空 = 未记忆，取默认屏幕右上角；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）
     bool assistantBallEnabled() const;

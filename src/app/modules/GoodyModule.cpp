@@ -113,6 +113,11 @@ void GoodyModule::init(AppServices &services)
         if (m_window)
             m_window->appendAssistantDelta(delta);
     });
+    // T-050-P2：思考增量 → 思考折叠区（流式，默认折叠，标题行报字数）
+    connect(m_client, &LlmClient::reasoningDelta, this, [this](const QString &delta) {
+        if (m_window)
+            m_window->appendReasoningDelta(delta);
+    });
     connect(m_client, &LlmClient::finished, this, &GoodyModule::onTurnFinished);
 
     connect(&services, &AppServices::settingsChanged, this, &GoodyModule::onSettingsChanged);
@@ -317,7 +322,7 @@ void GoodyModule::ensureWindow()
     if (m_window)
         return;
     m_window = new GoodyWindow(); // 无父窗口：随 QApplication 退出清理
-    m_window->restoreGeometry(Settings::instance().assistantGeometry());
+    m_window->setSession(m_session); // T-050-P2：会话域对象注入（侧栏/历史/四件套）
     connect(m_window, &GoodyWindow::sendRequested, this, &GoodyModule::sendMessage);
     connect(m_window, &GoodyWindow::stopRequested, this, [this] { m_client->abort(); });
     connect(m_window, &GoodyWindow::sessionCleared, this, [this] {
@@ -353,10 +358,89 @@ void GoodyModule::ensureWindow()
         m_session->save();
         updateWorkingState(); // T-050：清空收束（abort+工具期放弃）后同步工作态
     });
-    // 关窗记忆几何（hideEvent 通知，见 GoodyWindow）；T-050：聊天窗隐没
-    // 时悬浮球回归（隐没/回归以开关设置为准）
+
+    // ---- T-050-P2：会话侧栏与消息四件套（域操作统一在模块侧守卫执行，
+    //      busy/工具期一律拒绝——中途切会话等价 C-N2 迟到回包场景） ----
+    connect(m_window, &GoodyWindow::sessionSwitchRequested, this, [this](const QString &id) {
+        if (turnLocked())
+            return;
+        m_session->switchSession(id); // changed 信号驱动窗口重建气泡列表
+        m_session->saveSoon();
+    });
+    connect(m_window, &GoodyWindow::sessionCreateRequested, this, [this] {
+        if (turnLocked())
+            return;
+        m_session->createSession();
+        m_session->saveSoon();
+    });
+    connect(m_window, &GoodyWindow::sessionDeleteRequested, this, [this](const QString &id) {
+        if (turnLocked())
+            return;
+        m_session->deleteSession(id); // 删当前 → 域内自动切最近会话或空会话
+        m_session->saveSoon();
+    });
+    // 编辑重发（AI 代决语义）：从该消息截断其后全部（含自身），输入框
+    // 预填原文本，用户可改后重发
+    connect(m_window, &GoodyWindow::editResendRequested, this, [this](int sessionIndex) {
+        if (turnLocked())
+            return;
+        const QJsonArray msgs = m_session->messages();
+        if (sessionIndex < 0 || sessionIndex >= msgs.size())
+            return;
+        const QString text =
+            msgs.at(sessionIndex).toObject().value(QStringLiteral("content")).toString();
+        m_session->truncateFrom(sessionIndex, true);
+        m_session->saveSoon();
+        if (m_window) {
+            m_window->reloadFromSession();
+            m_window->setDraftInput(text);
+        }
+    });
+    // 删除单条消息（assistant 连带其 reasoning——reasoning 内嵌随消息删除；
+    // 域 API 自带 tool 配对组整删）
+    connect(m_window, &GoodyWindow::messageDeleteRequested, this, [this](int sessionIndex) {
+        if (turnLocked())
+            return;
+        if (!m_session->removeMessageAt(sessionIndex))
+            return;
+        m_session->saveSoon();
+        if (m_window)
+            m_window->reloadFromSession();
+    });
+    // 重新生成（AI 代决语义）：丢弃最后一条 user 之后全部（完整工具链一并
+    // 回退，防孤儿序列）+ 以最后一条 user 重发（主流产品"从该消息分支重问"）
+    connect(m_window, &GoodyWindow::regenerateRequested, this, [this] {
+        if (turnLocked())
+            return;
+        const QJsonArray msgs = m_session->messages();
+        int lastUser = -1;
+        for (int i = msgs.size() - 1; i >= 0; --i) {
+            if (msgs.at(i).toObject().value(QStringLiteral("role")).toString()
+                == QLatin1String("user")) {
+                lastUser = i;
+                break;
+            }
+        }
+        if (lastUser < 0) {
+            if (m_window)
+                m_window->showErrorLine(QStringLiteral("没有可重新生成的对话内容"));
+            return;
+        }
+        m_session->truncateFrom(lastUser, false); // exclusive：保留该条 user，其后全弃
+        m_session->saveSoon();
+        // T-050-FIX2：重新生成是同一用户消息的新回合——工具轮次计数必须
+        // 复位（sendMessage :573 是唯一复位点，本路径原先漏复位），否则
+        // 新回合从 N 起步，反复重生成会提前触发 8 轮上限并把半截
+        // tool_calls 塞进会话
+        m_toolRounds = 0;
+        if (m_window)
+            m_window->reloadFromSession();
+        runTurn(); // 既有回合循环（epoch 快照/呼吸灯/流式气泡照旧）
+    });
+
+    // 关窗：几何由窗口自管（assistant/windowGeometry，hideEvent 落盘）；
+    // T-050：聊天窗隐没时悬浮球回归（隐没/回归以开关设置为准）
     connect(m_window, &GoodyWindow::windowHidden, this, [this] {
-        Settings::instance().setAssistantGeometry(m_window->saveGeometry());
         if (m_ball && Settings::instance().assistantBallEnabled())
             m_ball->show();
     });
@@ -498,6 +582,20 @@ void GoodyModule::sendMessage(const QString &text)
     runTurn();
 }
 
+// T-050-P2：会话切换/新建/删除与消息四件套共用的回合锁守卫（busy =
+// LLM 请求在途，工具期 = tool_calls 回填/确认等待）。中途执行这些域
+// 操作会让在途回包写错会话（等价 C-N2 迟到回包场景），一律拒绝并给
+// 用户可见反馈
+bool GoodyModule::turnLocked() const
+{
+    if (m_client->busy() || m_toolPhase) {
+        if (m_window)
+            m_window->showErrorLine(QStringLiteral("回复进行中，请等当前回合结束后再操作"));
+        return true;
+    }
+    return false;
+}
+
 void GoodyModule::runTurn()
 {
     m_activeTurnEpoch = m_toolEpoch; // 回合代数快照：清空后迟到回包按失配丢弃
@@ -524,17 +622,11 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         if (m_window) {
             m_window->setBusy(false);
             m_window->finishAssistantBubble(
-                assistantMessage.value(QStringLiteral("content")).toString());
+                assistantMessage.value(QStringLiteral("content")).toString(),
+                assistantMessage.value(QStringLiteral("reasoning")).toString());
         }
         updateWorkingState(); // T-050：迟到回包收束（busy 已复位）
         return;
-    }
-
-    if (m_window) {
-        m_window->setBusy(false);
-        m_window->finishAssistantBubble(assistantMessage.value(QStringLiteral("content")).toString());
-        if (!ok && error != QStringLiteral("已中止"))
-            m_window->showErrorLine(QStringLiteral("请求失败：%1").arg(error));
     }
 
     // 会话一致性护栏（P0：孤儿 tool_calls 会让之后每轮请求被 API 整包
@@ -547,8 +639,20 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
     // 本地中止标记（LlmClient 插入，无任何消费方）不随会话回传：网关对
     // message 内非标准字段的容忍度无文档承诺，剥除后请求体只含标准字段
     msg.remove(QStringLiteral("aborted"));
+    // T-050-P2：reasoning 字段保留在会话消息里（随消息持久化，供窗口
+    // 展示），发送请求体时由 buildChatRequestBody 统一剥离
     m_session->append(msg);
     m_session->saveSoon();
+
+    if (m_window) {
+        m_window->setBusy(false);
+        // 先入会话再定稿：定稿后的"重新生成"判定需要会话里已有本条回复
+        m_window->finishAssistantBubble(
+            msg.value(QStringLiteral("content")).toString(),
+            msg.value(QStringLiteral("reasoning")).toString());
+        if (!ok && error != QStringLiteral("已中止"))
+            m_window->showErrorLine(QStringLiteral("请求失败：%1").arg(error));
+    }
 
     if (!ok) {
         m_toolPhase = false; // 中止收束工具执行期守卫

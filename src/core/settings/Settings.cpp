@@ -551,14 +551,17 @@ void Settings::setAssistantPersonaAppendix(const QString &text)
     syncChecked();
 }
 
-QByteArray Settings::assistantGeometry() const
+// T-050-P2：聊天窗几何新键 assistant/windowGeometry（居中卡片聊天窗；
+// 空 = 未记忆，首开居中弹出）。旧键 assistant/geometry 不再读写（残留
+// 于用户 ini 无害）
+QByteArray Settings::assistantWindowGeometry() const
 {
-    return m_s.value("assistant/geometry").toByteArray();
+    return m_s.value("assistant/windowGeometry").toByteArray();
 }
 
-void Settings::setAssistantGeometry(const QByteArray &state)
+void Settings::setAssistantWindowGeometry(const QByteArray &state)
 {
-    m_s.setValue("assistant/geometry", state);
+    m_s.setValue("assistant/windowGeometry", state);
     syncChecked();
 }
 

@@ -154,9 +154,17 @@ target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.
 # ---- Goody 管家聊天窗（无边框工具窗；会话/工具在 core/assistant） ----
 # T-050：桌面悬浮球（GoodyFloatingBall + GoodyBallLogic 纯逻辑）同库，
 # 需 poptools_ui_shared（desktopstack 贴底 Z 序协调）
+# T-050-P2：聊天窗重构——气泡组件（MessageBubble）+ 流式渲染纯逻辑
+#（MarkdownRenderer，可单测）+ 代码块语法高亮（GoodyCodeHighlighter）
 add_library(poptools_ui_goody STATIC
     goody/GoodyWindow.cpp
     goody/GoodyWindow.h
+    goody/MessageBubble.cpp
+    goody/MessageBubble.h
+    goody/MarkdownRenderer.cpp
+    goody/MarkdownRenderer.h
+    goody/CodeHighlighter.cpp
+    goody/CodeHighlighter.h
     goody/GoodyFloatingBall.cpp
     goody/GoodyFloatingBall.h
     goody/GoodyBallLogic.h
