@@ -129,6 +129,7 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
         s.setAssistantPermMode(m_gdyPermCombo->currentData().toString());
         s.setAssistantSummaryTime(m_gdyTimeEdit->text().trimmed());
         s.setAssistantAutoSummarize(m_gdyAutoCheck->isChecked());
+        s.setAssistantBallEnabled(m_gdyBallCheck->isChecked()); // T-050
         s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
     });
 
@@ -656,6 +657,16 @@ QWidget *SettingsDialog::buildGoodyPage()
     m_gdyAutoCheck->setChecked(Settings::instance().assistantAutoSummarize());
     permForm->addRow(QString(), m_gdyAutoCheck);
     lay->addLayout(permForm);
+
+    addSeparator();
+
+    // ---- 桌面悬浮球（T-050） ----
+    addSection(QStringLiteral("桌面悬浮球"));
+    m_gdyBallCheck = new QCheckBox(
+        QStringLiteral("在桌面显示 Goody 悬浮球（单击打开对话，可拖动并记忆位置；"
+                       "Goody 工作时呼吸光效提示）"), page);
+    m_gdyBallCheck->setChecked(Settings::instance().assistantBallEnabled());
+    lay->addWidget(m_gdyBallCheck);
 
     addSeparator();
 

@@ -208,7 +208,10 @@ bool BandMouseRouter::swallowFilter(int nativeMsg, const QPoint &nativePos,
     // 键盘移动循环）已在上面的放行前置中覆盖
     if (msg == RouteMsg::Move && m_state.capturedLeftBand < 0) {
         bool buttonHeld = false;
-        for (const int vk : { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON }) {
+        // T-050-FIX：X 键（VK_XBUTTON1/2）按住的拖拽同样放行——否则
+        // X 键拖拽横穿带矩形仍被 hover 吞噬冻结（同 P1-2 机理）
+        for (const int vk : { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON,
+                              VK_XBUTTON1, VK_XBUTTON2 }) {
             if (GetAsyncKeyState(vk) < 0) {
                 buttonHeld = true;
                 break;

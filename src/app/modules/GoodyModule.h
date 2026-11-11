@@ -14,6 +14,7 @@ namespace poptools {
 class ActivityStore;
 class ChatSession;
 class DailyRecordJob;
+class GoodyFloatingBall;
 class GoodyWindow;
 class LlmClient;
 class McpStdioClient;
@@ -47,13 +48,21 @@ public:
 private slots:
     void onSettingsChanged();
 
+signals:
+    // T-050：Goody 工作态广播（LLM 请求在途 || 工具执行期）——悬浮球
+    // 接此信号驱动呼吸光效；非工作态球侧零动画零定时器
+    void workingChanged(bool working);
+
 private:
     void ensureWindow();
+    void ensureBall();           // T-050：悬浮球懒建（开关开且未建时）
+    void applyBallSettings();    // T-050：球开关/位置重应用（init 与设置变更共用）
     void openChat();
     void registerBuiltinTools();
     void setupMcp();              // mcp.json 配置装载 + 工具桥接（P6；不 start，R6-C2）
     void ensureMcpStarted();      // MCP 子进程懒启动（首次打开聊天窗，幂等；R6-C2）
     void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
+    void updateWorkingState();   // T-050：busy||toolPhase → workingChanged 去重广播
     void sendMessage(const QString &text);
     void runTurn();
     void onTurnFinished(bool ok, const QJsonObject &assistantMessage, const QString &error);
@@ -74,6 +83,8 @@ private:
     LlmClient *m_client = nullptr;
     ChatSession *m_session = nullptr;
     GoodyWindow *m_window = nullptr;
+    GoodyFloatingBall *m_ball = nullptr; // T-050：桌面悬浮球（无父窗口，随 QApplication 清理）
+    bool m_working = false;              // T-050：工作态缓存（去重广播用）
     DailyRecordJob *m_recordJob = nullptr; // 本日工作记录任务（P4）
     Scheduler *m_scheduler = nullptr;      // 每日到点调度（P4）
     MemoryStore *m_memory = nullptr;       // 长期记忆（P5）

@@ -562,4 +562,36 @@ void Settings::setAssistantGeometry(const QByteArray &state)
     syncChecked();
 }
 
+// T-050：桌面悬浮球开关（默认开）与记忆位置（"x,y"；空 = 未记忆，
+// 取屏幕右上角默认位；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）
+bool Settings::assistantBallEnabled() const
+{
+    return m_s.value("assistant/ballEnabled", true).toBool();
+}
+
+void Settings::setAssistantBallEnabled(bool on)
+{
+    m_s.setValue("assistant/ballEnabled", on);
+    syncChecked();
+}
+
+QString Settings::assistantBallPos() const
+{
+    // 兼容两种磁盘形态：应用写入的 QString("x,y")（IniFormat 落盘带引号）
+    // 与手改 ini 未加引号的 "x,y"——后者会被 IniFormat 按逗号裂成
+    // QStringList，直接 toString() 得空串（实测踩坑），此处合回 "x,y"
+    const QVariant v = m_s.value("assistant/ballPos", QString());
+    if (v.metaType().id() == QMetaType::QStringList) {
+        const QStringList parts = v.toStringList();
+        return parts.size() == 2 ? parts.join(QLatin1Char(',')) : QString();
+    }
+    return v.toString();
+}
+
+void Settings::setAssistantBallPos(const QString &xy)
+{
+    m_s.setValue("assistant/ballPos", xy);
+    syncChecked();
+}
+
 } // namespace poptools

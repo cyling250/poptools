@@ -27,6 +27,8 @@
 #include "core/hotkey/GlobalHotKey.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
+#include "ui/goody/GoodyBallLogic.h"
+#include "ui/goody/GoodyFloatingBall.h"
 #include "ui/goody/GoodyWindow.h"
 
 namespace poptools {
@@ -103,6 +105,9 @@ void GoodyModule::init(AppServices &services)
         QStringLiteral("Goody 管家 (%1)%2").arg(hotKeyDisplayName(hkVk, hkMods), hkFailNote),
         [this] { openChat(); });
 
+    // T-050：桌面悬浮球（开关默认开；关=销毁，设置页即时重应用）
+    applyBallSettings();
+
     // 聊天数据流
     connect(m_client, &LlmClient::contentDelta, this, [this](const QString &delta) {
         if (m_window)
@@ -132,6 +137,8 @@ void GoodyModule::onSettingsChanged()
     }
     // 总结调度接线：总结时刻/自动开关改动即时生效（原实现须重启）
     applySummarySchedule();
+    // T-050：悬浮球开关/位置改动即时重应用（开=建+显示，关=销毁）
+    applyBallSettings();
 }
 
 // 总结调度接线（init 与设置变更共用）：按当前设置注册/启停每日任务
@@ -344,12 +351,65 @@ void GoodyModule::ensureWindow()
             m_client->abort();
         m_session->clear();
         m_session->save();
+        updateWorkingState(); // T-050：清空收束（abort+工具期放弃）后同步工作态
     });
-    // 关窗记忆几何（hideEvent 通知，见 GoodyWindow）
+    // 关窗记忆几何（hideEvent 通知，见 GoodyWindow）；T-050：聊天窗隐没
+    // 时悬浮球回归（隐没/回归以开关设置为准）
     connect(m_window, &GoodyWindow::windowHidden, this, [this] {
         Settings::instance().setAssistantGeometry(m_window->saveGeometry());
+        if (m_ball && Settings::instance().assistantBallEnabled())
+            m_ball->show();
     });
     connect(m_window, &QObject::destroyed, this, [this] { m_window = nullptr; });
+}
+
+// ---- T-050：桌面悬浮球 ----
+
+// 懒建（幂等）：接线单击开窗、拖动位置持久化、工作呼吸光效与隐没同步
+void GoodyModule::ensureBall()
+{
+    if (m_ball)
+        return;
+    m_ball = new GoodyFloatingBall(); // 无父窗口：随 QApplication 退出清理
+    m_ball->applySavedPosition();
+    connect(m_ball, &GoodyFloatingBall::clicked, this, [this] { openChat(); });
+    connect(m_ball, &GoodyFloatingBall::positionChanged, this,
+            [](const QPoint &pos) {
+                Settings::instance().setAssistantBallPos(
+                    goodyball::ballPosToString(pos));
+            });
+    connect(this, &GoodyModule::workingChanged, m_ball, &GoodyFloatingBall::setWorking);
+    // 球建时若已在工作态（设置页销毁重建场景），立即同步呼吸光效
+    m_ball->setWorking(m_working);
+    connect(m_ball, &QObject::destroyed, this, [this] { m_ball = nullptr; });
+}
+
+// 开关重应用（init 与 settingsChanged 共用）：开=建+显示（聊天窗可见时
+// 保持隐没）；关=销毁球。位置在球内 applySavedPosition 重钳制（换屏/改 ini 生效）
+void GoodyModule::applyBallSettings()
+{
+    if (Settings::instance().assistantBallEnabled()) {
+        ensureBall();
+        m_ball->applySavedPosition();
+        if (!m_window || !m_window->isVisible())
+            m_ball->show();
+        else
+            m_ball->hide(); // 聊天窗开着：保持隐没
+    } else if (m_ball) {
+        m_ball->deleteLater(); // 关闭=销毁
+        m_ball = nullptr;
+    }
+}
+
+// 工作态去重广播：busy（LLM 请求在途）|| 工具执行期（tool_calls 回填/
+// 权限确认等待）。调用点铺在回合状态机的各收束处，信号只在沿上变化
+void GoodyModule::updateWorkingState()
+{
+    const bool working = (m_client && m_client->busy()) || m_toolPhase;
+    if (working == m_working)
+        return;
+    m_working = working;
+    emit workingChanged(working);
 }
 
 void GoodyModule::openChat()
@@ -364,6 +424,9 @@ void GoodyModule::openChat()
     m_window->show();
     m_window->raise();
     m_window->activateWindow();
+    // T-050：聊天时悬浮球隐没（球是唯一自动唤起点；关窗时经 windowHidden 回归）
+    if (m_ball)
+        m_ball->hide();
 }
 
 QString GoodyModule::buildSystemPrompt() const
@@ -447,6 +510,7 @@ void GoodyModule::runTurn()
                                    m_registry->toolSchemasForApi());
     if (!ok)
         m_window->setBusy(false); // busy 状态下不会发生，防御性复位
+    updateWorkingState(); // T-050：请求在途 → 呼吸光效起
 }
 
 void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
@@ -462,6 +526,7 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
             m_window->finishAssistantBubble(
                 assistantMessage.value(QStringLiteral("content")).toString());
         }
+        updateWorkingState(); // T-050：迟到回包收束（busy 已复位）
         return;
     }
 
@@ -489,6 +554,7 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         m_toolPhase = false; // 中止收束工具执行期守卫
         if (m_window)
             m_window->setToolPhase(false);
+        updateWorkingState(); // T-050：失败/中止收束
         return; // 失败/中止不再走工具链
     }
 
@@ -497,6 +563,7 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         m_toolPhase = false; // 普通回答，回合结束
         if (m_window)
             m_window->setToolPhase(false);
+        updateWorkingState(); // T-050：回合结束
         return;
     }
 
@@ -516,12 +583,14 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
             m_window->showErrorLine(QStringLiteral("工具调用轮次过多（>%1），已停止。")
                                         .arg(kMaxToolRounds));
         }
+        updateWorkingState(); // T-050：轮次超限收束
         return;
     }
     m_toolPhase = true; // 进入工具执行期（sendMessage 守卫到结果回填完毕）
     if (m_window)
         m_window->setToolPhase(true); // 工具期禁用「清空」（防孤儿 tool 序列）
     m_pendingToolCalls = toolCalls;
+    updateWorkingState(); // T-050：工具执行期 → 呼吸光效保持
     processNextToolCall();
 }
 
@@ -606,6 +675,7 @@ void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &res
             m_window->setToolPhase(false);
     }
     processNextToolCall();
+    updateWorkingState(); // T-050：链条同步走完（下一轮 runTurn 或收束）后再广播
 }
 
 } // namespace poptools

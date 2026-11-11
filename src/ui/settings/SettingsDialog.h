@@ -102,6 +102,7 @@ private:
     QComboBox *m_gdyPermCombo = nullptr;
     QLineEdit *m_gdyTimeEdit = nullptr;
     QCheckBox *m_gdyAutoCheck = nullptr;
+    QCheckBox *m_gdyBallCheck = nullptr; // T-050：桌面悬浮球开关
     QPlainTextEdit *m_gdyAppendix = nullptr;
 };
 

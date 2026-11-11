@@ -157,6 +157,12 @@ public:
     // 聊天窗口几何（base64 序列化；空 = 未记忆）
     QByteArray assistantGeometry() const;
     void setAssistantGeometry(const QByteArray &state);
+    // 桌面悬浮球（T-050 阶段一）：显示开关与记忆位置。位置为 "x,y" 字符串
+    //（空 = 未记忆，取默认屏幕右上角；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）
+    bool assistantBallEnabled() const;
+    void setAssistantBallEnabled(bool on);
+    QString assistantBallPos() const;
+    void setAssistantBallPos(const QString &xy);
 
 private:
     Settings();

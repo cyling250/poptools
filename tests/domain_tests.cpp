@@ -52,8 +52,10 @@
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
 #include "ui/desktopband/DesktopBandLogic.h"
+#include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyWindow.h"
 
+#include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -1978,6 +1980,159 @@ private slots:
         QVERIFY(!clearBtn->isEnabled());
         win.setToolPhase(false);
         QVERIFY(clearBtn->isEnabled());
+    }
+
+    // ---- Settings：悬浮球键默认值/往返 + 手改 ini 未引号列表容错（T-050） ----
+    void settings_ball_keys_and_unquoted_tolerance()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("settings_ball.ini");
+        {
+            Settings s(ini);
+            QVERIFY(s.assistantBallEnabled()); // 默认开
+            QVERIFY(s.assistantBallPos().isEmpty()); // 默认无记忆位
+            s.setAssistantBallEnabled(false);
+            s.setAssistantBallPos(goodyball::ballPosToString(QPoint(123, -456)));
+        }
+        {
+            Settings s(ini);
+            QVERIFY(!s.assistantBallEnabled());
+            QCOMPARE(goodyball::ballPosFromString(s.assistantBallPos()),
+                     QPoint(123, -456));
+        }
+        // 手改 ini 未加引号："ballPos=123,-456"（无引号）会被 IniFormat 按
+        // 逗号裂成 QStringList，直接 toString() 得空串（实测踩坑 P-0xx）——
+        // 读取端须把双元素列表合回 "x,y" 字符串
+        {
+            QFile f(ini);
+            QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+            QByteArray content = f.readAll();
+            f.close();
+            content.replace("ballPos=\"123,-456\"", "ballPos=123,-456");
+            QVERIFY(content.contains("ballPos=123,-456")); // 替换确实命中引号形态
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate));
+            f.write(content);
+            f.close();
+        }
+        Settings s(ini);
+        QCOMPARE(goodyball::ballPosFromString(s.assistantBallPos()), QPoint(123, -456));
+        // 非双元素的手改坏列表 → 仍回落空串（不崩不误用）
+        {
+            QFile f(ini);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate));
+            f.write("[assistant]\nballPos=1,2,3\n");
+            f.close();
+        }
+        Settings s3(ini);
+        QVERIFY(s3.assistantBallPos().isEmpty());
+    }
+
+    // ---- GoodyBallLogic：点击/拖动判别状态机（T-050，注入位移） ----
+    void goody_ball_gesture_click_vs_drag()
+    {
+        using goodyball::Gesture;
+        using goodyball::GestureClassifier;
+
+        // 按下未动 → 单击
+        GestureClassifier g;
+        g.beginPress(QPoint(100, 100));
+        QVERIFY(!g.dragging());
+        QCOMPARE(g.endRelease(), Gesture::Click);
+
+        // 未按松开 / 重复松开 → None（无按下语义）
+        QCOMPARE(g.endRelease(), Gesture::None);
+        g.addMove(QPoint(200, 200)); // 空闲态移动安全无操作
+        QCOMPARE(g.endRelease(), Gesture::None);
+
+        // 微动（≤6px 曼哈顿距离）仍判单击
+        g.beginPress(QPoint(0, 0));
+        g.addMove(QPoint(2, 3)); // 5 ≤ 6
+        g.addMove(QPoint(1, 2)); // 相对按下点 3 ≤ 6
+        QVERIFY(!g.dragging());
+        QCOMPARE(g.endRelease(), Gesture::Click);
+
+        // 阈值边界：恰好 6px 单击，7px 拖动
+        g.beginPress(QPoint(0, 0));
+        g.addMove(QPoint(6, 0));
+        QCOMPARE(g.endRelease(), Gesture::Click);
+        g.beginPress(QPoint(0, 0));
+        g.addMove(QPoint(7, 0));
+        QVERIFY(g.dragging());
+        QCOMPARE(g.endRelease(), Gesture::Drag);
+
+        // 拖动跟手：totalDelta 随注入移动推进
+        g.beginPress(QPoint(0, 0));
+        g.addMove(QPoint(4, 4)); // 8 > 6：闩锁
+        g.addMove(QPoint(20, 15));
+        QCOMPARE(g.totalDelta(), QPoint(20, 15));
+        QCOMPARE(g.endRelease(), Gesture::Drag);
+
+        // 闩锁语义：拖动后回落到按下点附近仍判拖动（不因终点≈起点改判单击）
+        g.beginPress(QPoint(50, 50));
+        g.addMove(QPoint(60, 50));
+        QVERIFY(g.dragging());
+        g.addMove(QPoint(50, 50));
+        QVERIFY(g.dragging());
+        QCOMPARE(g.endRelease(), Gesture::Drag);
+    }
+
+    // ---- GoodyBallLogic：位置钳制（注入屏幕矩形，T-050） ----
+    void goody_ball_pos_clamp()
+    {
+        const QSize sz(52, 52);
+        const QList<QRect> screens{QRect(0, 0, 1920, 1040), QRect(1920, 0, 1920, 1080)};
+
+        // 屏内原样保留
+        QCOMPARE(goodyball::clampBallPos(QPoint(100, 100), sz, screens), QPoint(100, 100));
+        // 第二屏归属（球中心在 1920..3840）且未越界 → 原样
+        QCOMPARE(goodyball::clampBallPos(QPoint(2000, 500), sz, screens), QPoint(2000, 500));
+        // 第二屏右越界 → 钳回第二屏右缘内（不跳回第一屏）
+        QCOMPARE(goodyball::clampBallPos(QPoint(3800, 500), sz, screens),
+                 QPoint(1920 + 1920 - 52, 500));
+        // 下越界 → 钳回第一屏底缘内
+        QCOMPARE(goodyball::clampBallPos(QPoint(100, 2000), sz, screens),
+                 QPoint(100, 1040 - 52));
+        // 上/左负越界 → 钳回 ≥ 屏左上
+        QCOMPARE(goodyball::clampBallPos(QPoint(-30, -8), sz, screens), QPoint(0, 0));
+        // 完全离屏 → 最近屏钳制
+        QCOMPARE(goodyball::clampBallPos(QPoint(-500, -500), sz, screens), QPoint(0, 0));
+        // 负坐标屏（显示器在主屏左侧）同样成立
+        const QList<QRect> leftScreens{QRect(-1920, 0, 1920, 1040)};
+        QCOMPARE(goodyball::clampBallPos(QPoint(-1900, 100), sz, leftScreens),
+                 QPoint(-1900, 100));
+        // 屏表为空（异常环境）原样返回
+        QCOMPARE(goodyball::clampBallPos(QPoint(9, 9), sz, {}), QPoint(9, 9));
+
+        // 默认位：可用区右上角内缩 12px，整球落在可用区内（不遮任务栏）
+        const QRect avail(0, 0, 1920, 1040);
+        const QPoint def = goodyball::defaultBallPos(avail, sz);
+        QCOMPARE(def, QPoint(1920 - 52 - 12, 12));
+        QVERIFY(avail.contains(QRect(def, sz)));
+    }
+
+    // ---- GoodyBallLogic：assistant/ballPos "x,y" 字符串往返（T-050） ----
+    void goody_ball_pos_string_roundtrip()
+    {
+        bool ok = false;
+        // 正/负坐标往返无损
+        const QPoint p1(123, -456);
+        QCOMPARE(goodyball::ballPosFromString(goodyball::ballPosToString(p1), &ok), p1);
+        QVERIFY(ok);
+        // 周边空格容忍（手改 ini 常见）
+        const QPoint p2 = goodyball::ballPosFromString(QStringLiteral(" 10 , 20 "), &ok);
+        QVERIFY(ok);
+        QCOMPARE(p2, QPoint(10, 20));
+        // 坏值：空串/缺字段/非数字/多余字段 → isNull + ok=false（调用方回落默认位）
+        ok = true;
+        QVERIFY(goodyball::ballPosFromString(QString(), &ok).isNull());
+        QVERIFY(!ok);
+        QVERIFY(goodyball::ballPosFromString(QStringLiteral("12"), &ok).isNull());
+        QVERIFY(!ok);
+        QVERIFY(goodyball::ballPosFromString(QStringLiteral("a,b"), &ok).isNull());
+        QVERIFY(!ok);
+        QVERIFY(goodyball::ballPosFromString(QStringLiteral("1,2,3"), &ok).isNull());
+        QVERIFY(!ok);
     }
 
     // ============================================================

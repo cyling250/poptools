@@ -152,12 +152,18 @@ target_link_libraries(poptools_ui_box PUBLIC
 target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # ---- Goody 管家聊天窗（无边框工具窗；会话/工具在 core/assistant） ----
+# T-050：桌面悬浮球（GoodyFloatingBall + GoodyBallLogic 纯逻辑）同库，
+# 需 poptools_ui_shared（desktopstack 贴底 Z 序协调）
 add_library(poptools_ui_goody STATIC
     goody/GoodyWindow.cpp
     goody/GoodyWindow.h
+    goody/GoodyFloatingBall.cpp
+    goody/GoodyFloatingBall.h
+    goody/GoodyBallLogic.h
 )
 target_link_libraries(poptools_ui_goody PUBLIC
     poptools_core
+    poptools_ui_shared
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
