@@ -28,6 +28,19 @@ bool GlobalHotKey::registerKey(quint32 vk, int id, quint32 modifiers)
     if (m_keys.contains(id) && m_keys[id].registered)
         return false; // 已注册
 #ifdef Q_OS_WIN
+    // R5-D2：先查本进程内 vk+mod 重复——Windows 对同组合全局去重（含本
+    // 进程），ini 把两个模块配成相同组合时第二次注册必败且 GetLastError
+    // 报 ERROR_HOTKEY_ALREADY_REGISTERED，原文案"已被其他程序占用"把
+    // 用户排查方向引向外部程序
+    for (auto it = m_keys.cbegin(); it != m_keys.cend(); ++it) {
+        if (it.key() == id || !it->registered)
+            continue;
+        if (it->vk == vk && it->modifiers == modifiers) {
+            m_lastError = QStringLiteral("与 PopTools 内其他快捷键冲突");
+            m_keys[id] = {vk, modifiers, false};
+            return false;
+        }
+    }
     const bool ok = RegisterHotKey(nullptr, id, modifiers, vk) != 0;
     if (ok)
         m_lastError.clear();

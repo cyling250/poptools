@@ -30,9 +30,10 @@ void CalendarModule::init(AppServices &services)
 
     // 迷你条的数据刷新：数据变化 + 每分钟（跨天自动换内容）
     connect(m_store, &CalendarStore::changed, this, &CalendarModule::refreshMini);
+    m_lastDay = QDate::currentDate();
     auto *minuteTimer = new QTimer(this);
     minuteTimer->setInterval(60 * 1000);
-    connect(minuteTimer, &QTimer::timeout, this, &CalendarModule::refreshMini);
+    connect(minuteTimer, &QTimer::timeout, this, &CalendarModule::onMinuteTick);
     minuteTimer->start();
 
     // 设置开启时随应用启动显示（窗口在事件循环就绪后创建，桌面 Explorer 已就绪）
@@ -137,6 +138,26 @@ void CalendarModule::refreshMini()
 {
     if (m_mini && m_mini->isVisible())
         m_mini->refresh();
+}
+
+void CalendarModule::onMinuteTick()
+{
+    refreshMini(); // 迷你条：既有模式（内部 isVisible 门卫，不可见零开销）
+
+    // 主窗口跨午夜刷新（R5-B5）：MonthView 的"今天"圈选在 paint 时取
+    // QDate::currentDate()，但没有跨日重绘触发——常驻贴底过夜后圈选与
+    // 右栏"日程 · 今天 X 项"停留在昨天，直到用户交互才更新。
+    // 仅在日期真正变化时触发一次 storeChanged 全量轻刷新（refreshLists/
+    // refreshDots/refreshTitle；refreshDots 经 setEventDots 触发 MonthView
+    // 整格重绘，"今天"圈选按当前日期重算），平时零开销、不干扰交互。
+    // 窗口隐藏时不跳过：每天至多一次，成本可忽略，且覆盖"隐藏状态跨天
+    // 后再显示"的标签滞后
+    const QDate today = QDate::currentDate();
+    if (today == m_lastDay)
+        return;
+    m_lastDay = today;
+    if (m_window)
+        m_window->storeChanged();
 }
 
 } // namespace poptools

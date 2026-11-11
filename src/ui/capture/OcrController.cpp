@@ -204,6 +204,11 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
         return;
     }
 
+    if (m_ocrImg.isNull())
+        return; // 会话已结束（releaseSessionResources 已释放）：过期回包丢弃，
+                // 避免旧识别内容经 showPanel 置位面板后跨会话复活（R5-B1，
+                // 对照 onBoxes 的空图防护；翻译路径无 m_ocrImg 依赖故需单独门卫）
+
     // 按阅读顺序（先从上到下，再从左到右）合并行文本（半行高容差同行判定
     // 与贴图 OCR 共用一实现，见 sortOcrBoxesReadingOrder）
     QVector<OcrBox> sorted = boxes;

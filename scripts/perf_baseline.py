@@ -2,7 +2,8 @@
 """启动/内存性能基线采样（发版流程用，防劣化有据可查）。
 
 流程：
-  1. 结束现有 PopTools.exe / PaddleOCR-json.exe（冷启动基线需要）
+  1. 结束现有 PopTools.exe / RapidOCR-json.exe（引擎迁移前旧名 PaddleOCR-json.exe
+     也一并清理；/T 杀进程树，进程不存在时静默跳过）
   2. 启动 build/Release/PopTools.exe，WaitForInputIdle 等待托盘就绪，计启动耗时
   3. 稳定 2 秒后采样主进程工作集内存；若 OCR 子进程已拉起则一并列出
   4. 结果打印为 JSON 并追加到 temp_scripts/out/perf_baseline.jsonl（一行一条）
@@ -12,7 +13,7 @@
 
 依赖：标准库（ctypes/subprocess），无第三方；.venv 或任意 Python 3.8+ 可跑。
 数字解读：启动耗时正常百毫秒级；主进程内存 ~35MB 量级；OCR 子进程 ~775MB
-（懒启动，未用过 OCR 时为 0）。连续两次运行取第二次为温启动参考。
+（RapidOCR-json.exe，懒启动，未用过 OCR 时为 0）。连续两次运行取第二次为温启动参考。
 """
 import argparse
 import ctypes
@@ -49,9 +50,13 @@ class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
 
 
 def kill_existing():
-    """结束现有实例（冷启动基线需要；P-008：两个进程都要杀）"""
-    for name in ("PopTools.exe", "PaddleOCR-json.exe"):
-        subprocess.run(["taskkill", "/F", "/IM", name],
+    """结束现有实例（冷启动基线需要；P-008：主进程与 OCR 子进程都要杀）。
+    R5-D1：引擎已迁移 RapidOCR-json.exe（RapidOcrService.cpp 启动名），
+    只杀旧名会让上一会话的 OCR 子进程变孤儿（~770MB 常驻）跨轮累积；
+    /T 杀进程树；旧名 PaddleOCR-json.exe 保留兜底清理。进程不存在时
+    taskkill 非零退出，check=False 静默容错"""
+    for name in ("PopTools.exe", "RapidOCR-json.exe", "PaddleOCR-json.exe"):
+        subprocess.run(["taskkill", "/F", "/T", "/IM", name],
                        capture_output=True, check=False)
     time.sleep(0.6)
 
@@ -71,14 +76,15 @@ def working_set_mb(pid):
         kernel32.CloseHandle(h)
 
 
-def child_paddle_mb():
-    """PaddleOCR-json 子进程内存（存在则返回 MB，否则 0）——经 tasklist 查询。
+def ocr_child_mb():
+    """RapidOCR-json 子进程内存（存在则返回 MB，否则 0）——经 tasklist 查询。
+    R5-D1：引擎迁移后原 PaddleOCR-json 查询恒 0.0，基线观测完全失效。
     中文 Windows 的 tasklist 输出是 GBK（见踩坑 P-020）：按 bytes 捕获后
     以 gbk + errors=replace 解码，不能用 text=True 的默认 UTF-8"""
-    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq PaddleOCR-json.exe",
+    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq RapidOCR-json.exe",
                         "/FO", "CSV", "/NH"], capture_output=True)
     for line in (r.stdout or b"").decode("gbk", errors="replace").splitlines():
-        if "PaddleOCR-json.exe" in line:
+        if "RapidOCR-json.exe" in line:
             try:
                 kb = int(line.split('","')[-1].replace('"', "")
                          .replace(".", "").replace(",", "").replace(" K", "").strip())
@@ -110,7 +116,7 @@ def main():
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "startup_ms": startup_ms,
         "main_ws_mb": working_set_mb(proc.pid),
-        "paddle_ws_mb": child_paddle_mb(),
+        "ocr_ws_mb": ocr_child_mb(),
         "exe_mb": round(os.path.getsize(args.exe) / (1024 * 1024), 2),
     }
 

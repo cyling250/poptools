@@ -23,6 +23,8 @@
 #include "core/assistant/PermissionManager.h"
 #include "core/assistant/ShellTool.h"
 #include "core/assistant/ToolRegistry.h"
+#include "core/hotkey/GlobalHotKey.h"
+#include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
 #include "ui/goody/GoodyWindow.h"
 
@@ -77,13 +79,28 @@ void GoodyModule::init(AppServices &services)
         });
     }
 
-    // 呼出热键（注册失败由组合根统一气泡告知）
-    services.registerHotKey(Settings::instance().assistantHotKeyVk(),
-                            Settings::instance().assistantHotKeyModifiers(),
-                            [this] { openChat(); });
+    // 呼出热键（注册失败由组合根统一气泡告知；R5-D2：注册返回值用于
+    // 托盘文案标注，不再静默）
+    const quint32 hkVk = Settings::instance().assistantHotKeyVk();
+    const quint32 hkMods = Settings::instance().assistantHotKeyModifiers();
+    const bool hkOk = services.registerHotKey(hkVk, hkMods,
+                                              [this] { openChat(); });
 
-    m_trayAction =
-        services.addTrayAction(QStringLiteral("Goody 管家 (Ctrl+Alt+G)"), [this] { openChat(); });
+    // R5-D2：托盘文案的快捷键改为按设置动态生成（ini 改 assistantHotKeyVk
+    // 后不再与事实不符）；注册失败时追加标注（CaptureModule 的"已被占用"
+    // 托盘文案先例）
+    // R5-D2 复审修正（P3-4）：失败标注对齐 CaptureModule 的括注先例风格，
+    // 原因取 GlobalHotKey::lastError 的具体原因——常见即"已被其他程序占用"，
+    // 进程内冲突/Win32 错误码场景也比笼统"注册失败"可排查
+    const QString hkFailNote =
+        hkOk ? QString()
+             : QStringLiteral("（%1）").arg(
+                   services.hotkey && !services.hotkey->lastError().isEmpty()
+                       ? services.hotkey->lastError()
+                       : QStringLiteral("注册失败"));
+    m_trayAction = services.addTrayAction(
+        QStringLiteral("Goody 管家 (%1)%2").arg(hotKeyDisplayName(hkVk, hkMods), hkFailNote),
+        [this] { openChat(); });
 
     // 聊天数据流
     connect(m_client, &LlmClient::contentDelta, this, [this](const QString &delta) {

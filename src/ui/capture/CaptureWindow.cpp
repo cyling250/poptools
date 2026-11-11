@@ -240,6 +240,11 @@ namespace poptools
         m_ocrScanning = false; // 重置 OCR 扫描动效
         m_ocrScanTimer.stop();
         m_toolbar->hide();
+        // OCR 文字栏无条件隐藏兜底（R5-B1）：退出会话后迟到的【译】回包曾把面板
+        // visible 置位（子控件标志在窗口隐藏时保留），重进截图时随窗口映射浮出
+        // 上一会话的 OCR 内容；setBusy(false) 同时解除可能卡住的禁用态
+        m_ocrPanel->hide();
+        m_ocrPanel->setBusy(false);
         setGeometry(m_cap.desktop);
         show();
         activateWindow();
@@ -534,6 +539,13 @@ namespace poptools
 
         if (event->button() == Qt::RightButton)
         {
+            // 拖拽绘制中右键 = 取消当前笔画（R5-B2：与 Esc 同语义，工具与截图保留；
+            // 绘制中右键无菜单语义——mousePressEvent 是全窗口唯一 RightButton 处理点）
+            if (m_state == State::Editing && m_toolDrawing->isDrawing())
+            {
+                m_toolDrawing->abortDraft();
+                return;
+            }
             // 编辑态有墨迹时右键选区外退出与 ESC 保护对齐：首次武装确认，
             // 再按（含再右键）才退出，防误触一键清掉全部标注
             if (m_state == State::Editing && !m_selection.contains(pos) && hasInk())
@@ -828,6 +840,7 @@ namespace poptools
         m_state = State::Selecting;
         m_dblReselect = true;
         m_toolbar->hide();
+        m_ocrPanel->hide(); // 重选过程中旧 OCR 面板不再悬浮（R5-B1 附带：旧面板内容已过时）
         m_annotationEditor->clearSelection();
         m_selectionCtrl->beginSelect(pos);
     }

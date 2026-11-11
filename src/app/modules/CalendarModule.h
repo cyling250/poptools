@@ -2,6 +2,7 @@
 
 #include "../IFeatureModule.h"
 
+#include <QDate>
 #include <QObject>
 
 namespace poptools {
@@ -33,6 +34,7 @@ private slots:
     void showFullFromMini();
     void onSettingsChanged();
     void refreshMini();
+    void onMinuteTick(); // 分钟 tick：迷你条刷新 + 主窗口跨午夜刷新（R5-B5）
     void applyVisibility(); // 按设置开关显示/隐藏
 
 private:
@@ -42,6 +44,7 @@ private:
     CalendarStore *m_store = nullptr;
     CalendarWindow *m_window = nullptr;
     CalendarMiniWidget *m_mini = nullptr;
+    QDate m_lastDay; // 分钟 tick 的跨天判定基准（init 时置为当天）
 };
 
 } // namespace poptools

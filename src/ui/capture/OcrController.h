@@ -54,8 +54,14 @@ public:
     void requestTranslate(QWidget *parent); // 识别并翻译：结果显示到文字栏面板（原始+翻译）
 
     // 会话级资源释放：清掉传给 OCR 的选区大图缓存（4K 选区约 33MB，
-    // 红线 5：会话级大缓冲退出即清空，先例 m_baseScaled）。退出截图时调用
-    void releaseSessionResources() { m_ocrImg = QImage(); }
+    // 红线 5：会话级大缓冲退出即清空，先例 m_baseScaled），并复位在途回包
+    // 归属标记（R5-B1：否则退出后迟到的【译】回包经 showPanel 置位面板，
+    // 下次 startCapture 浮出上一会话的 OCR 内容）。退出截图时调用
+    void releaseSessionResources()
+    {
+        m_ocrImg = QImage();
+        m_ocrPending = false;
+    }
 
 private:
     bool prepareAndRecognize(QWidget *parent); // 公共准备（检查状态 + 裁剪 + 启动识别）；不可用返回 false

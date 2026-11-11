@@ -1046,7 +1046,17 @@ private slots:
             ChatSession s(path);
             s.setSystemPrompt("v1");
             s.append(QJsonObject{{"role", "user"}, {"content", "a"}});
-            s.append(QJsonObject{{"role", "assistant"}, {"content", "b"}});
+            // R5-C2 复审修正（P1-1）：assistant 须带 tool_calls，其后的 tool
+            // 回应才是合法序列——原数据 assistant 无 tool_calls，load 时该
+            // tool 被按孤儿过滤，roundtrip 断言 4 条必失败
+            s.append(QJsonObject{
+                {"role", "assistant"},
+                {"content", "b"},
+                {"tool_calls", QJsonArray{QJsonObject{
+                    {"id", QStringLiteral("call_1")},
+                    {"type", QStringLiteral("function")},
+                    {"function", QJsonObject{{"name", QStringLiteral("echo")},
+                                             {"arguments", QStringLiteral("{}")}}}}}}});
             s.appendToolResult("call_1", QJsonObject{{"ok", true}, {"output", "done"}});
             s.save();
             QCOMPARE(s.size(), 4);
@@ -1080,6 +1090,96 @@ private slots:
         ChatSession s3(path);
         s3.load();
         QCOMPARE(s3.size(), 0);
+    }
+
+    // ---- ChatSession 回归（R5-C2 复审 P1-1/P3-1/P3-2）：损坏会话 → .bad
+    //      逐字节备份 + 空载（对照 box_store_load_corrupt_backup 先例）；
+    //      备份两代轮换（.bad.old）；version 合法但 messages 键缺失并入
+    //      损坏路径 ----
+    void chat_session_corrupt_backup()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("chat/sessions.json");
+        // 直写损坏原件前先建父目录（正常路径由 ChatSession::save 的 mkpath 兜底）
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+
+        // 场景一：非 JSON 会话文件 → 空载 + .bad 逐字节备份；之后 save()
+        // 正常重写主文件且不破坏 .bad
+        const QByteArray raw1 = "{\"version\":1,\"messages\":[ broken";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(raw1);
+        }
+        ChatSession s1(path);
+        s1.load();
+        QCOMPARE(s1.size(), 0); // ① 损坏 → 返回空会话
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw1); // ② 原件逐字节一致
+        }
+        s1.append(QJsonObject{{"role", "user"}, {"content", "a"}});
+        s1.save(); // ③ 之后 save 正常
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw1); // ③ save 不破坏 .bad
+        }
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::ReadOnly));
+            QVERIFY(QJsonDocument::fromJson(f.readAll()).object()
+                        .value(QStringLiteral("messages"))
+                        .toArray()
+                        .size()
+                    == 1); // 主文件已重写为合法会话
+        }
+
+        // 场景二（P3-1 轮换）：再次损坏 → 旧 .bad 挪为 .bad.old（保留上一
+        // 代原件），新 .bad 为本次原件
+        const QByteArray raw2 = "not json at all";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(raw2);
+        }
+        ChatSession s2(path);
+        s2.load();
+        QCOMPARE(s2.size(), 0);
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw2); // 新 .bad = 最新损坏原件
+        }
+        {
+            QFile badOld(path + QStringLiteral(".bad.old"));
+            QVERIFY(badOld.open(QIODevice::ReadOnly));
+            QCOMPARE(badOld.readAll(), raw1); // 上一代 .bad 完整保留
+        }
+
+        // 场景三（P3-2）：version 合法但 messages 键缺失 → 同样按损坏处理
+        //（原先静默空载无备份），轮换继续推进
+        const QByteArray raw3 = "{\"version\":1}";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(raw3);
+        }
+        ChatSession s3(path);
+        s3.load();
+        QCOMPARE(s3.size(), 0);
+        {
+            QFile bad(path + QStringLiteral(".bad"));
+            QVERIFY(bad.open(QIODevice::ReadOnly));
+            QCOMPARE(bad.readAll(), raw3);
+        }
+        {
+            QFile badOld(path + QStringLiteral(".bad.old"));
+            QVERIFY(badOld.open(QIODevice::ReadOnly));
+            QCOMPARE(badOld.readAll(), raw2); // 上一代继续前移
+        }
     }
 
     // ---- ToolRegistry：注册 / schema / 异步执行 / 未知工具 ----
