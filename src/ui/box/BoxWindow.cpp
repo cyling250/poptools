@@ -26,7 +26,12 @@
 
 #include "core/box/BoxStore.h"
 #include "core/box/IconExtractor.h"
+#include "core/settings/Settings.h"
+#include "ui/desktopband/DesktopBandHost.h"
+#include "ui/desktopband/DesktopBandLogic.h"
 #include "ui/shared/DesktopStack.h"
+
+#include <QApplication>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -154,6 +159,7 @@ void BoxWindow::refresh()
 
     prefetchIcons();
     applyGeometry();
+    presentToBand(); // T-048：带模式下目录变化重新上传（几何同步+合并节流）
 }
 
 // 图标后台预取（红线1：shell 图标提取是磁盘/跨进程 COM，禁入主线程）：
@@ -203,6 +209,7 @@ void BoxWindow::syncMeta()
             applyGeometry();
         else
             update();
+        presentToBand(); // T-048：元数据外改（行列/折叠/改名）重新上传
         return;
     }
 }
@@ -421,6 +428,7 @@ void BoxWindow::mouseMoveEvent(QMouseEvent *event)
 
     if (m_draggingWindow) {
         move(event->globalPosition().toPoint() - m_dragOffset);
+        presentToBand(); // T-048：拖动即带几何同步 + 内容重传（合并节流）
         return;
     }
 
@@ -435,6 +443,7 @@ void BoxWindow::mouseMoveEvent(QMouseEvent *event)
         setCursor((hit >= 0 || onGear || onCollapse) ? Qt::PointingHandCursor
                                                      : Qt::ArrowCursor);
         update();
+        presentToBand(); // T-048：hover 高亮变化重新上传（合并节流）
     }
 }
 
@@ -491,7 +500,11 @@ void BoxWindow::startRename()
     m_renameEdit->raise();
     m_renameEdit->setFocus();
     m_renameEdit->selectAll();
-    activateWindow(); // 不抢焦点窗口要打字时临时唤起（日历同款）
+    // 不抢焦点窗口要打字时临时唤起（日历同款）。T-048：带模式走打字挂起
+    if (bandActive())
+        suspendBandForTyping();
+    else
+        activateWindow();
 }
 
 void BoxWindow::finishRename(bool commit)
@@ -502,6 +515,7 @@ void BoxWindow::finishRename(bool commit)
     m_renameEdit->hide();
     if (commit && !text.isEmpty() && text != m_name)
         m_store->renameBox(m_boxId, text);
+    maybeResumeBand(); // T-048：改名结束（回车/Esc/失焦）即回带
 }
 
 // 内联编辑框的 Esc 取消
@@ -523,6 +537,7 @@ void BoxWindow::leaveEvent(QEvent * /*event*/)
     m_hoverGear = m_hoverCollapse = false;
     setCursor(Qt::ArrowCursor);
     update();
+    presentToBand(); // T-048：划出清 hover 后重新上传
 }
 
 // ---------- 右键菜单 ----------
@@ -729,25 +744,171 @@ void BoxWindow::dropEvent(QDropEvent *event)
 
 // ---------- 贴桌与原生事件 ----------
 
-// 贴桌：Z 序经 DesktopStack 钉在日历层之上（1s 全局守护归位）
+// T-048：呈现载体二选一——壁纸带直绘（默认，真窗口隐藏 + 内容 grab
+// 上传 + 钩子转发交互）优先；box/bandMode=false 或带定位/初始化失败
+// 时降级为 DesktopStack Z 序贴底（1s 全局守护归位）。带内窗口收不到
+// OLE 拖放（见头注释已知限制），其余交互经钩子转发保持单一来源
 void BoxWindow::glueIfFixed()
 {
     if (!isVisible())
         return;
+    if (Settings::instance().boxBandMode() && ensureBandEntered()) {
+        // T-048-FIX（P1-1）：内容仍可见时先过 showBand 的内容可见性门开
+        // 带呈现（activate 只建链不显示），再隐藏真窗口
+        m_band->showBand();
+        m_bandSwitchGuard = true;
+        setVisible(false);
+        m_bandSwitchGuard = false;
+        presentToBand();
+        return;
+    }
+    if (m_band && m_band->active())
+        m_band->deactivate(); // bandMode 被关闭：释放带宿主
     desktopstack::attach(this, desktopstack::Layer::Box);
+}
+
+// T-048-FIX（P3-2）：设置变更后重估呈现载体（box/bandMode 逃生口即时
+// 生效）。带呈现中真窗口隐藏（glueIfFixed 会因不可见早退）——关带模式
+// 时先恢复可见再二选一；打字挂起中不重估（恢复路径 resumeBandIfSuspended
+// 复查 bandMode）
+void BoxWindow::applySettings()
+{
+    if (m_bandSuspended)
+        return;
+    if (!Settings::instance().boxBandMode() && bandActive()) {
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+    }
+    glueIfFixed();
+}
+
+// ---------- T-048 壁纸带驻入 ----------
+
+bool BoxWindow::bandActive() const
+{
+    return m_band && m_band->active();
+}
+
+bool BoxWindow::ensureBandEntered()
+{
+    if (!m_band) {
+        m_band = new desktopband::DesktopBandHost(this);
+        m_band->setContent(this);
+        connect(m_band, &desktopband::DesktopBandHost::bandLost, this,
+                &BoxWindow::degradeFromBand);
+    }
+    if (m_band->active()) {
+        m_band->showBand();
+        return true;
+    }
+    return m_band->activate(geometry(), m_name, desktopband::BandLayer::Box);
+}
+
+void BoxWindow::presentToBand()
+{
+    if (bandActive() && m_band->bandVisible())
+        m_band->presentWidget(this);
+}
+
+void BoxWindow::degradeFromBand()
+{
+    qWarning("[band] 收纳盒降级：壁纸带不可用，回退 DesktopStack 贴底路径");
+    // T-048-FIX（P1-1）：内容可见性门——带呈现进行中才回归真窗口；
+    // 真隐藏态（模块开关/删盒后宿主已 deactivate，此门为兜底）只记状态
+    // 不 show，防 Explorer 重建带触发的降级把已隐藏的盒子复活
+    const bool presenting = m_band && m_band->bandVisible();
+    if (m_band) {
+        m_band->deactivate();
+        m_band->deleteLater();
+        m_band = nullptr;
+    }
+    m_bandSuspended = false;
+    if (presenting || isVisible()) {
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+        glueIfFixed();
+    }
+}
+
+// 打字挂起（改名内联编辑）：带窗收起、真窗口临时可见接键盘
+void BoxWindow::suspendBandForTyping()
+{
+    if (!bandActive() || m_bandSuspended)
+        return;
+    m_bandSuspended = true;
+    m_band->hideBand();
+    m_bandSwitchGuard = true;
+    setVisible(true);
+    m_bandSwitchGuard = false;
+    activateWindow();
+}
+
+void BoxWindow::resumeBandIfSuspended()
+{
+    if (!m_bandSuspended)
+        return;
+    m_bandSuspended = false;
+    if (!bandActive() || !isVisible())
+        return;
+    // T-048-FIX（P3-2）：挂起期间逃生口被关闭 → 不回带，真窗口走贴底
+    if (!Settings::instance().boxBandMode()) {
+        if (m_band)
+            m_band->deactivate();
+        desktopstack::attach(this, desktopstack::Layer::Box);
+        return;
+    }
+    // T-048-FIX（P1-1）：此刻真窗口可见——先过 showBand 内容可见性门开
+    // 带呈现，再隐藏真窗口（顺序不可反，门会拦下"先藏后开"）
+    m_band->showBand();
+    m_bandSwitchGuard = true;
+    setVisible(false);
+    m_bandSwitchGuard = false;
+    presentToBand();
+}
+
+void BoxWindow::maybeResumeBand()
+{
+    if (!m_bandSuspended)
+        return;
+    if (QApplication::focusWidget() == m_renameEdit)
+        return; // 继续打字
+    resumeBandIfSuspended();
 }
 
 void BoxWindow::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    // 显示完成后贴桌（延迟到事件循环，避开 show 过程的原生窗口状态期）
-    QTimer::singleShot(0, this, [this] { glueIfFixed(); });
+    // 显示完成后驻带/贴桌（延迟到事件循环，避开 show 过程的原生窗口
+    // 状态期）。T-048：打字挂起期真窗口临时可见，跳过
+    if (!m_bandSuspended)
+        QTimer::singleShot(0, this, [this] { glueIfFixed(); });
 }
 
 void BoxWindow::hideEvent(QHideEvent *event)
 {
     desktopstack::detach(this);
+    // T-048：真隐藏（删盒/模块开关）时连带呈现一并收起；双表示切换
+    // 不收；真隐藏同时清打字挂起态
+    if (m_bandSwitchGuard)
+        return QWidget::hideEvent(event);
+    m_bandSuspended = false;
+    // T-048-FIX（P1-1）：真隐藏（模块开关/shutdown/删盒，无 guard 的
+    // hideEvent）→ 宿主 deactivate()（释放 DComp、注销路由、停 heal）
+    // ——只 hideBand 会留下 m_active 挂着 + heal 照跑，Explorer 重建带
+    // 时把用户已隐藏的盒子幽灵复活
+    if (m_band && m_band->active())
+        m_band->deactivate();
     QWidget::hideEvent(event);
+}
+
+// T-048：打字挂起中失焦（点外部应用）即回带
+void BoxWindow::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::ActivationChange && !isActiveWindow())
+        resumeBandIfSuspended();
+    QWidget::changeEvent(event);
 }
 
 bool BoxWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)

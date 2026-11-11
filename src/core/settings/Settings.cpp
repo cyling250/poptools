@@ -317,6 +317,19 @@ void Settings::setCalendarSplitter(const QByteArray &state)
     syncChecked();
 }
 
+// T-048 逃生口：calendar/bandMode（默认 true；false=固定模式回退
+// DesktopStack 贴底路径）
+bool Settings::calendarBandMode() const
+{
+    return m_s.value("calendar/bandMode", true).toBool();
+}
+
+void Settings::setCalendarBandMode(bool on)
+{
+    m_s.setValue("calendar/bandMode", on);
+    syncChecked();
+}
+
 // ---- 桌面收纳盒 ----
 
 bool Settings::organizerEnabled() const
@@ -327,6 +340,18 @@ bool Settings::organizerEnabled() const
 void Settings::setOrganizerEnabled(bool on)
 {
     m_s.setValue("organizer/enabled", on);
+    syncChecked();
+}
+
+// T-048 逃生口：box/bandMode（默认 true；false=回退 DesktopStack 贴底路径）
+bool Settings::boxBandMode() const
+{
+    return m_s.value("box/bandMode", true).toBool();
+}
+
+void Settings::setBoxBandMode(bool on)
+{
+    m_s.setValue("box/bandMode", on);
     syncChecked();
 }
 

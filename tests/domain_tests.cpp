@@ -51,6 +51,7 @@
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
+#include "ui/desktopband/DesktopBandLogic.h"
 #include "ui/goody/GoodyWindow.h"
 
 #include <QDate>
@@ -3107,6 +3108,359 @@ private slots:
         OwnWriteGuard::reset();
         QVERIFY(!OwnWriteGuard::isSelfWrite(s1));
 #endif
+    }
+
+    // ---- T-048 桌面壁纸带纯逻辑：band 定位决策（注入句柄） ----
+    void desktopband_resolve_band_decisions()
+    {
+        using namespace desktopband;
+        const void *prog = reinterpret_cast<const void *>(quintptr(0x11));
+        const void *defview = reinterpret_cast<const void *>(quintptr(0x22));
+        const void *band = reinterpret_cast<const void *>(quintptr(0x33));
+
+        // 标准分裂形态：Progman ← [DefView(图标层), WorkerW(壁纸带)] → Ready
+        {
+            BandProbeInput in;
+            in.progman = prog;
+            in.defview = defview;
+            in.workerAfterDefview = band;
+            const BandProbeResult r = resolveBand(in);
+            QCOMPARE(r.verdict, BandVerdict::Ready);
+            QCOMPARE(r.band, band);
+        }
+        // 图标层在但壁纸带未分裂 → Splice（0x052C 幂等触发）
+        {
+            BandProbeInput in;
+            in.progman = prog;
+            in.defview = defview;
+            QCOMPARE(resolveBand(in).verdict, BandVerdict::Splice);
+        }
+        // 图标层缺席：无 DefView 子窗的顶层 WorkerW 即带 → Ready
+        {
+            BandProbeInput in;
+            in.progman = prog;
+            BandProbeInput::TopWorker iconHost{ reinterpret_cast<const void *>(quintptr(0x44)), true };
+            BandProbeInput::TopWorker bare{ reinterpret_cast<const void *>(quintptr(0x55)), false };
+            in.topWorkers = { iconHost, bare };
+            const BandProbeResult r = resolveBand(in);
+            QCOMPARE(r.verdict, BandVerdict::Ready);
+            QCOMPARE(r.band, reinterpret_cast<const void *>(quintptr(0x55)));
+        }
+        // 全部 WorkerW 都挂 DefView（分裂失败）→ Splice
+        {
+            BandProbeInput in;
+            in.progman = prog;
+            BandProbeInput::TopWorker iconHost{ reinterpret_cast<const void *>(quintptr(0x44)), true };
+            in.topWorkers = { iconHost };
+            QCOMPARE(resolveBand(in).verdict, BandVerdict::Splice);
+        }
+        // 无 Progman（Explorer 未就绪）→ Fail
+        {
+            BandProbeInput in;
+            QCOMPARE(resolveBand(in).verdict, BandVerdict::Fail);
+        }
+    }
+
+    // ---- T-048：降级决策（bandMode=false / band 缺失 → 贴底路径） ----
+    void desktopband_degrade_decision()
+    {
+        using namespace desktopband;
+        QCOMPARE(choosePresentPath(false, true), PresentPath::GlueStack);
+        QCOMPARE(choosePresentPath(true, false), PresentPath::GlueStack);
+        QCOMPARE(choosePresentPath(false, false), PresentPath::GlueStack);
+        QCOMPARE(choosePresentPath(true, true), PresentPath::Band);
+    }
+
+    // ---- T-048：命中判定与坐标换算（屏幕物理 → 宿主客户区物理） ----
+    void desktopband_route_hit_and_client_coords()
+    {
+        using namespace desktopband;
+        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300),
+                                     QRectF(600, 200, 200, 200) };
+        RouteState st;
+        const qint64 t = 1000;
+
+        // 命中日历矩形：左键按下 → 吞噬 + LeftDown 路由到宿主 0
+        RouteOutcome o =
+            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), t, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        QCOMPARE(o.nativePos, QPointF(150, 250));
+        // 客户区换算：屏幕物理坐标 − 宿主矩形左上
+        QCOMPARE(toClientPhysical(QPointF(150, 250), rects.at(0)),
+                 QPointF(50, 50));
+        QCOMPARE(toClientPhysical(QPointF(100, 200), rects.at(0)), QPointF(0, 0));
+        // 抬起：捕获宿主收到配对抬起
+        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), t + 10, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::LeftUp);
+        // 未命中矩形：放行（点击图标/桌面菜单由系统自然处理）
+        o = routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(50, 50), t + 20, 500, 4, 4, false);
+        QVERIFY(!o.swallow);
+        QCOMPARE(o.band, -1);
+        // Move 未命中且无 hover → 放行；命中 → 吞噬路由 hover
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(50, 50), t + 30, 500, 4, 4, false);
+        QVERIFY(!o.swallow);
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(650, 250), t + 40, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 1);
+        QCOMPARE(o.msg, RouteMsg::Move);
+        // 划出：放行 + 对原宿主发 Leave（清 hover）
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(50, 50), t + 50, 500, 4, 4, false);
+        QVERIFY(!o.swallow);
+        QCOMPARE(o.leaveBand, 1);
+    }
+
+    // ---- T-048：拖拽捕获 + 双击合成 + 右键与 NC 归一 + 放行白名单 ----
+    void desktopband_route_capture_and_dblclick()
+    {
+        using namespace desktopband;
+        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
+
+        // 按下 → 拖拽捕获：移动出界仍吞噬并路由到捕获宿主（配对保障）
+        RouteState st;
+        RouteOutcome o =
+            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(120, 220), 1000, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(1600, 900), 1050, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::Move);
+        // 出界抬起：吞噬一次并清除捕获；随后同位置事件放行
+        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(1600, 900), 1100, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.msg, RouteMsg::LeftUp);
+        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(1600, 900), 1150, 500, 4, 4, false);
+        QVERIFY(!o.swallow);
+
+        // 双击合成：同宿主 + 时间窗内两次按下 → 第二次为 LeftDbl；
+        // 超出时间窗 → 仍是 LeftDown
+        RouteState st2;
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(150, 250), 2000, 500, 4, 4, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(150, 250), 2050, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(152, 252), 2200, 500, 4, 4, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDbl);
+        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(152, 252), 2250, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(152, 252), 3600, 500, 4, 4, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+
+        // 右键：命中吞噬、未命中放行；NC 变体归一为客户区消息
+        RouteState st3;
+        o = routeMouse(st3, rects, WM_RBUTTONDOWN, QPointF(150, 250), 100, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::RightDown);
+        o = routeMouse(st3, rects, WM_RBUTTONUP, QPointF(150, 250), 150, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.msg, RouteMsg::RightUp);
+        o = routeMouse(st3, rects, WM_NCRBUTTONDOWN, QPointF(50, 50), 200, 500, 4, 4, false);
+        QVERIFY(!o.swallow);
+
+        // 中键/X 键：一律放行（classify → None）。
+        // T-048-FIX（P2-2）：滚轮不再放行——命中吞噬并路由（见专测），
+        // 未命中放行
+        RouteState st4;
+        QVERIFY(!routeMouse(st4, rects, WM_MBUTTONDOWN, QPointF(150, 250), 0, 500, 4, 4, false)
+                     .swallow);
+        QVERIFY(!routeMouse(st4, rects, WM_MOUSEWHEEL, QPointF(50, 50), 0, 500, 4, 4, false)
+                     .swallow);
+        QCOMPARE(classifyNativeMsg(WM_NCLBUTTONDOWN), RouteMsg::LeftDown);
+        QCOMPARE(nativeMsgForRoute(RouteMsg::LeftDbl), WM_LBUTTONDBLCLK);
+        QCOMPARE(nativeMsgForRoute(RouteMsg::Leave), WM_MOUSELEAVE);
+    }
+
+    // ---- T-048-FIX（P2-2）：滚轮路由——命中吞掉并路由到宿主，未命中放行 ----
+    void desktopband_route_wheel()
+    {
+        using namespace desktopband;
+        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
+        RouteState st;
+
+        // 分类与还原消息
+        QCOMPARE(classifyNativeMsg(WM_MOUSEWHEEL), RouteMsg::Wheel);
+        QCOMPARE(nativeMsgForRoute(RouteMsg::Wheel), WM_MOUSEWHEEL);
+
+        // 命中：吞掉 + Wheel 路由（带模式下日历列表才能滚动）
+        const RouteOutcome o =
+            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(150, 250), 0, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::Wheel);
+        QCOMPARE(o.nativePos, QPointF(150, 250));
+
+        // 未命中：放行
+        const RouteOutcome miss =
+            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(50, 50), 10, 500, 4, 4, false);
+        QVERIFY(!miss.swallow);
+        QCOMPARE(miss.band, -1);
+
+        // 滚轮不改变捕获/hover 状态：捕获中滚轮按命中路由，状态保持
+        RouteOutcome d =
+            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), 20, 500, 4, 4, false);
+        QVERIFY(d.swallow);
+        const RouteOutcome w =
+            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(150, 250), 30, 500, 4, 4, false);
+        QVERIFY(w.swallow);
+        QCOMPARE(w.band, 0);
+        // 捕获仍有效（滚轮未清除），抬起照常配对
+        const RouteOutcome up =
+            routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), 40, 500, 4, 4, false);
+        QVERIFY(up.swallow);
+        QCOMPARE(up.msg, RouteMsg::LeftUp);
+    }
+
+    // ---- T-048-FIX（P3-7）：双击距离窗改用系统度量开区间矩形语义 ----
+    void desktopband_route_dblclick_system_metrics()
+    {
+        using namespace desktopband;
+        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
+        // 距离窗 4×4：|dx|<4 且 |dy|<4 内合成双击，开区间（=4 不算）
+        const int cx = 4, cy = 4;
+
+        RouteState st;
+        RouteOutcome o =
+            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
+        QVERIFY(o.swallow);
+        // 界内 (3,0)：双击
+        o = routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(153, 250), 1100, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDbl);
+        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(153, 250), 1150, 500, cx, cy, false);
+        QVERIFY(o.swallow);
+
+        // 边界 |dx|==cx：超出开区间 → 不是双击
+        RouteState st2;
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(154, 250), 1100, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        // y 向界内、x 向超界 → 仍不是双击（矩形语义，非曼哈顿距离）
+        RouteState st3;
+        o = routeMouse(st3, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        o = routeMouse(st3, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st3, rects, WM_LBUTTONDOWN, QPointF(154, 251), 1100, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+
+        // 时间窗不受距离窗替换影响：窗外仍是 LeftDown
+        RouteState st4;
+        o = routeMouse(st4, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+        o = routeMouse(st4, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st4, rects, WM_LBUTTONDOWN, QPointF(151, 251), 3000, 500, cx, cy, false);
+        QCOMPARE(o.msg, RouteMsg::LeftDown);
+    }
+
+    // ---- T-048-FIX（P1-2）：按钮按住时未捕获 Move 放行（routeMouse 纯函数层） ----
+    void desktopband_route_move_pressed_passthrough()
+    {
+        using namespace desktopband;
+        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
+
+        // 按压中（外来拖拽）Move 横穿宿主矩形：放行且不产生 Leave/不更新 hover
+        RouteState st;
+        RouteOutcome o =
+            routeMouse(st, rects, WM_MOUSEMOVE, QPointF(150, 250), 0, 500, 4, 4, true);
+        QVERIFY(!o.swallow);
+        QCOMPARE(o.band, -1);
+        QCOMPARE(o.leaveBand, -1);
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(1600, 900), 10, 500, 4, 4, true);
+        QVERIFY(!o.swallow);
+        QCOMPARE(o.leaveBand, -1); // 划出也不误发 Leave（hover 未被设置）
+
+        // 松开后同一位置：恢复正常悬停吞噬路由
+        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(150, 250), 20, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::Move);
+
+        // 已捕获（本带发起的拖拽）时按压中的 Move 保持吞噬 + 配对路由
+        RouteState st2;
+        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(120, 220), 0, 500, 4, 4, false);
+        QVERIFY(o.swallow);
+        o = routeMouse(st2, rects, WM_MOUSEMOVE, QPointF(1600, 900), 10, 500, 4, 4, true);
+        QVERIFY(o.swallow);
+        QCOMPARE(o.band, 0);
+        QCOMPARE(o.msg, RouteMsg::Move);
+    }
+
+    // ---- T-048-FIX（P3-8）：矩形重叠按带内 Z 序取优先（大 = 靠顶） ----
+    void desktopband_route_overlap_z_order()
+    {
+        using namespace desktopband;
+        // 两宿主矩形在 x∈[50,100) 重叠
+        const QVector<QRectF> rects{ QRectF(0, 0, 100, 100),
+                                     QRectF(50, 0, 100, 100) };
+        const QPointF inside(75, 50);
+
+        // 盒子层（id 1）在日历层（id 0）之上（与 DesktopStack 对齐）→ 命中 1
+        {
+            RouteState st;
+            const QVector<int> z{ 0, 1 };
+            const RouteOutcome o =
+                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false, z);
+            QVERIFY(o.swallow);
+            QCOMPARE(o.band, 1);
+        }
+        // Z 序反转（日历在上）→ 命中 0
+        {
+            RouteState st;
+            const QVector<int> z{ 1, 0 };
+            const RouteOutcome o =
+                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false, z);
+            QVERIFY(o.swallow);
+            QCOMPARE(o.band, 0);
+        }
+        // 未提供 Z 序：退回注册序首命中（既有行为）
+        {
+            RouteState st;
+            const RouteOutcome o =
+                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false);
+            QVERIFY(o.swallow);
+            QCOMPARE(o.band, 0);
+        }
+        // 无重叠区域：Z 序不参与（各自命中）
+        {
+            RouteState st;
+            const QVector<int> z{ 0, 1 };
+            RouteOutcome o =
+                routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(10, 50), 0, 500, 4, 4, false, z);
+            QCOMPARE(o.band, 0);
+            // 捕获中出界抬起仍配对路由到捕获宿主（不按 Z 序换目标）
+            o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(120, 50), 10, 500, 4, 4, false, z);
+            QVERIFY(o.swallow);
+            QCOMPARE(o.msg, RouteMsg::LeftUp);
+            QCOMPARE(o.band, 0);
+            // 新按下（独立状态）：命中 id 1
+            RouteState st2;
+            o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(120, 50), 20, 500, 4, 4, false, z);
+            QCOMPARE(o.band, 1);
+        }
+    }
+
+    // ---- T-048：上传合并节流状态机（单事件循环至多一次 Commit） ----
+    void desktopband_upload_coalescer()
+    {
+        using namespace desktopband;
+        UploadCoalescer c;
+        QVERIFY(c.submit());      // 首帧：需调度 flush
+        QVERIFY(!c.submit());     // 同一事件循环内再提交：帧被合并
+        QVERIFY(!c.submit());
+        QVERIFY(c.beginFlush());  // flush 取走待传帧并清调度位
+        QVERIFY(!c.beginFlush()); // 空 flush：无帧、调度位已清
+        QVERIFY(c.submit());      // 下一事件循环可重新调度
+        QVERIFY(c.beginFlush());
+        QVERIFY(!c.beginFlush());
     }
 };
 

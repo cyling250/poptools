@@ -13,12 +13,20 @@ namespace poptools {
 
 class CalendarStore;
 
+namespace desktopband {
+class DesktopBandHost; // T-048：壁纸带宿主（ui/desktopband/DesktopBandHost）
+}
+
 // ============================================================
 // 迷你待办条：主窗口收起后贴在桌面层右上角，只显示今日未完成日程。
 //
 // 未完成置顶显示、完成的打勾划线垫底；点击条目切换完成；双击或
-// 点「展开」恢复完整日历；✕ 隐藏；标题区可拖动。与主窗口同样
-// 钉扎到桌面 WorkerW（T-043），被普通窗口遮挡。
+// 点「展开」恢复完整日历；✕ 隐藏；标题区可拖动。
+//
+// 呈现载体（T-048）：calendar/bandMode=true（默认）时驻入壁纸带直绘
+//（DesktopBandHost：真窗口隐藏 + 内容 grab 上传 + 钩子转发交互）；
+// 失败降级/逃生口关闭时回退 DesktopStack 贴底。带模式下标题区拖动
+// 不可用（带内窗口无原生输入），点击/双击交互经钩子转发保持原样。
 // ============================================================
 class CalendarMiniWidget : public QWidget
 {
@@ -28,6 +36,7 @@ public:
 
     void refresh();       // 数据/日期变化后刷新内容（模块连接 store 变更与分钟定时器）
     void applySettings(); // 透明度/颜色重应用
+    bool bandActive() const; // T-048：驻带呈现中（模块刷新守卫用）
 
 signals:
     void expandRequested(); // 恢复完整日历（模块负责显示主窗口）
@@ -43,6 +52,10 @@ protected:
 private:
     void buildUi();
     void applyTheme();
+    void glueIfFixed();      // T-048：驻带优先，失败降级贴底
+    bool ensureBandEntered();
+    void presentToBand();
+    void degradeFromBand();
 
     CalendarStore *m_store;
     QLabel *m_dateLabel = nullptr;
@@ -52,6 +65,9 @@ private:
     QColor m_accent = QColor(0x2B, 0x6F, 0xF2);
     bool m_darkText = false;
     QDate m_loadedForDate;
+
+    desktopband::DesktopBandHost *m_band = nullptr;
+    bool m_bandSwitchGuard = false; // 双表示显隐切换中（hideEvent 不收带窗）
 };
 
 } // namespace poptools

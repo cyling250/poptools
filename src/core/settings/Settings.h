@@ -93,11 +93,19 @@ public:
     void setCalendarGeometry(const QByteArray &state);
     QByteArray calendarSplitter() const;
     void setCalendarSplitter(const QByteArray &state);
+    // T-048 逃生口：固定模式呈现载体（true=驻入壁纸带直绘，false=回退
+    // 既有贴底路径；ini 手改，不进设置 UI，默认 true）
+    bool calendarBandMode() const;
+    void setCalendarBandMode(bool on);
 
     // ---- 桌面收纳盒 ----
     // 是否显示桌面收纳盒（设置页开关；勾选即启动时自动出现）
     bool organizerEnabled() const;
     void setOrganizerEnabled(bool on);
+    // T-048 逃生口：收纳盒呈现载体（true=驻入壁纸带直绘，false=回退
+    // 既有贴底路径；ini 手改，不进设置 UI，默认 true）
+    bool boxBandMode() const;
+    void setBoxBandMode(bool on);
 
     // ---- 活动监控 ----
     // 总开关（默认关闭；开启即授权键盘键入记录 + 窗口时间线 + OCR 快照，

@@ -223,6 +223,10 @@ void BoxModule::createBox()
 void BoxModule::onSettingsChanged()
 {
     applyVisibility();
+    // T-048-FIX（P3-2）：设置变更后重估呈现载体（box/bandMode 逃生口
+    // 即时生效）——窗口 applySettings 触发 glueIfFixed 重估
+    for (BoxWindow *w : m_windows)
+        w->applySettings();
 }
 
 } // namespace poptools

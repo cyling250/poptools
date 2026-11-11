@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <QObject>
 #include <QPoint>
 
@@ -39,6 +41,22 @@ public:
     void start();
     // 离开共享钩子（最后一个实例离开时卸载系统钩子）
     void stop();
+
+    // ---- T-048：吞噬过滤器（共享钩子仍只有这一个系统钩子） ----
+    //
+    // 桌面壁纸带宿主（DesktopBandHost）需要"命中即吞"：真实点击物理上
+    // 落在图标层，必须在钩子回调内同步决定吞掉与否（事后拦截不可能），
+    // 故新增内联谓词通道。谓词在钩子回调线程（安装线程 = 主线程）执行，
+    // 红线 2 豁免纪律同样适用：只许纯判定 + 入队（微秒级矩形检查），
+    // 禁止任何阻塞/IO/等待。返回 true = 该事件被吞（不再 CallNextHookEx，
+    // 系统层收不到）；返回 false = 放行。按下广播不受吞噬影响
+    //（监控/划词等既有消费者仍视其为一次点击活动）。
+    // T-048-FIX（P2-2）：第三参 nativeData 为 MSLLHOOKSTRUCT::mouseData
+    //（滚轮消息的高字 = 滚轮 delta，120 的倍数；其余消息为 0）
+    using SwallowPredicate = std::function<bool(int nativeMsg, const QPoint &nativePos,
+                                                quintptr nativeData)>;
+    static quintptr addSwallowFilter(const SwallowPredicate &pred);
+    static void removeSwallowFilter(quintptr id);
 
 signals:
     // 系统任意位置按下鼠标（左/中/右键）。

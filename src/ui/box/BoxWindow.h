@@ -14,6 +14,10 @@ namespace poptools {
 
 class BoxStore;
 
+namespace desktopband {
+class DesktopBandHost; // T-048：壁纸带宿主（ui/desktopband/DesktopBandHost）
+}
+
 // ============================================================
 // 桌面收纳盒窗口：贴在桌面层的分类卡片（一个盒子一个窗口）。
 //
@@ -30,10 +34,17 @@ class BoxStore;
 // 尺寸由「几行几列」决定：宽 = 2×边距 + cols×格宽，展开高 =
 // 标题栏 + rows×格高（条目超出 rows×cols 截断，右键标题打开目录）。
 //
-// 窗口纪律（复用日历贴桌全套）：顶层窗口 Z 序经 DesktopStack 钉在
-// 日历层之上（Progman 正上方，P-031：SetParent 进桌面层内容不被
+// 呈现载体（T-048）：box/bandMode=true（默认）时驻入壁纸带直绘
+//（DesktopBandHost，真窗口隐藏 + 内容 grab 上传 + 钩子转发交互）；
+// 失败降级/逃生口关闭时回退旧贴底路径——顶层窗口 Z 序经 DesktopStack
+// 钉在日历层之上（Progman 正上方，P-031：SetParent 进桌面层内容不被
 // 合成，故贴 Z 序）；WM_MOUSEACTIVATE → MA_NOACTIVATE 不抢焦点
 // 不抬窗；目录内容经 QFileSystemWatcher 自动刷新。
+//
+// ⚠ 已知限制（T-048，如实呈现）：带内窗口收不到 OLE 拖放——「从桌面
+// 拖文件进盒子」在带模式下不可用（拖放会被图标层当桌面拖放处理）。
+// 备选逃生口：ini 设 box/bandMode=false 回退旧贴底路径即恢复拖入。
+// 点击/右键/改名/折叠/移出等其余交互不受影响。
 // ============================================================
 class BoxWindow : public QWidget
 {
@@ -41,6 +52,10 @@ class BoxWindow : public QWidget
 public:
     explicit BoxWindow(BoxStore *store, const QString &boxId, QWidget *parent = nullptr);
     QString boxId() const { return m_boxId; }
+
+    // T-048-FIX（P3-2）：设置变更后重估呈现载体（box/bandMode 逃生口
+    // 即时生效；模块 settingsChanged 链路调用）
+    void applySettings();
 
 signals:
     void storageError(const QString &message); // 移动失败（模块转托盘气泡）
@@ -59,6 +74,7 @@ protected:
     void dropEvent(QDropEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
+    void changeEvent(QEvent *event) override; // T-048：失焦即回带
     bool eventFilter(QObject *watched, QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
@@ -82,7 +98,16 @@ private:
     void startRename();               // 双击标题文字：内联编辑框
     void finishRename(bool commit);
     void dissolve();                  // 解散：文件移回桌面 + 删盒
-    void glueIfFixed();               // 贴桌（经 DesktopStack，日历层之上）
+    void glueIfFixed();               // 呈现载体：驻带优先，失败降级贴底
+
+    // ---- T-048 壁纸带驻入（与日历同款双表示 + 打字挂起） ----
+    bool bandActive() const;
+    bool ensureBandEntered();
+    void presentToBand();
+    void degradeFromBand();
+    void suspendBandForTyping();
+    void resumeBandIfSuspended();
+    void maybeResumeBand();
 
     BoxStore *m_store = nullptr;
     QString m_boxId;
@@ -110,6 +135,10 @@ private:
     bool m_hoverCollapse = false;
     QLineEdit *m_renameEdit = nullptr; // 双击改名的内联编辑框（懒创建）
     QFileSystemWatcher *m_watcher = nullptr;
+
+    desktopband::DesktopBandHost *m_band = nullptr; // T-048：壁纸带宿主（懒创建）
+    bool m_bandSuspended = false;      // 打字挂起中（真窗口临时可见）
+    bool m_bandSwitchGuard = false;    // 双表示显隐切换中（hideEvent 不收带窗）
 };
 
 } // namespace poptools

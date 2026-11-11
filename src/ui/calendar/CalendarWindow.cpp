@@ -1,5 +1,7 @@
 #include "CalendarWindow.h"
 
+#include "ui/desktopband/DesktopBandHost.h"
+#include "ui/desktopband/DesktopBandLogic.h"
 #include "ui/shared/DesktopStack.h"
 #include "ItemDelegate.h"
 #include "ItemEditDialog.h"
@@ -8,6 +10,7 @@
 #include "core/calendar/LunarCalendar.h"
 #include "core/settings/Settings.h"
 
+#include <QApplication>
 #include <QCalendarWidget>
 #include <QCursor>
 #include <QDateTime>
@@ -332,26 +335,160 @@ void CalendarWindow::setEditMode(bool on)
         return;
     hideInlineAdd();
     m_editMode = on;
+    m_bandSuspended = false; // 打字挂起态随模式切换一并清除
     if (on)
         desktopstack::detach(this); // 编辑期间浮为置顶，退出贴桌队列
+    // T-048：带模式进出——编辑=收起带呈现、真窗口回归（置顶浮动可拖缩）；
+    // 完成编辑走 glueIfFixed 重新驻带
+    if (on && bandActive()) {
+        m_band->hideBand();
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+    }
     applyWindowFlags();
     if (on) {
         raise();
         activateWindow();
     } else if (isVisible()) {
-        glueIfFixed(); // 编辑 → 固定：当前位置贴底
+        glueIfFixed(); // 编辑 → 固定：当前位置驻带/贴底
     }
     updateModeUi();
     update();
 }
 
-// 固定模式贴底：Z 序经 DesktopStack 钉在桌面之上（1s 全局守护归位；
-// 与收纳盒层共用协调器，保证收纳盒层稳定在日历层之上）
+// T-048：固定模式呈现载体二选一——壁纸带直绘（默认）优先，带定位/
+// 初始化失败或 calendar/bandMode=false 时降级为 DesktopStack Z 序贴底
+//（1s 全局守护归位；降级路径保留守护，带模式无守护——带内不可能浮到
+// 应用之上，P-031 横跳根因自然消失）
 void CalendarWindow::glueIfFixed()
 {
     if (m_editMode || !isVisible())
         return;
+    const bool bandEnabled = Settings::instance().calendarBandMode();
+    if (bandEnabled && ensureBandEntered()) {
+        // 带模式：真窗口隐藏（双表示），内容由 DesktopBandHost 呈现。
+        // T-048-FIX（P1-1）：activate 只建链不显示——此刻内容仍可见，
+        // 先过 showBand 的内容可见性门开带呈现，再隐藏真窗口
+        desktopstack::detach(this);
+        m_band->showBand();
+        m_bandSwitchGuard = true;
+        setVisible(false);
+        m_bandSwitchGuard = false;
+        presentToBand();
+        return;
+    }
+    if (m_band && m_band->active())
+        m_band->deactivate(); // bandMode 被关闭：释放带宿主
     desktopstack::attach(this, desktopstack::Layer::Calendar);
+}
+
+// ---------- T-048 壁纸带驻入 ----------
+
+bool CalendarWindow::bandActive() const
+{
+    return m_band && m_band->active();
+}
+
+// 懒创建/激活带宿主（首次固定显示时才探测壁纸带；失败返回 false 降级）
+bool CalendarWindow::ensureBandEntered()
+{
+    if (!m_band) {
+        m_band = new desktopband::DesktopBandHost(this);
+        m_band->setContent(this);
+        connect(m_band, &desktopband::DesktopBandHost::interactionRouted, this,
+                [this](int msg) {
+                    // 移动不重绘（无 hover 反馈需求）；其余交互后内容
+                    // 状态可能变化（导航/勾选/选中），重新上传
+                    if (msg != int(desktopband::RouteMsg::Move))
+                        presentToBand();
+                });
+        connect(m_band, &desktopband::DesktopBandHost::bandLost, this,
+                &CalendarWindow::degradeFromBand);
+    }
+    if (m_band->active()) {
+        m_band->showBand();
+        return true;
+    }
+    return m_band->activate(geometry(), QStringLiteral("桌面日历"),
+                            desktopband::BandLayer::Calendar);
+}
+
+void CalendarWindow::presentToBand()
+{
+    if (bandActive() && m_band->bandVisible())
+        m_band->presentWidget(this);
+}
+
+// 带丢失/重定位失败：释放带宿主，真窗口回归并走贴底路径
+void CalendarWindow::degradeFromBand()
+{
+    qWarning("[band] 日历降级：壁纸带不可用，回退 DesktopStack 贴底路径");
+    // T-048-FIX（P1-1）：内容可见性门——带呈现正在进行（bandVisible 在
+    // deactivate 前取样）才需要真窗口回归；真隐藏态（✕/开关关闭后宿主已
+    // deactivate，此门为兜底）只记状态不 show 真窗口，防 Explorer 重建带
+    // 触发的降级把用户已关闭的日历复活
+    const bool presenting = m_band && m_band->bandVisible();
+    if (m_band) {
+        m_band->deactivate();
+        m_band->deleteLater();
+        m_band = nullptr;
+    }
+    m_bandSuspended = false;
+    if (!m_editMode && (presenting || isVisible())) {
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+        glueIfFixed();
+    }
+}
+
+// 打字挂起：带内窗口无法接收键盘焦点——需要打字的内联输入（双击格子/
+// 底部输入行）临时切回真窗口呈现（同几何，视觉连续），输入结束自动回带
+void CalendarWindow::suspendBandForTyping()
+{
+    if (!bandActive() || m_bandSuspended)
+        return;
+    m_bandSuspended = true;
+    m_band->hideBand();
+    m_bandSwitchGuard = true;
+    setVisible(true);
+    m_bandSwitchGuard = false;
+    activateWindow();
+}
+
+void CalendarWindow::resumeBandIfSuspended()
+{
+    if (!m_bandSuspended)
+        return;
+    m_bandSuspended = false;
+    if (m_editMode || !bandActive() || !isVisible())
+        return; // 编辑切走/带已失效/真隐藏：呈现路径交给 showEvent/glueIfFixed
+    // T-048-FIX（P3-2）：挂起期间逃生口被关闭 → 不回带，真窗口走贴底
+    if (!Settings::instance().calendarBandMode()) {
+        if (m_band)
+            m_band->deactivate();
+        desktopstack::attach(this, desktopstack::Layer::Calendar);
+        return;
+    }
+    // T-048-FIX（P1-1）：此刻真窗口可见——先过 showBand 内容可见性门开
+    // 带呈现，再隐藏真窗口（顺序不可反，门会拦下"先藏后开"）
+    m_band->showBand();
+    m_bandSwitchGuard = true;
+    setVisible(false);
+    m_bandSwitchGuard = false;
+    presentToBand();
+}
+
+void CalendarWindow::maybeResumeBand()
+{
+    if (!m_bandSuspended)
+        return;
+    // 输入控件仍持有焦点（继续打字）→ 不恢复
+    const QWidget *focus = QApplication::focusWidget();
+    if (focus && (focus == m_input || focus == m_inlineAdd))
+        return;
+    resumeBandIfSuspended();
 }
 
 void CalendarWindow::updateModeUi()
@@ -380,6 +517,19 @@ void CalendarWindow::applySettings()
     m_darkText = darkTextFor(m_bg);
     applyTheme();
     refreshDots();
+    // T-048-FIX（P3-2）：设置变更后重估呈现载体（calendar/bandMode 逃生
+    // 口即时生效）——带呈现中真窗口隐藏，glueIfFixed 会因不可见早退，
+    // 关带模式时先恢复可见再二选一；编辑/打字挂起态不重估（回带路径
+    // setEditMode→glueIfFixed 与 resumeBandIfSuspended 各自复查 bandMode）
+    if (!m_editMode && !m_bandSuspended) {
+        if (!Settings::instance().calendarBandMode() && bandActive()) {
+            m_bandSwitchGuard = true;
+            setVisible(true);
+            m_bandSwitchGuard = false;
+        }
+        glueIfFixed();
+    }
+    presentToBand(); // T-048：外观变化（透明度/颜色）重新上传带呈现
 }
 
 void CalendarWindow::applyTheme()
@@ -508,6 +658,7 @@ void CalendarWindow::storeChanged()
     refreshLists();
     refreshDots();
     refreshTitle();
+    presentToBand(); // T-048：带模式下内容变化即重新上传（合并节流）
 }
 
 // ---------- 增删改 ----------
@@ -547,9 +698,14 @@ void CalendarWindow::showInlineAdd(const QDate &date)
     m_inlineAdd->show();
     m_inlineAdd->raise();
     // 固定模式下点击不激活（防抬升），打字需要键盘焦点——用户双击
-    // 是明确意图，此处临时唤起窗口；输入结束守护定时器自动归位
-    if (!m_editMode)
-        activateWindow();
+    // 是明确意图，此处临时唤起窗口；输入结束守护定时器自动归位。
+    // T-048：带模式下带窗无法接键盘——打字挂起临时切回真窗口呈现
+    if (!m_editMode) {
+        if (bandActive())
+            suspendBandForTyping();
+        else
+            activateWindow();
+    }
     m_inlineAdd->setFocus();
 }
 
@@ -557,6 +713,7 @@ void CalendarWindow::hideInlineAdd()
 {
     if (m_inlineAdd && m_inlineAdd->isVisible())
         m_inlineAdd->hide();
+    maybeResumeBand(); // T-048：内联输入结束（回车/Esc/失焦/换月）即回带
 }
 
 bool CalendarWindow::eventFilter(QObject *watched, QEvent *event)
@@ -573,9 +730,15 @@ bool CalendarWindow::eventFilter(QObject *watched, QEvent *event)
         }
     } else if (watched == m_input && event->type() == QEvent::MouseButtonPress) {
         // 固定模式下点击输入行：显式唤起窗口以获得键盘焦点
-        //（MA_NOACTIVATE 抑制了点击激活）
-        if (!m_editMode)
-            activateWindow();
+        //（MA_NOACTIVATE 抑制了点击激活）。T-048：带模式走打字挂起
+        if (!m_editMode) {
+            if (bandActive())
+                suspendBandForTyping();
+            else
+                activateWindow();
+        }
+    } else if (watched == m_input && event->type() == QEvent::FocusOut) {
+        maybeResumeBand(); // T-048：底部输入行失焦即回带
     }
     return QWidget::eventFilter(watched, event);
 }
@@ -692,9 +855,10 @@ void CalendarWindow::syncReorder()
 void CalendarWindow::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    // 固定模式：显示完成后贴底（延迟到事件循环，避开 show 过程中的
-    // 原生窗口状态变化窗口期）
-    if (!m_editMode)
+    // 固定模式：显示完成后驻带/贴底（延迟到事件循环，避开 show 过程中的
+    // 原生窗口状态变化窗口期）。T-048：打字挂起期真窗口临时可见，跳过
+    //（恢复由 resumeBandIfSuspended 负责）
+    if (!m_editMode && !m_bandSuspended)
         QTimer::singleShot(0, this, [this] { glueIfFixed(); });
 }
 
@@ -704,7 +868,29 @@ void CalendarWindow::hideEvent(QHideEvent *event)
     Settings::instance().setCalendarGeometry(saveGeometry());
     Settings::instance().setCalendarSplitter(m_hSplit->saveState().toBase64());
     desktopstack::detach(this);
+    // T-048：真隐藏（设置开关/✕）时连带呈现一并收起；双表示切换
+    //（m_bandSwitchGuard）不收——带窗口继续承载显示；真隐藏同时清
+    // 打字挂起态，下次显示走正常驻带流程
+    if (m_bandSwitchGuard)
+        return QWidget::hideEvent(event);
+    m_bandSuspended = false;
+    // T-048-FIX（P1-1）：真隐藏（✕/开关关闭/shutdown，无 guard 的
+    // hideEvent）→ 宿主 deactivate()（释放 DComp、注销路由、停 heal），
+    // 比 hideBand 彻底——否则 m_active 挂着、heal 照跑，Explorer 重建带
+    // 时整链重建 + 恢复呈现，把用户已 ✕ 关闭的日历幽灵复活
+    if (m_band && m_band->active())
+        m_band->deactivate();
     QWidget::hideEvent(event);
+}
+
+// T-048：打字挂起中失焦（点外部应用）即回带——挂起态的真窗口是普通
+// 浮动窗，不应久留
+void CalendarWindow::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::ActivationChange && !m_editMode
+        && !isActiveWindow())
+        resumeBandIfSuspended();
+    QWidget::changeEvent(event);
 }
 
 // 固定模式：空白处右键转发给桌面（弹出系统桌面右键菜单），让日历

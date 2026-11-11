@@ -26,6 +26,26 @@ target_link_libraries(poptools_ui_shared PUBLIC
 )
 target_include_directories(poptools_ui_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# ---- 桌面壁纸带驻入（T-048：DComp 直绘宿主 + WH_MOUSE_LL 转发路由） ----
+# 被日历/收纳盒链接（禁止 ui_box→ui_calendar 跨库依赖的共享层）
+add_library(poptools_ui_desktopband STATIC
+    desktopband/DesktopBandLogic.cpp
+    desktopband/DesktopBandLogic.h
+    desktopband/DesktopBandHost.cpp
+    desktopband/DesktopBandHost.h
+    desktopband/BandMouseRouter.cpp
+    desktopband/BandMouseRouter.h
+)
+target_link_libraries(poptools_ui_desktopband PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+target_include_directories(poptools_ui_desktopband PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# DComp 直绘链路（探针验证：dcomp + d3d11；user32/gdi32 由 Qt 传递，显式声明防患）
+target_link_libraries(poptools_ui_desktopband PUBLIC user32 gdi32 dcomp d3d11 dxgi)
+
 # ---- 截图功能：画布窗口 + 控制器 + 工具栏 + 标注工具 ----
 add_library(poptools_ui_capture STATIC
     capture/CaptureWindow.cpp
@@ -109,6 +129,7 @@ add_library(poptools_ui_calendar STATIC
 target_link_libraries(poptools_ui_calendar PUBLIC
     poptools_core
     poptools_ui_shared
+    poptools_ui_desktopband
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -123,6 +144,7 @@ add_library(poptools_ui_box STATIC
 target_link_libraries(poptools_ui_box PUBLIC
     poptools_core
     poptools_ui_shared
+    poptools_ui_desktopband
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -167,5 +189,6 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_box
     poptools_ui_goody
     poptools_ui_settings
+    poptools_ui_desktopband
     poptools_ui_shared
 )

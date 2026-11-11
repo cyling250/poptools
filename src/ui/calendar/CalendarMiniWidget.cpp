@@ -1,5 +1,6 @@
 #include "CalendarMiniWidget.h"
 
+#include "ui/desktopband/DesktopBandHost.h"
 #include "ui/shared/DesktopStack.h"
 #include "ItemDelegate.h"
 #include "core/calendar/CalendarStore.h"
@@ -113,10 +114,11 @@ void CalendarMiniWidget::refresh()
 {
     const QDate today = QDate::currentDate();
 
-    // 跨天自动刷新内容（常驻显示，内容由日期驱动）
+    // 跨天自动刷新内容（常驻显示，内容由日期驱动）。
+    // T-048：驻带呈现中 isVisible()==false（真窗口隐藏），视为显示中
     if (m_loadedForDate != today) {
         m_loadedForDate = today;
-    } else if (!isVisible()) {
+    } else if (!isVisible() && !bandActive()) {
         return; // 未显示时无需频繁重排
     }
 
@@ -160,6 +162,7 @@ void CalendarMiniWidget::refresh()
     const int listH = rows * 30 + 6;
     m_list->setFixedHeight(qMax(44, listH));
     adjustSize();
+    presentToBand(); // T-048：内容/高度变化重新上传（合并节流）
 }
 
 void CalendarMiniWidget::applySettings()
@@ -170,6 +173,16 @@ void CalendarMiniWidget::applySettings()
     m_accent = Settings::instance().calendarAccentColor();
     m_darkText = darkTextFor(m_bg);
     applyTheme();
+    // T-048-FIX（P3-2）：设置变更后重估呈现载体（calendar/bandMode 逃生
+    // 口即时生效）——带呈现中真窗口隐藏，关带模式先恢复可见再走
+    // glueIfFixed 二选一；未显示时 glueIfFixed 自行早退
+    if (!Settings::instance().calendarBandMode() && bandActive()) {
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+    }
+    glueIfFixed();
+    presentToBand(); // T-048：外观变化重新上传
 }
 
 void CalendarMiniWidget::applyTheme()
@@ -211,10 +224,8 @@ void CalendarMiniWidget::applyTheme()
 void CalendarMiniWidget::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    // 贴底（Z 序经 DesktopStack 全局守护归位，显示完成后延迟执行）
-    QTimer::singleShot(0, this, [this] {
-        desktopstack::attach(this, desktopstack::Layer::Calendar);
-    });
+    // 驻带/贴底（T-048：驻带优先，显示完成后延迟执行）
+    QTimer::singleShot(0, this, [this] { glueIfFixed(); });
 }
 
 void CalendarMiniWidget::hideEvent(QHideEvent *event)
@@ -223,6 +234,84 @@ void CalendarMiniWidget::hideEvent(QHideEvent *event)
     // 退出守护表（R3 #19）：隐藏后不再需要 Z 序守护——attach 与 detach
     // 配对，否则守护定时器为不可见窗口永不停表（每秒一次 FindWindowW 空转）
     desktopstack::detach(this);
+    // T-048：真隐藏（✕/展开切换）连带呈现一并收起；双表示切换不收
+    if (m_bandSwitchGuard)
+        return;
+    // T-048-FIX（P1-1）：真隐藏 → 宿主 deactivate()（释放 DComp、注销
+    // 路由、停 heal）——只 hideBand 会留下 m_active 挂着 + heal 照跑，
+    // Explorer 重建带时把用户已 ✕ 关闭的迷你条幽灵复活
+    if (m_band && m_band->active())
+        m_band->deactivate();
+}
+
+// ---------- T-048 壁纸带驻入 ----------
+
+bool CalendarMiniWidget::bandActive() const
+{
+    return m_band && m_band->active();
+}
+
+// 驻带优先：bandMode 开启且带就绪 → 真窗口隐藏（双表示），内容由
+// DesktopBandHost 呈现；失败降级为 DesktopStack 贴底
+void CalendarMiniWidget::glueIfFixed()
+{
+    if (!isVisible())
+        return;
+    if (Settings::instance().calendarBandMode() && ensureBandEntered()) {
+        // T-048-FIX（P1-1）：内容仍可见时先过 showBand 的内容可见性门开
+        // 带呈现（activate 只建链不显示），再隐藏真窗口
+        m_band->showBand();
+        m_bandSwitchGuard = true;
+        setVisible(false);
+        m_bandSwitchGuard = false;
+        presentToBand();
+        return;
+    }
+    if (m_band && m_band->active())
+        m_band->deactivate();
+    desktopstack::attach(this, desktopstack::Layer::Calendar);
+}
+
+bool CalendarMiniWidget::ensureBandEntered()
+{
+    if (!m_band) {
+        m_band = new desktopband::DesktopBandHost(this);
+        m_band->setContent(this);
+        connect(m_band, &desktopband::DesktopBandHost::bandLost, this,
+                &CalendarMiniWidget::degradeFromBand);
+    }
+    if (m_band->active()) {
+        m_band->showBand();
+        return true;
+    }
+    return m_band->activate(geometry(), QStringLiteral("今日待办"),
+                            desktopband::BandLayer::Calendar);
+}
+
+void CalendarMiniWidget::presentToBand()
+{
+    if (bandActive() && m_band->bandVisible())
+        m_band->presentWidget(this);
+}
+
+void CalendarMiniWidget::degradeFromBand()
+{
+    qWarning("[band] 迷你条降级：壁纸带不可用，回退 DesktopStack 贴底路径");
+    // T-048-FIX（P1-1）：内容可见性门——带呈现进行中才回归真窗口；
+    // 真隐藏态（✕ 后宿主已 deactivate，此门为兜底）只记状态不 show，
+    // 防 Explorer 重建带触发的降级把已关闭的迷你条复活
+    const bool presenting = m_band && m_band->bandVisible();
+    if (m_band) {
+        m_band->deactivate();
+        m_band->deleteLater();
+        m_band = nullptr;
+    }
+    if (presenting || isVisible()) {
+        m_bandSwitchGuard = true;
+        setVisible(true);
+        m_bandSwitchGuard = false;
+        glueIfFixed();
+    }
 }
 
 void CalendarMiniWidget::paintEvent(QPaintEvent * /*event*/)

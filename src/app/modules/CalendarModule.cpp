@@ -136,7 +136,8 @@ void CalendarModule::onSettingsChanged()
 
 void CalendarModule::refreshMini()
 {
-    if (m_mini && m_mini->isVisible())
+    // T-048：驻带呈现时真窗口隐藏（isVisible()==false），须视为显示中
+    if (m_mini && (m_mini->isVisible() || m_mini->bandActive()))
         m_mini->refresh();
 }
 

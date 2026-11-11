@@ -9,6 +9,7 @@ target_link_libraries(poptools_domain_tests PRIVATE
     poptools_app_infra  # AppServices/FeatureRegistry（链接库目标，不再手抄源文件）
     poptools_core
     poptools_ui_goody   # GoodyWindow（清空按钮 busy/工具期守卫用例）
+    poptools_ui_desktopband # T-048（壁纸带纯逻辑：band 决策/路由/合并节流用例）
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
