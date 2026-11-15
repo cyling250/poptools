@@ -49,7 +49,7 @@ GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
     // 复用现有资源：resources 无 goody 专属图标，窗口图标取应用方砖；
     // 球面中央字标自绘 "G"（见 paintEvent）
     setWindowIcon(QIcon(QStringLiteral(":/app_icon.svg")));
-    // 窗口纪律同 CalendarMiniWidget：无边框工具窗、透明背景、显示不激活
+    // 窗口纪律：无边框工具窗、透明背景、显示不激活
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
@@ -189,7 +189,7 @@ void GoodyFloatingBall::showEvent(QShowEvent *event)
     QWidget::showEvent(event);
     if (m_working)
         startBreath(); // 隐藏期间被停表的呼吸，显示即恢复
-    // 显示完成后贴底（winId 就绪后再 attach，CalendarMiniWidget 先例）
+    // 显示完成后贴底（winId 就绪后再 attach）
     QTimer::singleShot(0, this, [this] {
         if (isVisible())
             desktopstack::attach(this, desktopstack::Layer::Ball);

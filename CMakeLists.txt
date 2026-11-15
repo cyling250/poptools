@@ -10,6 +10,14 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# Release 构建生成 PDB（T-051 崩溃自诊的符号化需要；/Zi 不改变代码生成，
+# /OPT:REF /OPT:ICF 维持 Release 尺寸纪律）
+option(POPTOOLS_RELEASE_PDB "Release 构建生成 PDB（崩溃栈符号化）" ON)
+if(MSVC AND POPTOOLS_RELEASE_PDB)
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zi")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)

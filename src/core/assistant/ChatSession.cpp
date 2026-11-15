@@ -104,7 +104,7 @@ void ChatSession::load()
     const QByteArray raw = f.readAll();
     f.close();
 
-    // R5-C1（对照 BoxStore P2-13 先例）：非 JSON/半截文件或版本不识别时，
+    // R5-C1（对照既有 Store 损坏备份先例）：非 JSON/半截文件或版本不识别时，
     // 先把原件备份为 .bad 再空载——否则之后 GoodyModule::shutdown 的必发
     // save()（或任意一次 saveSoon 落盘）会用空/新历史覆盖原文件，聊天
     // 历史永久丢失且无恢复手段

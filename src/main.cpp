@@ -4,6 +4,7 @@
 #include <QStyleFactory>
 #include <QStyleHints>
 
+#include "app/CrashReporter.h"
 #include "app/MainWindow.h"
 
 #ifdef Q_OS_WIN
@@ -12,6 +13,10 @@
 
 int main(int argc, char *argv[])
 {
+    // 崩溃自诊最先安装（早于 QApplication）：未处理异常/qFatal →
+    // exe 旁 crash/ 落 MiniDump + 符号化栈日志
+    poptools::CrashReporter::install();
+
     QApplication app(argc, argv);
     QApplication::setApplicationName("PopTools");
     QApplication::setOrganizationName("PopTools");

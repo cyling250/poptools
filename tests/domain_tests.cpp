@@ -33,9 +33,6 @@
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/annotation/AnnotationItem.h"
 #include "core/annotation/AnnotationPainter.h"
-#include "core/box/BoxStore.h"
-#include "core/calendar/CalendarStore.h"
-#include "core/calendar/LunarCalendar.h"
 #include "core/capture/QrScanner.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/monitor/ActivityStore.h"
@@ -51,7 +48,6 @@
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
-#include "ui/desktopband/DesktopBandLogic.h"
 #include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyWindow.h"
 #include "ui/goody/MarkdownRenderer.h" // T-050-P2：流式渲染节流/围栏状态机
@@ -474,226 +470,6 @@ private slots:
         QCOMPARE(s.assistantHotKeyModifiers(), quint32(0x0003));
     }
 
-    // ---- 桌面日历：农历换算（已知锚点日期） ----
-    void lunar_known_dates()
-    {
-        // 春节锚点（正月初一）：2024/2025/2026 三年的公历日期为公开事实
-        const LunarDate cny2024 = lunar::fromSolar(QDate(2024, 2, 10));
-        QVERIFY(cny2024.isValid());
-        QCOMPARE(cny2024.year, 2024);
-        QCOMPARE(cny2024.month, 1);
-        QCOMPARE(cny2024.day, 1);
-        QVERIFY(!cny2024.leap);
-
-        const LunarDate cny2025 = lunar::fromSolar(QDate(2025, 1, 29));
-        QCOMPARE(cny2025.year, 2025);
-        QCOMPARE(cny2025.month, 1);
-
-        const LunarDate cny2026 = lunar::fromSolar(QDate(2026, 2, 17));
-        QCOMPARE(cny2026.year, 2026);
-        QCOMPARE(cny2026.month, 1);
-        QCOMPARE(cny2026.day, 1);
-
-        // 中秋：2025-10-06 与 2026-09-25 均为八月十五
-        const LunarDate midAutumn2025 = lunar::fromSolar(QDate(2025, 10, 6));
-        QCOMPARE(midAutumn2025.month, 8);
-        QCOMPARE(midAutumn2025.day, 15);
-        const LunarDate midAutumn2026 = lunar::fromSolar(QDate(2026, 9, 25));
-        QCOMPARE(midAutumn2026.month, 8);
-        QCOMPARE(midAutumn2026.day, 15);
-
-        // 闰月：2023 年闰二月，3 月 22 日为闰二月初一（二月为 30 天大月）
-        const LunarDate leap = lunar::fromSolar(QDate(2023, 3, 22));
-        QCOMPARE(leap.year, 2023);
-        QCOMPARE(leap.month, 2);
-        QCOMPARE(leap.day, 1);
-        QVERIFY(leap.leap);
-        QCOMPARE(leap.monthName(), QStringLiteral("闰二月"));
-
-        // 月名/日名
-        QCOMPARE(cny2026.monthName(), QStringLiteral("正月"));
-        QCOMPARE(cny2026.dayName(), QStringLiteral("初一"));
-        QCOMPARE(lunar::fromSolar(QDate(2026, 2, 26)).dayName(), QStringLiteral("初十"));
-        QCOMPARE(lunar::fromSolar(QDate(2026, 2, 28)).dayName(), QStringLiteral("十二"));
-
-        // 范围护栏
-        QVERIFY(!lunar::fromSolar(QDate(1899, 1, 1)).isValid());
-        QVERIFY(!lunar::fromSolar(QDate(2110, 1, 1)).isValid());
-    }
-
-    // ---- 桌面日历：月历格小字（节日 / 朔日月名 / 平日日名） ----
-    void lunar_day_label()
-    {
-        bool festival = false;
-        QCOMPARE(lunar::dayLabel(QDate(2026, 2, 17), &festival), QStringLiteral("春节"));
-        QVERIFY(festival);
-        QCOMPARE(lunar::dayLabel(QDate(2026, 9, 25), &festival), QStringLiteral("中秋节"));
-        QVERIFY(festival);
-        QCOMPARE(lunar::dayLabel(QDate(2026, 10, 1), &festival), QStringLiteral("国庆节"));
-        QVERIFY(festival);
-
-        // 除夕 = 春节前一天
-        QCOMPARE(lunar::dayLabel(QDate(2026, 2, 16), &festival), QStringLiteral("除夕"));
-        QVERIFY(festival);
-
-        // 初一显示月名（非节日）；平日显示日名
-        QCOMPARE(lunar::dayLabel(QDate(2026, 3, 19), &festival), QStringLiteral("二月"));
-        QVERIFY(!festival);
-        QCOMPARE(lunar::dayLabel(QDate(2026, 3, 21), &festival), QStringLiteral("初三"));
-        QVERIFY(!festival);
-    }
-
-    // ---- 桌面日历：CalendarStore 增删改/排序/分类 JSON 往返（T-043 合并列表语义） ----
-    void calendar_store_roundtrip()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString path = dir.filePath("calendar.json");
-
-        CalendarStore store(path);
-        store.load();
-        // 播种默认分类
-        QVERIFY(store.categories().size() >= 2);
-        const QString workId = [&] {
-            for (const CalendarCategory &c : store.categories())
-                if (c.name == QStringLiteral("工作"))
-                    return c.id;
-            return QString();
-        }();
-        QVERIFY(!workId.isEmpty());
-
-        const QDate day(2026, 11, 8);
-        const QString item1 = store.addItem(day, workId, QStringLiteral("写周报"), true);
-        const QString item2 = store.addItem(day, workId, QStringLiteral("买咖啡"), false);
-        QVERIFY(!item1.isEmpty() && !item2.isEmpty());
-        QCOMPARE(store.itemsForDate(day).size(), 2);
-
-        // 完成切换
-        QVERIFY(store.setDone(item1, true));
-        QVERIFY(!store.setDone(item1, true)); // 幂等
-        QCOMPARE(store.itemsForDate(day).at(0).done, true);
-
-        // 上移/下移：moveItem(-1) 把 item2 提到 item1 前
-        QVERIFY(store.moveItem(item2, -1));
-        QCOMPARE(store.itemsForDate(day).at(0).id, item2);
-        QVERIFY(!store.moveItem(item2, -1)); // 已在顶
-        QVERIFY(store.moveItem(item2, 1));
-        QCOMPARE(store.itemsForDate(day).at(0).id, item1);
-
-        // 一键安排到其他日期
-        QVERIFY(store.moveItemToDate(item2, day.addDays(1)));
-        QCOMPARE(store.itemsForDate(day).size(), 1);
-        QCOMPARE(store.itemsForDate(day.addDays(1)).size(), 1);
-
-        // 拖拽重排回写（先补第二项，取到 2 项再做重排）
-        store.addItem(day, workId, QStringLiteral("第三项"), false);
-        const QList<CalendarItem> dayItems = store.itemsForDate(day);
-        QVERIFY(dayItems.size() == 2);
-        QStringList newOrder{ dayItems.at(1).id, dayItems.at(0).id };
-        store.reorderItems(day, newOrder);
-        QCOMPARE(store.itemsForDate(day).at(0).id, newOrder.at(0));
-        QCOMPARE(store.itemsForDate(day).at(1).id, newOrder.at(1));
-
-        // 分类增改删（删除后条目改挂默认分类）
-        const QString tempCat = store.addCategory(QStringLiteral("临时"), QColor("#123456"));
-        QVERIFY(!tempCat.isEmpty());
-        QVERIFY(store.updateCategory(tempCat, QStringLiteral("临时改"), QColor("#654321")));
-        store.addItem(day, tempCat, QStringLiteral("带临时分类"), false);
-        QVERIFY(store.removeCategory(tempCat));
-        QVERIFY(!store.removeCategory(tempCat)); // 再删无效
-        QVERIFY(!store.removeCategory(CalendarStore::defaultCategoryId())); // 默认分类不可删
-        for (const CalendarItem &it : store.itemsForDate(day))
-            QVERIFY(it.categoryId != tempCat);
-
-        // JSON 往返：重新加载同一路径，条目与属性一致
-        const QList<CalendarItem> before = store.items();
-        const QList<CalendarCategory> catsBefore = store.categories();
-        CalendarStore reloaded(path);
-        reloaded.load();
-        QCOMPARE(reloaded.items().size(), before.size());
-        QCOMPARE(reloaded.categories().size(), catsBefore.size());
-        QCOMPARE(reloaded.itemsForDate(day).size(), 3);
-        QCOMPARE(reloaded.itemsForDate(day.addDays(1)).size(), 1);
-        // 完成态与重要标记均持久化
-        for (const CalendarItem &it : reloaded.itemsForDate(day)) {
-            if (it.id == item1)
-                QVERIFY(it.done);
-            if (it.id == dayItems.at(0).id)
-                QCOMPARE(it.important, true);
-        }
-    }
-
-    // ---- BoxStore：盒子增删改 + 位置持久化 + JSON 往返 ----
-    void box_store_roundtrip()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString path = dir.filePath("boxes.json");
-        BoxStore store(path);
-        store.load();
-        QVERIFY(store.boxes().isEmpty());
-
-        const QString id1 = store.addBox(QStringLiteral("学习"), dir.filePath("学习"), 60, 120);
-        const QString id2 = store.addBox(QStringLiteral("学习"), QString(), 320, 120); // 重名自动加序号
-        QVERIFY(!id1.isEmpty() && !id2.isEmpty());
-        QCOMPARE(store.boxes().size(), 2);
-        QCOMPARE(store.boxes().at(1).name, QStringLiteral("学习 2"));
-
-        bool changed = false;
-        QMetaObject::Connection conn =
-            connect(&store, &BoxStore::changed, [&changed] { changed = true; });
-        QVERIFY(store.setBoxPos(id1, 88, 220));
-        QVERIFY(changed);
-        disconnect(conn);
-
-        // 位置与目录持久化（JSON 往返）
-        BoxStore reloaded(path);
-        reloaded.load();
-        QCOMPARE(reloaded.boxes().size(), 2);
-        QCOMPARE(reloaded.boxes().first().x, 88);
-        QCOMPARE(reloaded.boxes().first().y, 220);
-        QVERIFY(QFileInfo::exists(reloaded.boxes().first().dir)); // 目录自动创建
-        QVERIFY(reloaded.boxes().first().dir.endsWith(QStringLiteral("学习")));
-
-        // 改名 / 删除（目录不动）
-        QVERIFY(reloaded.renameBox(id1, QStringLiteral("学习资料")));
-        QCOMPARE(reloaded.boxes().first().name, QStringLiteral("学习资料"));
-        const QString dir1 = reloaded.boxes().first().dir;
-        QVERIFY(reloaded.removeBox(id1));
-        QVERIFY(!reloaded.removeBox(id1));
-        QVERIFY(QFileInfo::exists(dir1)); // 删盒子不删目录
-    }
-
-    // ---- BoxStore::moveUrlsIntoDir：同名去重与移动 ----
-    void box_move_urls_into_dir()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString src = dir.filePath("src");
-        const QString dst = dir.filePath("dst");
-        QVERIFY(QDir().mkpath(src) && QDir().mkpath(dst));
-        QFile f1(src + "/a.txt"), f2(src + "/b.txt");
-        QVERIFY(f1.open(QIODevice::WriteOnly) && f1.write("1") > 0);
-        QVERIFY(f2.open(QIODevice::WriteOnly) && f2.write("2") > 0);
-        QFile dup(dst + "/a.txt");
-        QVERIFY(dup.open(QIODevice::WriteOnly) && dup.write("dup") > 0);
-        // Windows 下句柄未关的文件不能 rename（共享冲突），先落盘关闭
-        f1.close();
-        f2.close();
-        dup.close();
-
-        QList<QUrl> urls;
-        urls << QUrl::fromLocalFile(f1.fileName()) << QUrl::fromLocalFile(f2.fileName());
-        const QStringList failures = BoxStore::moveUrlsIntoDir(dst, urls);
-        QVERIFY(failures.isEmpty());
-        QVERIFY(!QFileInfo::exists(f1.fileName()));
-        QFile check(dst + "/a.txt"); // 原同名文件未覆盖（内容仍是 dup）
-        QVERIFY(check.open(QIODevice::ReadOnly));
-        QCOMPARE(check.readAll(), QByteArray("dup"));
-        QVERIFY(QFileInfo::exists(dst + "/a (2).txt")); // 新来的加了序号
-        QVERIFY(QFileInfo::exists(dst + "/b.txt"));
-    }
-
     // ---- ActivityStore：JSONL 落盘 / meta 首建 / 保留期清理 ----
     void activity_store_write_and_prune()
     {
@@ -1113,7 +889,7 @@ private slots:
     }
 
     // ---- ChatSession 回归（R5-C2 复审 P1-1/P3-1/P3-2）：损坏会话 → .bad
-    //      逐字节备份 + 空载（对照 box_store_load_corrupt_backup 先例）；
+    //      逐字节备份 + 空载（对照 ChatSession 既有备份先例）；
     //      备份两代轮换（.bad.old）；version 合法但 messages 键缺失并入
     //      损坏路径 ----
     void chat_session_corrupt_backup()
@@ -1381,18 +1157,18 @@ private slots:
 
         WorkingMemory work(base.path());
         // 新建
-        const QJsonObject t1 = work.startTask(QStringLiteral("收纳盒整理"),
+        const QJsonObject t1 = work.startTask(QStringLiteral("桌面文件整理"),
                                               QStringLiteral("把桌面文件分类"));
         QCOMPARE(t1.value("continued").toBool(), false);
         QVERIFY(!t1.value("id").toString().isEmpty());
         // 缓存命中：相近标题续用同一任务
-        const QJsonObject t2 = work.startTask(QStringLiteral("继续收纳盒整理"),
+        const QJsonObject t2 = work.startTask(QStringLiteral("继续桌面文件整理"),
                                               QStringLiteral("换目标"));
         QCOMPARE(t2.value("continued").toBool(), true);
         QCOMPARE(t2.value("id").toString(), t1.value("id").toString());
-        work.updateTask(t1.value("id").toString(), QStringLiteral("已建 3 个盒子"));
+        work.updateTask(t1.value("id").toString(), QStringLiteral("已分 3 个文件夹"));
         QCOMPARE(work.openCount(), 1);
-        QVERIFY(work.promptBlock().contains(QStringLiteral("收纳盒整理")));
+        QVERIFY(work.promptBlock().contains(QStringLiteral("桌面文件整理")));
 
         // 重新装载（模拟重启）：未结任务仍在
         WorkingMemory work2(base.path());
@@ -1401,7 +1177,7 @@ private slots:
 
         // 完成 → 归档 + 工作集释放
         const QJsonObject done = work2.completeTask(t1.value("id").toString(),
-                                                    QStringLiteral("整理完成，共 5 盒"));
+                                                    QStringLiteral("整理完成，共 5 个文件夹"));
         QCOMPARE(done.value("ok").toBool(), true);
         QVERIFY(QFileInfo::exists(done.value("archived").toString()));
         QCOMPARE(work2.openCount(), 0);
@@ -1410,7 +1186,7 @@ private slots:
         const QString md = QString::fromUtf8(archived.readAll());
         archived.close();
         QVERIFY(md.contains(QStringLiteral("整理完成")));
-        QVERIFY(md.contains(QStringLiteral("已建 3 个盒子"))); // 过程笔记入档
+        QVERIFY(md.contains(QStringLiteral("已分 3 个文件夹"))); // 过程笔记入档
     }
 
     // ---- McpStdioClient::loadConfig：配置解析与容错 ----
@@ -1591,26 +1367,6 @@ private slots:
         }
     }
 
-    // ---- BoxStore 回归：addBox 目录参数二次校验（拒绝 ".." 段与相对
-    //      路径，防归一化后在预期位置之外建目录树） ----
-    void box_addbox_rejects_traversal()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        BoxStore store(dir.filePath("boxes.json"));
-        const QString evil =
-            dir.filePath(QStringLiteral("Desktop")) + QStringLiteral("/..\\..\\escaped");
-        QVERIFY(store.addBox(QStringLiteral("x"), evil, 0, 0).isEmpty());
-        QCOMPARE(store.boxes().size(), 0);
-        QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("escaped"))));
-        QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("Desktop/escaped"))));
-        // 相对路径同样拒绝
-        QVERIFY(store.addBox(QStringLiteral("z"), QStringLiteral("relative/path"), 0, 0).isEmpty());
-        // 合法路径不受影响
-        QVERIFY(!store.addBox(QStringLiteral("y"), dir.filePath(QStringLiteral("y")), 0, 0).isEmpty());
-        QVERIFY(QFileInfo::exists(dir.filePath(QStringLiteral("y"))));
-    }
-
     // ---- Scheduler 回归：重注册（设置页改总结时刻）保留当天已跑记账，
     //      不重复触发 ----
     void scheduler_reregister_keeps_lastrun()
@@ -1681,62 +1437,6 @@ private slots:
                         && msgs.at(i + 1).toObject().value("role").toString()
                             == QLatin1String("tool"));
         }
-    }
-
-    // ---- BoxStore 回归（P2-13）：损坏 JSON → 先备份 .bad 再空载；后续
-    //      save 正常重写主文件，备份不被清除 ----
-    void box_store_load_corrupt_backup()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString path = dir.filePath("boxes.json");
-        const QByteArray raw = "{\"version\":1,\"boxes\":[ broken";
-        {
-            QFile f(path);
-            QVERIFY(f.open(QIODevice::WriteOnly));
-            f.write(raw);
-        }
-
-        BoxStore store(path);
-        store.load(); // 损坏 → 空载 + 备份
-        QVERIFY(store.boxes().isEmpty());
-        {
-            QFile bad(path + QStringLiteral(".bad"));
-            QVERIFY(bad.open(QIODevice::ReadOnly));
-            QCOMPARE(bad.readAll(), raw); // 原件逐字节保留
-        }
-
-        // 之后的 save 覆盖主文件；.bad 备份仍在
-        QVERIFY(!store.addBox(QStringLiteral("a"), dir.filePath("a"), 0, 0).isEmpty());
-        QVERIFY(QFileInfo::exists(path + QStringLiteral(".bad")));
-        {
-            QFile bad(path + QStringLiteral(".bad"));
-            QVERIFY(bad.open(QIODevice::ReadOnly));
-            QCOMPARE(bad.readAll(), raw);
-        }
-    }
-
-    // ---- BoxStore 回归（B-1）：moveDirContents（解散搬运的纯 FS 部分，
-    //      工作线程可调）——文件与子目录整体迁出、目录腾空 ----
-    void box_move_dir_contents()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString src = dir.filePath("src");
-        const QString dst = dir.filePath("dst");
-        QVERIFY(QDir().mkpath(src + "/nested") && QDir().mkpath(dst));
-        QFile f1(src + "/a.txt");
-        QVERIFY(f1.open(QIODevice::WriteOnly) && f1.write("1") > 0);
-        f1.close();
-        QFile f2(src + "/nested/b.txt");
-        QVERIFY(f2.open(QIODevice::WriteOnly) && f2.write("2") > 0);
-        f2.close();
-
-        const QStringList failures = BoxStore::moveDirContents(src, dst);
-        QVERIFY(failures.isEmpty());
-        QVERIFY(QFileInfo::exists(dst + "/a.txt"));
-        QVERIFY(QFileInfo::exists(dst + "/nested/b.txt")); // 子目录随 rename 整体迁出
-        QCOMPARE(QDir(src).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 0);
     }
 
     // ---- MonitorQueryTool 回归（P2-2）：stream 白名单——白名单外（含
@@ -2595,7 +2295,7 @@ private slots:
         QVERIFY(!bad.value("ok").toBool(true));
         QVERIFY(bad.value("error").toString().contains(QStringLiteral("日期")));
 
-        // 形状合法但日历非法（2026-13-99）：正则只校形状，按日志缺失容忍
+        // 形状合法但日期非法（2026-13-99）：正则只校形状，按日志缺失容忍
         // 返回 ok + 空行（现行实现的守卫边界，如实钉住）
         QJsonObject cal;
         d.fn(QJsonObject{{"date", QStringLiteral("2026-13-99")}},
@@ -2651,20 +2351,6 @@ private slots:
         s.setAssistantPermMode(QStringLiteral("bogus"));
         QCOMPARE(s.assistantPermMode(), QStringLiteral("ask"));
 
-        // 日历背景/文字不透明度：setter 钳制保底与封顶
-        s.setCalendarOpacity(5);
-        QCOMPARE(s.calendarOpacity(), 20);
-        s.setCalendarOpacity(150);
-        QCOMPARE(s.calendarOpacity(), 100);
-        s.setCalendarTextOpacity(1);
-        QCOMPARE(s.calendarTextOpacity(), 30);
-
-        // 非法颜色名 → 默认色
-        s.setCalendarBgColor(QColor(QStringLiteral("not-a-color")));
-        QCOMPARE(s.calendarBgColor(), QColor(QStringLiteral("#FFFFFF")));
-        s.setCalendarAccentColor(QColor(QStringLiteral("nope")));
-        QCOMPARE(s.calendarAccentColor(), QColor(QStringLiteral("#2B6FF2")));
-
         // 术语对：空对在写入侧剔除，平行表不串位
         const QList<Settings::TermPair> terms{
             {QStringLiteral("GPU"), QStringLiteral("显卡")},
@@ -2678,16 +2364,6 @@ private slots:
         QCOMPARE(back.at(0).second, QStringLiteral("显卡"));
         QCOMPARE(back.at(1).first, QStringLiteral("LLM"));
         QCOMPARE(back.at(1).second, QStringLiteral("大模型"));
-
-        // 读取侧同样钳制（绕过 setter 直写 INI 的手改路径）
-        {
-            QSettings raw(ini, QSettings::IniFormat);
-            raw.setValue("calendar/opacity", 3);       // 低于下限 → 读 20
-            raw.setValue("calendar/textOpacity", 999); // 超上限 → 读 100
-            raw.sync();
-        }
-        QCOMPARE(s.calendarOpacity(), 20);
-        QCOMPARE(s.calendarTextOpacity(), 100);
     }
 
     // ---- FsTool：二进制拒读 / 追加写 / fs.list 500 项上限（异步交付） ----
@@ -2809,116 +2485,6 @@ private slots:
         QTRY_VERIFY(ok2);
         QVERIFY(digest2.contains(QStringLiteral("超出预算已截断")));
         QVERIFY(digest2.size() < 220); // 头部 200 + 截断标注（有界）
-    }
-
-    // ---- BoxStore：网格列/行钳制 + 折叠态持久化 + 直写越界 load 钳回 ----
-    void box_store_layout_clamps_roundtrip()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString path = dir.filePath("boxes.json");
-        BoxStore store(path);
-        store.load();
-        const QString id = store.addBox(QStringLiteral("学习"), dir.filePath("学习"), 60, 120);
-        QVERIFY(!id.isEmpty());
-
-        QVERIFY(store.setBoxCols(id, 0));
-        QCOMPARE(store.boxes().first().cols, 1);
-        QVERIFY(store.setBoxCols(id, 99));
-        QCOMPARE(store.boxes().first().cols, 8);
-        QVERIFY(store.setBoxRows(id, -3));
-        QCOMPARE(store.boxes().first().rows, 1);
-        QVERIFY(store.setBoxRows(id, 50));
-        QCOMPARE(store.boxes().first().rows, 8);
-        QVERIFY(store.setBoxCollapsed(id, true));
-
-        // JSON 往返：钳制值与折叠态持久化
-        BoxStore reloaded(path);
-        reloaded.load();
-        QCOMPARE(reloaded.boxes().size(), 1);
-        QCOMPARE(reloaded.boxes().first().cols, 8);
-        QCOMPARE(reloaded.boxes().first().rows, 8);
-        QCOMPARE(reloaded.boxes().first().collapsed, true);
-
-        // 直写越界 JSON（手改文件路径）：load 钳回合法区间
-        const QByteArray raw =
-            QStringLiteral("{\"version\":1,\"boxes\":[{\"id\":\"x\",\"name\":\"n\","
-                           "\"dir\":\"%1\",\"x\":0,\"y\":0,\"cols\":99,\"rows\":0,"
-                           "\"collapsed\":true}]}")
-                .arg(dir.filePath(QStringLiteral("n")))
-                .toUtf8();
-        {
-            QFile f(path);
-            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-            f.write(raw);
-        }
-        BoxStore reloaded2(path);
-        reloaded2.load();
-        QCOMPARE(reloaded2.boxes().size(), 1);
-        QCOMPARE(reloaded2.boxes().first().cols, 8); // 99 → 上限 8
-        QCOMPARE(reloaded2.boxes().first().rows, 1); // 0 → 下限 1
-        QCOMPARE(reloaded2.boxes().first().collapsed, true);
-    }
-
-    // ---- CalendarStore：条目更新/删除 + 分类回退 + 装载过滤非法条目 ----
-    void calendar_store_update_remove_and_load_filter()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString path = dir.filePath("calendar.json");
-        CalendarStore store(path);
-        store.load();
-        QVERIFY(!store.categories().isEmpty());
-        const QString defId = CalendarStore::defaultCategoryId();
-        const QDate day(2026, 11, 8);
-
-        const QString id = store.addItem(day, defId, QStringLiteral("写周报"), false);
-        QVERIFY(!id.isEmpty());
-
-        // updateItem：改文本/分类/重要并持久化；未知 id false
-        const QString tempCat = store.addCategory(QStringLiteral("临时"), QColor("#ABCDEF"));
-        QVERIFY(!tempCat.isEmpty());
-        QVERIFY(store.updateItem(id, QStringLiteral("写双周报"), tempCat, true));
-        QVERIFY(!store.updateItem(QStringLiteral("no-such-id"), QStringLiteral("x"),
-                                  defId, false));
-        {
-            CalendarStore reloaded(path);
-            reloaded.load();
-            QCOMPARE(reloaded.itemsForDate(day).size(), 1);
-            QCOMPARE(reloaded.itemsForDate(day).at(0).text, QStringLiteral("写双周报"));
-            QCOMPARE(reloaded.itemsForDate(day).at(0).categoryId, tempCat);
-            QCOMPARE(reloaded.itemsForDate(day).at(0).important, true);
-        }
-
-        // removeItem：true → 再删 false
-        QVERIFY(store.removeItem(id));
-        QVERIFY(!store.removeItem(id));
-        QVERIFY(store.itemsForDate(day).isEmpty());
-
-        // 分类回退：未知 id → 默认灰 + "其他"
-        QCOMPARE(store.categoryColor(QStringLiteral("nope")), QColor(0x8A, 0x93, 0xA6));
-        QCOMPARE(store.categoryName(QStringLiteral("nope")), QStringLiteral("其他"));
-
-        // 直写含非法条目的 JSON：缺 text / 坏 date / 缺 id → load 全部跳过
-        const QByteArray raw =
-            "{\"version\":1,\"categories\":[{\"id\":\"c1\",\"name\":\"工作\","
-            "\"color\":\"#123456\"}],\"items\":["
-            "{\"id\":\"ok1\",\"date\":\"2026-11-08\",\"text\":\"合法\",\"category\":\"c1\"},"
-            "{\"id\":\"bad1\",\"date\":\"2026-11-08\",\"category\":\"c1\"},"
-            "{\"id\":\"bad2\",\"date\":\"2026-13-99\",\"text\":\"坏日期\",\"category\":\"c1\"},"
-            "{\"date\":\"2026-11-08\",\"text\":\"缺id\",\"category\":\"c1\"}"
-            "]}";
-        {
-            QFile f(path);
-            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-            f.write(raw);
-        }
-        CalendarStore filtered(path);
-        filtered.load();
-        QCOMPARE(filtered.items().size(), 1); // 非法条目全部跳过
-        QCOMPARE(filtered.items().at(0).id, QStringLiteral("ok1"));
-        QCOMPARE(filtered.categories().size(), 1);
-        QCOMPARE(filtered.categories().at(0).name, QStringLiteral("工作"));
     }
 
     // ---- 守卫合集：权限模式回退 / 工作记忆 / 长期记忆 / 工具注册 / 调度 ----
@@ -3271,359 +2837,6 @@ private slots:
         OwnWriteGuard::reset();
         QVERIFY(!OwnWriteGuard::isSelfWrite(s1));
 #endif
-    }
-
-    // ---- T-048 桌面壁纸带纯逻辑：band 定位决策（注入句柄） ----
-    void desktopband_resolve_band_decisions()
-    {
-        using namespace desktopband;
-        const void *prog = reinterpret_cast<const void *>(quintptr(0x11));
-        const void *defview = reinterpret_cast<const void *>(quintptr(0x22));
-        const void *band = reinterpret_cast<const void *>(quintptr(0x33));
-
-        // 标准分裂形态：Progman ← [DefView(图标层), WorkerW(壁纸带)] → Ready
-        {
-            BandProbeInput in;
-            in.progman = prog;
-            in.defview = defview;
-            in.workerAfterDefview = band;
-            const BandProbeResult r = resolveBand(in);
-            QCOMPARE(r.verdict, BandVerdict::Ready);
-            QCOMPARE(r.band, band);
-        }
-        // 图标层在但壁纸带未分裂 → Splice（0x052C 幂等触发）
-        {
-            BandProbeInput in;
-            in.progman = prog;
-            in.defview = defview;
-            QCOMPARE(resolveBand(in).verdict, BandVerdict::Splice);
-        }
-        // 图标层缺席：无 DefView 子窗的顶层 WorkerW 即带 → Ready
-        {
-            BandProbeInput in;
-            in.progman = prog;
-            BandProbeInput::TopWorker iconHost{ reinterpret_cast<const void *>(quintptr(0x44)), true };
-            BandProbeInput::TopWorker bare{ reinterpret_cast<const void *>(quintptr(0x55)), false };
-            in.topWorkers = { iconHost, bare };
-            const BandProbeResult r = resolveBand(in);
-            QCOMPARE(r.verdict, BandVerdict::Ready);
-            QCOMPARE(r.band, reinterpret_cast<const void *>(quintptr(0x55)));
-        }
-        // 全部 WorkerW 都挂 DefView（分裂失败）→ Splice
-        {
-            BandProbeInput in;
-            in.progman = prog;
-            BandProbeInput::TopWorker iconHost{ reinterpret_cast<const void *>(quintptr(0x44)), true };
-            in.topWorkers = { iconHost };
-            QCOMPARE(resolveBand(in).verdict, BandVerdict::Splice);
-        }
-        // 无 Progman（Explorer 未就绪）→ Fail
-        {
-            BandProbeInput in;
-            QCOMPARE(resolveBand(in).verdict, BandVerdict::Fail);
-        }
-    }
-
-    // ---- T-048：降级决策（bandMode=false / band 缺失 → 贴底路径） ----
-    void desktopband_degrade_decision()
-    {
-        using namespace desktopband;
-        QCOMPARE(choosePresentPath(false, true), PresentPath::GlueStack);
-        QCOMPARE(choosePresentPath(true, false), PresentPath::GlueStack);
-        QCOMPARE(choosePresentPath(false, false), PresentPath::GlueStack);
-        QCOMPARE(choosePresentPath(true, true), PresentPath::Band);
-    }
-
-    // ---- T-048：命中判定与坐标换算（屏幕物理 → 宿主客户区物理） ----
-    void desktopband_route_hit_and_client_coords()
-    {
-        using namespace desktopband;
-        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300),
-                                     QRectF(600, 200, 200, 200) };
-        RouteState st;
-        const qint64 t = 1000;
-
-        // 命中日历矩形：左键按下 → 吞噬 + LeftDown 路由到宿主 0
-        RouteOutcome o =
-            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), t, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        QCOMPARE(o.nativePos, QPointF(150, 250));
-        // 客户区换算：屏幕物理坐标 − 宿主矩形左上
-        QCOMPARE(toClientPhysical(QPointF(150, 250), rects.at(0)),
-                 QPointF(50, 50));
-        QCOMPARE(toClientPhysical(QPointF(100, 200), rects.at(0)), QPointF(0, 0));
-        // 抬起：捕获宿主收到配对抬起
-        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), t + 10, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::LeftUp);
-        // 未命中矩形：放行（点击图标/桌面菜单由系统自然处理）
-        o = routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(50, 50), t + 20, 500, 4, 4, false);
-        QVERIFY(!o.swallow);
-        QCOMPARE(o.band, -1);
-        // Move 未命中且无 hover → 放行；命中 → 吞噬路由 hover
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(50, 50), t + 30, 500, 4, 4, false);
-        QVERIFY(!o.swallow);
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(650, 250), t + 40, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 1);
-        QCOMPARE(o.msg, RouteMsg::Move);
-        // 划出：放行 + 对原宿主发 Leave（清 hover）
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(50, 50), t + 50, 500, 4, 4, false);
-        QVERIFY(!o.swallow);
-        QCOMPARE(o.leaveBand, 1);
-    }
-
-    // ---- T-048：拖拽捕获 + 双击合成 + 右键与 NC 归一 + 放行白名单 ----
-    void desktopband_route_capture_and_dblclick()
-    {
-        using namespace desktopband;
-        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
-
-        // 按下 → 拖拽捕获：移动出界仍吞噬并路由到捕获宿主（配对保障）
-        RouteState st;
-        RouteOutcome o =
-            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(120, 220), 1000, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(1600, 900), 1050, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::Move);
-        // 出界抬起：吞噬一次并清除捕获；随后同位置事件放行
-        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(1600, 900), 1100, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.msg, RouteMsg::LeftUp);
-        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(1600, 900), 1150, 500, 4, 4, false);
-        QVERIFY(!o.swallow);
-
-        // 双击合成：同宿主 + 时间窗内两次按下 → 第二次为 LeftDbl；
-        // 超出时间窗 → 仍是 LeftDown
-        RouteState st2;
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(150, 250), 2000, 500, 4, 4, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(150, 250), 2050, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(152, 252), 2200, 500, 4, 4, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDbl);
-        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(152, 252), 2250, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(152, 252), 3600, 500, 4, 4, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-
-        // 右键：命中吞噬、未命中放行；NC 变体归一为客户区消息
-        RouteState st3;
-        o = routeMouse(st3, rects, WM_RBUTTONDOWN, QPointF(150, 250), 100, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::RightDown);
-        o = routeMouse(st3, rects, WM_RBUTTONUP, QPointF(150, 250), 150, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.msg, RouteMsg::RightUp);
-        o = routeMouse(st3, rects, WM_NCRBUTTONDOWN, QPointF(50, 50), 200, 500, 4, 4, false);
-        QVERIFY(!o.swallow);
-
-        // 中键/X 键：一律放行（classify → None）。
-        // T-048-FIX（P2-2）：滚轮不再放行——命中吞噬并路由（见专测），
-        // 未命中放行
-        RouteState st4;
-        QVERIFY(!routeMouse(st4, rects, WM_MBUTTONDOWN, QPointF(150, 250), 0, 500, 4, 4, false)
-                     .swallow);
-        QVERIFY(!routeMouse(st4, rects, WM_MOUSEWHEEL, QPointF(50, 50), 0, 500, 4, 4, false)
-                     .swallow);
-        QCOMPARE(classifyNativeMsg(WM_NCLBUTTONDOWN), RouteMsg::LeftDown);
-        QCOMPARE(nativeMsgForRoute(RouteMsg::LeftDbl), WM_LBUTTONDBLCLK);
-        QCOMPARE(nativeMsgForRoute(RouteMsg::Leave), WM_MOUSELEAVE);
-    }
-
-    // ---- T-048-FIX（P2-2）：滚轮路由——命中吞掉并路由到宿主，未命中放行 ----
-    void desktopband_route_wheel()
-    {
-        using namespace desktopband;
-        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
-        RouteState st;
-
-        // 分类与还原消息
-        QCOMPARE(classifyNativeMsg(WM_MOUSEWHEEL), RouteMsg::Wheel);
-        QCOMPARE(nativeMsgForRoute(RouteMsg::Wheel), WM_MOUSEWHEEL);
-
-        // 命中：吞掉 + Wheel 路由（带模式下日历列表才能滚动）
-        const RouteOutcome o =
-            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(150, 250), 0, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::Wheel);
-        QCOMPARE(o.nativePos, QPointF(150, 250));
-
-        // 未命中：放行
-        const RouteOutcome miss =
-            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(50, 50), 10, 500, 4, 4, false);
-        QVERIFY(!miss.swallow);
-        QCOMPARE(miss.band, -1);
-
-        // 滚轮不改变捕获/hover 状态：捕获中滚轮按命中路由，状态保持
-        RouteOutcome d =
-            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), 20, 500, 4, 4, false);
-        QVERIFY(d.swallow);
-        const RouteOutcome w =
-            routeMouse(st, rects, WM_MOUSEWHEEL, QPointF(150, 250), 30, 500, 4, 4, false);
-        QVERIFY(w.swallow);
-        QCOMPARE(w.band, 0);
-        // 捕获仍有效（滚轮未清除），抬起照常配对
-        const RouteOutcome up =
-            routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), 40, 500, 4, 4, false);
-        QVERIFY(up.swallow);
-        QCOMPARE(up.msg, RouteMsg::LeftUp);
-    }
-
-    // ---- T-048-FIX（P3-7）：双击距离窗改用系统度量开区间矩形语义 ----
-    void desktopband_route_dblclick_system_metrics()
-    {
-        using namespace desktopband;
-        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
-        // 距离窗 4×4：|dx|<4 且 |dy|<4 内合成双击，开区间（=4 不算）
-        const int cx = 4, cy = 4;
-
-        RouteState st;
-        RouteOutcome o =
-            routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
-        QVERIFY(o.swallow);
-        // 界内 (3,0)：双击
-        o = routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(153, 250), 1100, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDbl);
-        o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(153, 250), 1150, 500, cx, cy, false);
-        QVERIFY(o.swallow);
-
-        // 边界 |dx|==cx：超出开区间 → 不是双击
-        RouteState st2;
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        o = routeMouse(st2, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(154, 250), 1100, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        // y 向界内、x 向超界 → 仍不是双击（矩形语义，非曼哈顿距离）
-        RouteState st3;
-        o = routeMouse(st3, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        o = routeMouse(st3, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st3, rects, WM_LBUTTONDOWN, QPointF(154, 251), 1100, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-
-        // 时间窗不受距离窗替换影响：窗外仍是 LeftDown
-        RouteState st4;
-        o = routeMouse(st4, rects, WM_LBUTTONDOWN, QPointF(150, 250), 1000, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-        o = routeMouse(st4, rects, WM_LBUTTONUP, QPointF(150, 250), 1050, 500, cx, cy, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st4, rects, WM_LBUTTONDOWN, QPointF(151, 251), 3000, 500, cx, cy, false);
-        QCOMPARE(o.msg, RouteMsg::LeftDown);
-    }
-
-    // ---- T-048-FIX（P1-2）：按钮按住时未捕获 Move 放行（routeMouse 纯函数层） ----
-    void desktopband_route_move_pressed_passthrough()
-    {
-        using namespace desktopband;
-        const QVector<QRectF> rects{ QRectF(100, 200, 400, 300) };
-
-        // 按压中（外来拖拽）Move 横穿宿主矩形：放行且不产生 Leave/不更新 hover
-        RouteState st;
-        RouteOutcome o =
-            routeMouse(st, rects, WM_MOUSEMOVE, QPointF(150, 250), 0, 500, 4, 4, true);
-        QVERIFY(!o.swallow);
-        QCOMPARE(o.band, -1);
-        QCOMPARE(o.leaveBand, -1);
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(1600, 900), 10, 500, 4, 4, true);
-        QVERIFY(!o.swallow);
-        QCOMPARE(o.leaveBand, -1); // 划出也不误发 Leave（hover 未被设置）
-
-        // 松开后同一位置：恢复正常悬停吞噬路由
-        o = routeMouse(st, rects, WM_MOUSEMOVE, QPointF(150, 250), 20, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::Move);
-
-        // 已捕获（本带发起的拖拽）时按压中的 Move 保持吞噬 + 配对路由
-        RouteState st2;
-        o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(120, 220), 0, 500, 4, 4, false);
-        QVERIFY(o.swallow);
-        o = routeMouse(st2, rects, WM_MOUSEMOVE, QPointF(1600, 900), 10, 500, 4, 4, true);
-        QVERIFY(o.swallow);
-        QCOMPARE(o.band, 0);
-        QCOMPARE(o.msg, RouteMsg::Move);
-    }
-
-    // ---- T-048-FIX（P3-8）：矩形重叠按带内 Z 序取优先（大 = 靠顶） ----
-    void desktopband_route_overlap_z_order()
-    {
-        using namespace desktopband;
-        // 两宿主矩形在 x∈[50,100) 重叠
-        const QVector<QRectF> rects{ QRectF(0, 0, 100, 100),
-                                     QRectF(50, 0, 100, 100) };
-        const QPointF inside(75, 50);
-
-        // 盒子层（id 1）在日历层（id 0）之上（与 DesktopStack 对齐）→ 命中 1
-        {
-            RouteState st;
-            const QVector<int> z{ 0, 1 };
-            const RouteOutcome o =
-                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false, z);
-            QVERIFY(o.swallow);
-            QCOMPARE(o.band, 1);
-        }
-        // Z 序反转（日历在上）→ 命中 0
-        {
-            RouteState st;
-            const QVector<int> z{ 1, 0 };
-            const RouteOutcome o =
-                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false, z);
-            QVERIFY(o.swallow);
-            QCOMPARE(o.band, 0);
-        }
-        // 未提供 Z 序：退回注册序首命中（既有行为）
-        {
-            RouteState st;
-            const RouteOutcome o =
-                routeMouse(st, rects, WM_LBUTTONDOWN, inside, 0, 500, 4, 4, false);
-            QVERIFY(o.swallow);
-            QCOMPARE(o.band, 0);
-        }
-        // 无重叠区域：Z 序不参与（各自命中）
-        {
-            RouteState st;
-            const QVector<int> z{ 0, 1 };
-            RouteOutcome o =
-                routeMouse(st, rects, WM_LBUTTONDOWN, QPointF(10, 50), 0, 500, 4, 4, false, z);
-            QCOMPARE(o.band, 0);
-            // 捕获中出界抬起仍配对路由到捕获宿主（不按 Z 序换目标）
-            o = routeMouse(st, rects, WM_LBUTTONUP, QPointF(120, 50), 10, 500, 4, 4, false, z);
-            QVERIFY(o.swallow);
-            QCOMPARE(o.msg, RouteMsg::LeftUp);
-            QCOMPARE(o.band, 0);
-            // 新按下（独立状态）：命中 id 1
-            RouteState st2;
-            o = routeMouse(st2, rects, WM_LBUTTONDOWN, QPointF(120, 50), 20, 500, 4, 4, false, z);
-            QCOMPARE(o.band, 1);
-        }
-    }
-
-    // ---- T-048：上传合并节流状态机（单事件循环至多一次 Commit） ----
-    void desktopband_upload_coalescer()
-    {
-        using namespace desktopband;
-        UploadCoalescer c;
-        QVERIFY(c.submit());      // 首帧：需调度 flush
-        QVERIFY(!c.submit());     // 同一事件循环内再提交：帧被合并
-        QVERIFY(!c.submit());
-        QVERIFY(c.beginFlush());  // flush 取走待传帧并清调度位
-        QVERIFY(!c.beginFlush()); // 空 flush：无帧、调度位已清
-        QVERIFY(c.submit());      // 下一事件循环可重新调度
-        QVERIFY(c.beginFlush());
-        QVERIFY(!c.beginFlush());
     }
 
     // ============================================================

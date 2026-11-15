@@ -16,15 +16,14 @@ namespace desktopstack {
 
 namespace {
 // 各层注册表（QPointer 防悬挂：窗口析构后自动变空并清除）
-// T-050：新增 Ball 层（悬浮球），层表随之扩到 3
-constexpr int kLayerCount = 3;
-// T-050-FIX（P3-3）：层表条数与 Layer 枚举平行维护，编译期锁死防漏改
+constexpr int kLayerCount = 1;
+// 层表条数与 Layer 枚举平行维护，编译期锁死防漏改
 static_assert(int(Layer::Ball) == kLayerCount - 1,
               "kLayerCount must track desktopstack::Layer (Ball is topmost)");
 QVector<QPointer<QWidget>> g_layers[kLayerCount];
 QTimer *g_timer = nullptr;
 
-// 自底向上重排：Progman → 日历层 → 收纳盒层 → 悬浮球层。
+// 自底向上重排：Progman → 悬浮球层。
 // 已就位的窗口零开销（仅一次 GetWindow 比较）。
 void assertOrder()
 {

@@ -5,13 +5,9 @@
 
 #include "AppServices.h"
 #include "core/assistant/ToolRegistry.h"
-#include "core/box/BoxStore.h"
-#include "core/calendar/CalendarStore.h"
 #include "core/ocr/RapidOcrService.h"
 #include "modules/ActivityMonitorModule.h"
-#include "modules/BoxModule.h"
 #include "modules/CaptureModule.h"
-#include "modules/CalendarModule.h"
 #include "modules/GoodyModule.h"
 #include "modules/PinModule.h"
 #include "modules/SelectionTranslateModule.h"
@@ -34,16 +30,10 @@ MainWindow::MainWindow(QObject *parent)
 
     // ---- 共享服务（组合根持有所有权，注入各功能模块） ----
     m_ocr = new RapidOcrService(this);
-    m_calendarStore = new CalendarStore(this);
-    m_calendarStore->load();
-    m_boxStore = new BoxStore(this);
-    m_boxStore->load();
     m_toolRegistry = new ToolRegistry(this);
     m_services = new AppServices(this);
     m_services->hotkey = &m_hotKey;
     m_services->ocr = m_ocr;
-    m_services->calendarStore = m_calendarStore;
-    m_services->boxStore = m_boxStore;
     m_services->toolRegistry = m_toolRegistry;
     m_services->trayMenu = m_menu;
     // 托盘气泡通知（模块的非交互结果反馈，如贴图 OCR 完成/失败）
@@ -55,8 +45,6 @@ MainWindow::MainWindow(QObject *parent)
     m_registry.add(std::make_unique<CaptureModule>());
     m_registry.add(std::make_unique<PinModule>());
     m_registry.add(std::make_unique<SelectionTranslateModule>());
-    m_registry.add(std::make_unique<CalendarModule>());
-    m_registry.add(std::make_unique<BoxModule>());
     m_registry.add(std::make_unique<ActivityMonitorModule>());
     m_registry.add(std::make_unique<GoodyModule>());
     m_registry.initAll(*m_services);
@@ -109,10 +97,10 @@ MainWindow::~MainWindow()
 
 void MainWindow::onShowSettings()
 {
-    SettingsDialog dlg(m_calendarStore, nullptr);
+    SettingsDialog dlg(nullptr);
     dlg.exec();
     // 设置保存后刷新运行时组件：Translator 每次 translate() 读取最新 Settings，
-    // 无需额外操作；桌面日历等有缓存外观的模块经 settingsChanged 信号重应用。
+    // 无需额外操作；有缓存外观的模块经 settingsChanged 信号重应用。
     if (dlg.result() == QDialog::Accepted)
         m_services->notifySettingsChanged();
 }

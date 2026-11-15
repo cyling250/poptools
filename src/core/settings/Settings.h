@@ -73,40 +73,6 @@ public:
     quint32 selectionTranslateHotKeyModifiers() const;
     void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);
 
-    // ---- 桌面日历 ----
-    // 是否显示桌面日历（设置页开关；勾选即启动时自动显示，取消即隐藏）
-    bool calendarEnabled() const;
-    void setCalendarEnabled(bool on);
-    // 整窗不透明度拆分两路：背景（卡片底色 alpha）与文字（文字/强调色
-    // alpha），分别 20-100 / 30-100（默认 95 / 100）
-    int calendarOpacity() const;
-    void setCalendarOpacity(int percent);
-    int calendarTextOpacity() const;
-    void setCalendarTextOpacity(int percent);
-    // 背景色 / 强调色（默认白底 + 应用主色 #2B6FF2）
-    QColor calendarBgColor() const;
-    void setCalendarBgColor(const QColor &color);
-    QColor calendarAccentColor() const;
-    void setCalendarAccentColor(const QColor &color);
-    // 窗口几何与分栏状态（base64 序列化；空串 = 未记忆）
-    QByteArray calendarGeometry() const;
-    void setCalendarGeometry(const QByteArray &state);
-    QByteArray calendarSplitter() const;
-    void setCalendarSplitter(const QByteArray &state);
-    // T-048 逃生口：固定模式呈现载体（true=驻入壁纸带直绘，false=回退
-    // 既有贴底路径；ini 手改，不进设置 UI，默认 true）
-    bool calendarBandMode() const;
-    void setCalendarBandMode(bool on);
-
-    // ---- 桌面收纳盒 ----
-    // 是否显示桌面收纳盒（设置页开关；勾选即启动时自动出现）
-    bool organizerEnabled() const;
-    void setOrganizerEnabled(bool on);
-    // T-048 逃生口：收纳盒呈现载体（true=驻入壁纸带直绘，false=回退
-    // 既有贴底路径；ini 手改，不进设置 UI，默认 true）
-    bool boxBandMode() const;
-    void setBoxBandMode(bool on);
-
     // ---- 活动监控 ----
     // 总开关（默认关闭；开启即授权键盘键入记录 + 窗口时间线 + OCR 快照，
     // 钩子常驻，红线2豁免条款见 docs/handover.md）

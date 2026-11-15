@@ -12,8 +12,6 @@ class QMenu;
 
 namespace poptools {
 
-class BoxStore;
-class CalendarStore;
 class GlobalHotKey;
 class RapidOcrService;
 class ToolRegistry;
@@ -36,8 +34,6 @@ public:
     // ---- 共享服务（组合根在 initAll 前注入并持有所有权） ----
     GlobalHotKey *hotkey = nullptr;   // 全局热键注册器
     RapidOcrService *ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
-    CalendarStore *calendarStore = nullptr; // 桌面日历数据仓库（全局唯一）
-    BoxStore *boxStore = nullptr;     // 桌面收纳盒数据仓库（全局唯一）
     ToolRegistry *toolRegistry = nullptr; // Goody 工具注册表（模块 init 中
                                           // registerTool 贡献"掌控本软件"能力）
     QMenu *trayMenu = nullptr;        // 托盘菜单（模块经 addTrayAction 贡献菜单项）

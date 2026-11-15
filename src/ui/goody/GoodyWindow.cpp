@@ -53,7 +53,7 @@ QString formatSessionTime(qint64 ms)
 GoodyWindow::GoodyWindow(QWidget *parent)
     : QWidget(parent)
 {
-    // 窗口纪律（BoxWindow/TranslateCard 先例）：无边框工具窗；聊天窗需
+    // 窗口纪律（TranslateCard 先例）：无边框工具窗；聊天窗需
     // 正常激活抢焦点，不用 WA_ShowWithoutActivating
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
@@ -62,7 +62,7 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     resize(kDefaultWidth, kDefaultHeight);
     setMinimumSize(560, 430);
     // T-050-P2 几何记忆（assistant/windowGeometry 新键）；无记忆 → 居中
-    // 弹出（CalendarWindow 先例，需求单定案：居中替代旧定位）
+    // 弹出（需求单定案：居中替代旧定位）
     if (!restoreGeometry(Settings::instance().assistantWindowGeometry())) {
         const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
         move(avail.center() - rect().center());
@@ -744,7 +744,7 @@ void GoodyWindow::paintEvent(QPaintEvent *event)
 void GoodyWindow::hideEvent(QHideEvent *event)
 {
     QWidget::hideEvent(event);
-    // T-050-P2：几何记忆新键（window self-manage，CalendarWindow 先例）
+    // T-050-P2：几何记忆新键（window self-manage）
     Settings::instance().setAssistantWindowGeometry(saveGeometry());
     emit windowHidden();
 }

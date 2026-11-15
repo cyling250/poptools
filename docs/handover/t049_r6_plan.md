@@ -24,21 +24,20 @@
 
 编号约定：**R6-B\*** 视觉/行为缺陷、**R6-C\*** 代码质量、**R6-D\*** 工具脚本。每条必须给 `文件:行号` + 证据，禁止猜测性泛泛清单。
 
-- **A【UI 显示路径 DPI 扫描】**：`grep -n "scaled(\|setDevicePixelRatio\|SmoothTransformation" src/ui src/app` 逐处判定——凡是"物理像素图 → 显示"路径且未带 DPR 元数据的都是 R6-B1 同款嫌疑。重点：MonthView 自绘、放大镜、PinWindow 缩放显示、图标生成（P-021 镜像：**带 DPR 元数据的位图进 QIcon 反而会被物理尺寸裁剪**——图标类与画面类的正确姿势相反，逐处判断归属）
+- **A【UI 显示路径 DPI 扫描】**：`grep -n "scaled(\|setDevicePixelRatio\|SmoothTransformation" src/ui src/app` 逐处判定——凡是"物理像素图 → 显示"路径且未带 DPR 元数据的都是 R6-B1 同款嫌疑。重点：放大镜、PinWindow 缩放显示、图标生成（P-021 镜像：**带 DPR 元数据的位图进 QIcon 反而会被物理尺寸裁剪**——图标类与画面类的正确姿势相反，逐处判断归属）
 - **B【QSS/主题一致性】**：P-022（poptools:: 命名空间类禁用类型选择器，QSS 静默失效——扫所有 setStyleSheet 上下文）；P-023（浮窗关键颜色须内联样式+调色板双通道）；settingsChanged 广播后各模块外观重应用是否有遗漏控件
-- **C【R5 完整性核对 + 提交】**：`git diff` 对照交接文档 R5 清单 7 个编号（B1/B2/B5/C1/C2/D1/D2）输出落码位置表；全文搜 `R5-` 查 B3/B4 缺号是否有痕迹；diff 本身质量复审（新引入缺陷）；然后提交（建议 message：`fix(ocr,calendar,assistant,hotkey): R5 修复复审遗留 7 项`）
-- **D【性能红线复查】**：六条红线对照 monitor/assistant/box/calendar 新代码；红线 2 豁免条款（钩子常驻三前提）专项核对；红线 1 注意 T-047 实施时 UIA COM 禁入 GUI 线程（P-025 前车之鉴）
+- **C【R5 完整性核对 + 提交】**：`git diff` 对照交接文档 R5 清单 7 个编号（B1/B2/B5/C1/C2/D1/D2）输出落码位置表；全文搜 `R5-` 查 B3/B4 缺号是否有痕迹；diff 本身质量复审（新引入缺陷）；然后提交（建议 message：`fix(ocr,assistant,hotkey): R5 修复复审遗留 7 项`）
+- **D【性能红线复查】**：六条红线对照 monitor/assistant 新代码；红线 2 豁免条款（钩子常驻三前提）专项核对；红线 1 注意 T-047 实施时 UIA COM 禁入 GUI 线程（P-025 前车之鉴）
 - **E【测试缺口】**：domain_tests 40 用例 vs 新域逻辑——查 GoodyModule 工具回合循环、PermissionManager 审计路径、McpStdioClient 握手状态机是否有可测纯逻辑未覆盖
 
 ## 3. R6 之后的排期（已在交接文档，此处只列顺序）
 
 1. **T-047 输入监控升级**（UIA 取文 + 剪贴板流 + OCR 兜底 v4）——Goody 检索质量的数据红利，建议先做
-2. **T-048 桌面件层级**（DComp+WorkerW 实验 → 日历+收纳盒落地，目标形态用户已锁定）
-3. **Goody 界面升级三阶段**（悬浮球 → 聊天窗重构 → 总览+全历史检索，见需求单）
+2. **Goody 界面升级三阶段**（悬浮球 → 聊天窗重构 → 总览+全历史检索，见需求单）
 
 ## 4. 执行顺序与纪律
 
-**R5 提交 → R6 探查（A~E 并行）→ R6 批量修复（一轮全修）→ ctest 全绿 → 提交 → T-047 → T-048 实验 → Goody UI 三阶段**
+**R5 提交 → R6 探查（A~E 并行）→ R6 批量修复（一轮全修）→ ctest 全绿 → 提交 → T-047 → Goody UI 三阶段**
 
 - 修复轮纪律：每条 R6-XX 修复后在代码内留 `R6-XX` 标记注释（沿用 R5 惯例）；视觉项一律用户目测验收（P-031 教训：AI 不做自主验收）
 - 台账/坑册随修随记；主档条目 ≤3 行，细节进本文件或对应细档

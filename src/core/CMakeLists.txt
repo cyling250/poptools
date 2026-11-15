@@ -43,14 +43,6 @@ add_library(poptools_core STATIC
     annotation/AnnotationPainter.cpp
     annotation/AnnotationPainter.h
     annotation/AnnotationTypes.h
-    calendar/LunarCalendar.cpp
-    calendar/LunarCalendar.h
-    calendar/CalendarStore.cpp
-    calendar/CalendarStore.h
-    box/BoxStore.cpp
-    box/BoxStore.h
-    box/IconExtractor.cpp
-    box/IconExtractor.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp
@@ -106,7 +98,7 @@ target_link_libraries(poptools_core PUBLIC
 )
 
 # Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）、
-# 收纳盒图标提取（shell32：SHGetFileInfo/SHGetImageList）、
+# 回收站删除（shell32：SHFileOperation，FsTool）、
 # UIA 取文（ole32：CoInitializeEx/CoCreateInstance；oleaut32：BSTR）
 if(WIN32)
     target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32 ole32 oleaut32)

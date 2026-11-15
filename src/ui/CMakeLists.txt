@@ -13,7 +13,7 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
-# ---- 共享窗口技术（贴桌 Z 序协调器；日历/收纳盒共用） ----
+# ---- 共享窗口技术（贴桌 Z 序协调器） ----
 add_library(poptools_ui_shared STATIC
     shared/DesktopStack.cpp
     shared/DesktopStack.h
@@ -23,28 +23,9 @@ target_link_libraries(poptools_ui_shared PUBLIC
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    user32
 )
 target_include_directories(poptools_ui_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-
-# ---- 桌面壁纸带驻入（T-048：DComp 直绘宿主 + WH_MOUSE_LL 转发路由） ----
-# 被日历/收纳盒链接（禁止 ui_box→ui_calendar 跨库依赖的共享层）
-add_library(poptools_ui_desktopband STATIC
-    desktopband/DesktopBandLogic.cpp
-    desktopband/DesktopBandLogic.h
-    desktopband/DesktopBandHost.cpp
-    desktopband/DesktopBandHost.h
-    desktopband/BandMouseRouter.cpp
-    desktopband/BandMouseRouter.h
-)
-target_link_libraries(poptools_ui_desktopband PUBLIC
-    poptools_core
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-)
-target_include_directories(poptools_ui_desktopband PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-# DComp 直绘链路（探针验证：dcomp + d3d11；user32/gdi32 由 Qt 传递，显式声明防患）
-target_link_libraries(poptools_ui_desktopband PUBLIC user32 gdi32 dcomp d3d11 dxgi)
 
 # ---- 截图功能：画布窗口 + 控制器 + 工具栏 + 标注工具 ----
 add_library(poptools_ui_capture STATIC
@@ -113,44 +94,6 @@ target_link_libraries(poptools_ui_translate PUBLIC
 )
 target_include_directories(poptools_ui_translate PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
-# ---- 桌面日历功能 ----
-add_library(poptools_ui_calendar STATIC
-    calendar/CalendarWindow.cpp
-    calendar/CalendarWindow.h
-    calendar/CalendarMiniWidget.cpp
-    calendar/CalendarMiniWidget.h
-    calendar/MonthView.cpp
-    calendar/MonthView.h
-    calendar/ItemDelegate.cpp
-    calendar/ItemDelegate.h
-    calendar/ItemEditDialog.cpp
-    calendar/ItemEditDialog.h
-)
-target_link_libraries(poptools_ui_calendar PUBLIC
-    poptools_core
-    poptools_ui_shared
-    poptools_ui_desktopband
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-)
-target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-
-# ---- 桌面收纳盒功能（贴桌分类卡片） ----
-add_library(poptools_ui_box STATIC
-    box/BoxWindow.cpp
-    box/BoxWindow.h
-)
-target_link_libraries(poptools_ui_box PUBLIC
-    poptools_core
-    poptools_ui_shared
-    poptools_ui_desktopband
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-)
-target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-
 # ---- Goody 管家聊天窗（无边框工具窗；会话/工具在 core/assistant） ----
 # T-050：桌面悬浮球（GoodyFloatingBall + GoodyBallLogic 纯逻辑）同库，
 # 需 poptools_ui_shared（desktopstack 贴底 Z 序协调）
@@ -182,8 +125,6 @@ target_include_directories(poptools_ui_goody PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}
 add_library(poptools_ui_settings STATIC
     settings/SettingsDialog.cpp
     settings/SettingsDialog.h
-    settings/CategoryManagerDialog.cpp
-    settings/CategoryManagerDialog.h
 )
 target_link_libraries(poptools_ui_settings PUBLIC
     poptools_core
@@ -199,10 +140,7 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_capture
     poptools_ui_pin
     poptools_ui_translate
-    poptools_ui_calendar
-    poptools_ui_box
     poptools_ui_goody
     poptools_ui_settings
-    poptools_ui_desktopband
     poptools_ui_shared
 )

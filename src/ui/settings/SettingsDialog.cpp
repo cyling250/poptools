@@ -1,12 +1,9 @@
 #include "SettingsDialog.h"
-#include "CategoryManagerDialog.h"
-#include "core/calendar/CalendarStore.h"
 #include "core/settings/Settings.h"
 #include "core/translation/ApiTester.h"
 #include "ui/ThemeColors.h"
 
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -31,9 +28,8 @@
 
 namespace poptools {
 
-SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
+SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
-    , m_calendarStore(calendarStore)
 {
     setWindowTitle("PopTools 设置");
     setMinimumSize(720, 520);
@@ -61,8 +57,6 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
     m_nav->addItem(QStringLiteral("通用"));
     m_nav->addItem(QStringLiteral("截图与贴图"));
     m_nav->addItem(QStringLiteral("翻译"));
-    m_nav->addItem(QStringLiteral("桌面日历"));
-    m_nav->addItem(QStringLiteral("桌面收纳盒"));
     m_nav->addItem(QStringLiteral("活动监控"));
     m_nav->addItem(QStringLiteral("Goody 管家"));
 
@@ -71,8 +65,6 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
     m_pages->addWidget(buildGeneralPage());
     m_pages->addWidget(buildCapturePage());
     m_pages->addWidget(buildTranslatePage());
-    m_pages->addWidget(buildCalendarPage());
-    m_pages->addWidget(buildOrganizerPage());
     m_pages->addWidget(buildMonitorPage());
     m_pages->addWidget(buildGoodyPage());
 
@@ -112,12 +104,6 @@ SettingsDialog::SettingsDialog(CalendarStore *calendarStore, QWidget *parent)
         s.setTranslateDomains(parseDomains());
         s.setTranslateTerms(parseTerms());
         s.setPinSaveDir(m_dirEdit->text().trimmed());
-        s.setCalendarEnabled(m_calShowCheck->isChecked());
-        s.setCalendarOpacity(m_calOpacity->value());
-        s.setCalendarTextOpacity(m_calTextOpacity->value());
-        s.setCalendarBgColor(m_calBg);
-        s.setCalendarAccentColor(m_calAccent);
-        s.setOrganizerEnabled(m_orgShowCheck->isChecked());
         s.setMonitorEnabled(m_monEnabledCheck->isChecked());
         s.setMonitorMaskPasswords(m_monMaskCheck->isChecked());
         s.setMonitorOcrSnapshot(m_monOcrCheck->isChecked());
@@ -164,7 +150,7 @@ QWidget *SettingsDialog::buildGeneralPage()
 
     addSection(QStringLiteral("应用"));
     auto *infoLabel = new QLabel(
-        QStringLiteral("PopTools —— Windows 全局实用工具箱\n截图（F1）· 贴图（F3）· 划词翻译（Ctrl+Alt+Shift+X）· 桌面日历"),
+        QStringLiteral("PopTools —— Windows 全局实用工具箱\n截图（F1）· 贴图（F3）· 划词翻译（Ctrl+Alt+Shift+X）"),
         page);
     lay->addWidget(infoLabel);
 
@@ -353,168 +339,6 @@ QWidget *SettingsDialog::buildTranslatePage()
     return page;
 }
 
-QWidget *SettingsDialog::buildCalendarPage()
-{
-    auto *page = newPage();
-    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
-    Q_ASSERT(lay);
-
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
-    auto addSeparator = [lay, page]() {
-        auto *sep = new QFrame(page);
-        sep->setObjectName("dialogSeparator");
-        sep->setFrameShape(QFrame::HLine);
-        lay->addWidget(sep);
-    };
-
-    // ---- 显示 ----
-    addSection(QStringLiteral("显示"));
-    m_calShowCheck = new QCheckBox(QStringLiteral("显示桌面日历（贴在桌面上，被普通窗口遮挡）"), page);
-    m_calShowCheck->setChecked(Settings::instance().calendarEnabled());
-    m_calShowCheck->setToolTip(QStringLiteral("勾选后立即显示并随应用启动自动出现；日历窗口内 ✏️ 可进入编辑模式调整位置大小"));
-    lay->addWidget(m_calShowCheck);
-
-    addSeparator();
-
-    // ---- 外观 ----
-    addSection(QStringLiteral("外观"));
-    auto *opacityRow = new QHBoxLayout;
-    opacityRow->setSpacing(8);
-    opacityRow->addWidget(new QLabel(QStringLiteral("背景不透明度:"), page));
-    m_calOpacity = new QSlider(Qt::Horizontal, page);
-    m_calOpacity->setRange(20, 100);
-    m_calOpacity->setValue(Settings::instance().calendarOpacity());
-    m_calOpacity->setFixedWidth(220);
-    m_calOpacityValue = new QLabel(page);
-    auto updateOpacityLabel = [this] {
-        m_calOpacityValue->setText(QStringLiteral("%1%").arg(m_calOpacity->value()));
-    };
-    connect(m_calOpacity, &QSlider::valueChanged, page, updateOpacityLabel);
-    updateOpacityLabel();
-    opacityRow->addWidget(m_calOpacity);
-    opacityRow->addWidget(m_calOpacityValue);
-    opacityRow->addStretch();
-    lay->addLayout(opacityRow);
-
-    auto *textOpacityRow = new QHBoxLayout;
-    textOpacityRow->setSpacing(8);
-    textOpacityRow->addWidget(new QLabel(QStringLiteral("文字不透明度:"), page));
-    m_calTextOpacity = new QSlider(Qt::Horizontal, page);
-    m_calTextOpacity->setRange(30, 100);
-    m_calTextOpacity->setValue(Settings::instance().calendarTextOpacity());
-    m_calTextOpacity->setFixedWidth(220);
-    m_calTextOpacityValue = new QLabel(page);
-    auto updateTextOpacityLabel = [this] {
-        m_calTextOpacityValue->setText(QStringLiteral("%1%").arg(m_calTextOpacity->value()));
-    };
-    connect(m_calTextOpacity, &QSlider::valueChanged, page, updateTextOpacityLabel);
-    updateTextOpacityLabel();
-    textOpacityRow->addWidget(m_calTextOpacity);
-    textOpacityRow->addWidget(m_calTextOpacityValue);
-    textOpacityRow->addStretch();
-    lay->addLayout(textOpacityRow);
-
-    auto *colorForm = new QFormLayout;
-    colorForm->setContentsMargins(0, 4, 0, 0);
-    colorForm->setSpacing(6);
-    colorForm->setLabelAlignment(Qt::AlignRight);
-
-    m_calBg = Settings::instance().calendarBgColor();
-    m_calAccent = Settings::instance().calendarAccentColor();
-
-    m_calBgSwatch = new QLabel(page);
-    m_calBgSwatch->setFixedSize(48, 20);
-    auto *bgPickBtn = new QPushButton(QStringLiteral("修改…"), page);
-    connect(bgPickBtn, &QPushButton::clicked, page, [this] {
-        const QColor c = QColorDialog::getColor(m_calBg, this, QStringLiteral("背景色"));
-        if (c.isValid()) {
-            m_calBg = c;
-            updateCalendarColorButtons();
-        }
-    });
-    auto *bgRow = new QHBoxLayout;
-    bgRow->setSpacing(8);
-    bgRow->addWidget(m_calBgSwatch);
-    bgRow->addWidget(bgPickBtn);
-    bgRow->addStretch();
-    colorForm->addRow(QStringLiteral("背景色:"), bgRow);
-
-    m_calAccentSwatch = new QLabel(page);
-    m_calAccentSwatch->setFixedSize(48, 20);
-    auto *accentPickBtn = new QPushButton(QStringLiteral("修改…"), page);
-    connect(accentPickBtn, &QPushButton::clicked, page, [this] {
-        const QColor c = QColorDialog::getColor(m_calAccent, this, QStringLiteral("强调色"));
-        if (c.isValid()) {
-            m_calAccent = c;
-            updateCalendarColorButtons();
-        }
-    });
-    auto *accentRow = new QHBoxLayout;
-    accentRow->setSpacing(8);
-    accentRow->addWidget(m_calAccentSwatch);
-    accentRow->addWidget(accentPickBtn);
-    accentRow->addStretch();
-    colorForm->addRow(QStringLiteral("强调色:"), accentRow);
-    lay->addLayout(colorForm);
-
-    addSeparator();
-
-    // ---- 分类 ----
-    addSection(QStringLiteral("分类"));
-    auto *categoryRow = new QHBoxLayout;
-    auto *categoryBtn = new QPushButton(QStringLiteral("管理分类…"), page);
-    categoryBtn->setToolTip(QStringLiteral("新增/重命名分类与颜色；删除分类后其条目归入「其他」"));
-    categoryBtn->setEnabled(m_calendarStore != nullptr);
-    connect(categoryBtn, &QPushButton::clicked, page, [this] {
-        CategoryManagerDialog dlg(m_calendarStore, this);
-        dlg.exec();
-    });
-    categoryRow->addWidget(categoryBtn);
-    categoryRow->addStretch();
-    lay->addLayout(categoryRow);
-
-    lay->addStretch();
-    return page;
-}
-
-QWidget *SettingsDialog::buildOrganizerPage()
-{
-    auto *page = newPage();
-    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
-    Q_ASSERT(lay);
-
-    auto *label = new QLabel(QStringLiteral("显示"));
-    label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-    lay->addWidget(label);
-
-    m_orgShowCheck =
-        new QCheckBox(QStringLiteral("显示桌面收纳盒（手机文件夹式桌面分类卡片）"), page);
-    m_orgShowCheck->setChecked(Settings::instance().organizerEnabled());
-    m_orgShowCheck->setToolTip(
-        QStringLiteral("勾选后桌面出现分类卡片：把桌面文件拖进卡片即收纳到"
-                       "桌面上的同名文件夹，桌面随之清爽；点卡片内图标打开；"
-                       "标题栏可拖动位置"));
-    lay->addWidget(m_orgShowCheck);
-
-    auto *hint = new QLabel(QStringLiteral(
-        "新建入口：托盘菜单「新建收纳盒…」（模块关闭时点击会自动启用）。\n"
-        "⚙ 按钮：设置几行几列；− 按钮：折叠成标题横条；双击标题文字改名。\n"
-        "标题栏右键：重命名 / 打开目录 / 解散收纳盒（文件移回桌面） / "
-        "删除收纳盒（保留磁盘文件）。"));
-    hint->setWordWrap(true);
-    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
-    // T-030 约定：文字不允许灰色）；此处只约束字号
-    hint->setStyleSheet("font-size: 12px;");
-    lay->addWidget(hint);
-
-    lay->addStretch();
-    return page;
-}
-
 QWidget *SettingsDialog::buildMonitorPage()
 {
     auto *page = newPage();
@@ -691,24 +515,6 @@ QWidget *SettingsDialog::buildGoodyPage()
     return page;
 }
 
-void SettingsDialog::updateCalendarColorButtons()
-{
-    if (m_calBgSwatch) {
-        m_calBgSwatch->setStyleSheet(
-            QStringLiteral("background: %1; border: 1px solid %2; border-radius: 4px;")
-                .arg(m_calBg.name(QColor::HexRgb),
-                     uiThemeColors(systemSchemeDark()).editBorder));
-        m_calBgSwatch->setText(QString());
-    }
-    if (m_calAccentSwatch) {
-        m_calAccentSwatch->setStyleSheet(
-            QStringLiteral("background: %1; border: 1px solid %2; border-radius: 4px;")
-                .arg(m_calAccent.name(QColor::HexRgb),
-                     uiThemeColors(systemSchemeDark()).editBorder));
-        m_calAccentSwatch->setText(QString());
-    }
-}
-
 // 领域输入 → 列表：中英文逗号、顿号、分号均可作分隔符，空白项丢弃
 QStringList SettingsDialog::parseDomains() const
 {
@@ -759,7 +565,6 @@ void SettingsDialog::applyTheme()
     const QString navBg = c.dark ? "#242424" : "#F5F6F8";
     const QString navSel = QStringLiteral("#2E%1").arg(QString(c.accent).mid(1));
 
-    updateCalendarColorButtons();
     setStyleSheet(QStringLiteral(
         "#settingsDialog { background: %1; }"
         "#settingsButtonRow { background: %1; border-top: 1px solid %10; }"

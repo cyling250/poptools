@@ -18,20 +18,18 @@ class QToolButton;
 namespace poptools {
 
 class ApiTester;
-class CalendarStore;
 
 // ============================================================
-// 设置对话框（左侧导航 + 分页，通用 / 截图与贴图 / 翻译 / 桌面日历）。
+// 设置对话框（左侧导航 + 分页，通用 / 截图与贴图 / 翻译 / 监控 / Goody）。
 //
 // 构造函数读取当前设置填充表单，点击 OK 时写入 Settings；
 // 「测试连接」用表单当前值（未保存前也能测）发一次真实请求。
-// 分类管理（CategoryManagerDialog）改动即时生效，与 OK/Cancel 无关。
 // ============================================================
 class SettingsDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit SettingsDialog(CalendarStore *calendarStore, QWidget *parent = nullptr);
+    explicit SettingsDialog(QWidget *parent = nullptr);
 
 private slots:
     void applyTheme(); // 主题应用（构造末尾 + 系统明暗切换时重取 ThemeColors）
@@ -40,12 +38,9 @@ private:
     QWidget *buildGeneralPage();
     QWidget *buildCapturePage();
     QWidget *buildTranslatePage();
-    QWidget *buildCalendarPage();
-    QWidget *buildOrganizerPage();
     QWidget *buildMonitorPage();
     QWidget *buildGoodyPage();
     void updateAutoStartButton();
-    void updateCalendarColorButtons();
     QStringList parseDomains() const;                  // 逗号/顿号分隔的领域输入 → 列表
     QList<QPair<QString, QString>> parseTerms() const; // "原文=译文" 逐行 → 翻译对
 
@@ -70,23 +65,6 @@ private:
 
     // 截图与贴图
     QLineEdit *m_dirEdit = nullptr; // 贴图默认保存文件夹
-
-    // 桌面日历
-    QCheckBox *m_calShowCheck = nullptr;
-    QSlider *m_calOpacity = nullptr;
-    QLabel *m_calOpacityValue = nullptr;
-    QSlider *m_calTextOpacity = nullptr;
-    QLabel *m_calTextOpacityValue = nullptr;
-    QPushButton *m_calBgBtn = nullptr;
-    QPushButton *m_calAccentBtn = nullptr;
-    QLabel *m_calBgSwatch = nullptr;
-    QLabel *m_calAccentSwatch = nullptr;
-    QColor m_calBg;
-    QColor m_calAccent;
-    CalendarStore *m_calendarStore = nullptr;
-
-    // 桌面收纳盒
-    QCheckBox *m_orgShowCheck = nullptr;
 
     // 活动监控
     QCheckBox *m_monEnabledCheck = nullptr;

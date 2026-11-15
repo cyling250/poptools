@@ -17,6 +17,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 add_library(poptools_app_infra STATIC
     AppServices.cpp
     AppServices.h
+    CrashReporter.cpp
+    CrashReporter.h
     FeatureRegistry.h
     IFeatureModule.h
 )
@@ -58,26 +60,6 @@ target_link_libraries(poptools_module_selectiontranslate PUBLIC
     poptools_ui_translate
 )
 
-# ---- 功能模块：桌面日历 ----
-add_library(poptools_module_calendar STATIC
-    modules/CalendarModule.cpp
-    modules/CalendarModule.h
-)
-target_link_libraries(poptools_module_calendar PUBLIC
-    poptools_app_infra
-    poptools_ui_calendar
-)
-
-# ---- 功能模块：桌面收纳盒 ----
-add_library(poptools_module_box STATIC
-    modules/BoxModule.cpp
-    modules/BoxModule.h
-)
-target_link_libraries(poptools_module_box PUBLIC
-    poptools_app_infra
-    poptools_ui_box
-)
-
 # ---- 功能模块：活动监控（无独立窗口，仅 core 服务接线） ----
 add_library(poptools_module_activitymonitor STATIC
     modules/ActivityMonitorModule.cpp
@@ -103,8 +85,6 @@ target_link_libraries(poptools_modules INTERFACE
     poptools_module_capture
     poptools_module_pin
     poptools_module_selectiontranslate
-    poptools_module_calendar
-    poptools_module_box
     poptools_module_activitymonitor
     poptools_module_goody
 )

@@ -86,7 +86,7 @@ QJsonObject WorkingMemory::startTask(const QString &title, const QString &goal)
     const QString t = title.trimmed();
     if (t.isEmpty())
         return QJsonObject{{"ok", false}, {"error", QStringLiteral("标题为空")}};
-    // 缓存命中：标题包含匹配（"继续收纳盒" 命中 "收纳盒整理"）→ 续用
+    // 缓存命中：标题包含匹配（"继续翻译" 命中 "翻译整理"）→ 续用
     for (Task &task : m_tasks) {
         if (task.title.contains(t, Qt::CaseInsensitive)
             || t.contains(task.title, Qt::CaseInsensitive)) {
