@@ -43,6 +43,15 @@ add_subdirectory(src/core)
 add_subdirectory(src/ui)
 add_subdirectory(src/app)
 
+# ---- 桌面日历 Explorer 注入 DLL（照搬 E:\rlqd DesktopHook 机制，纯 Win32）----
+# WH_CALLWNDPROC 钩子注入 explorer，子类化 SHELLDLL_DefView/SysListView32，
+# WM_ERASEBKGND 中 AlphaBlend 共享内存位图；输出与 PopTools.exe 同目录
+#（应用侧经 QLibrary 从 exe 目录加载并 StartDock）
+add_library(poptools_calendar_hook SHARED src/hook/calendar_hook.cpp)
+set_target_properties(poptools_calendar_hook PROPERTIES OUTPUT_NAME PopToolsCalendarHook)
+target_compile_definitions(poptools_calendar_hook PRIVATE WIN32_LEAN_AND_MEAN)
+target_link_libraries(poptools_calendar_hook PRIVATE user32 gdi32 comctl32 msimg32)
+
 # ---- 单元测试（可选，默认开启；ctest 运行） ----
 option(POPTOOLS_BUILD_TESTS "Build unit tests" ON)
 if(POPTOOLS_BUILD_TESTS)

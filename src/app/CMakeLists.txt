@@ -60,6 +60,16 @@ target_link_libraries(poptools_module_selectiontranslate PUBLIC
     poptools_ui_translate
 )
 
+# ---- 功能模块：桌面日历（注入式贴壁纸日历） ----
+add_library(poptools_module_calendar STATIC
+    modules/CalendarModule.cpp
+    modules/CalendarModule.h
+)
+target_link_libraries(poptools_module_calendar PUBLIC
+    poptools_app_infra
+    poptools_ui_calendar
+)
+
 # ---- 功能模块：活动监控（无独立窗口，仅 core 服务接线） ----
 add_library(poptools_module_activitymonitor STATIC
     modules/ActivityMonitorModule.cpp
@@ -86,5 +96,6 @@ target_link_libraries(poptools_modules INTERFACE
     poptools_module_pin
     poptools_module_selectiontranslate
     poptools_module_activitymonitor
+    poptools_module_calendar
     poptools_module_goody
 )

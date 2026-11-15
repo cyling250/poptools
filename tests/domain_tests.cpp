@@ -31,6 +31,10 @@
 #include "core/assistant/ToolText.h"
 #include "core/assistant/WorkingMemory.h"
 #include "core/annotation/AnnotationCanvas.h"
+#include "core/calendar/CalendarLayout.h"
+#include "core/calendar/CalendarSettings.h"
+#include "core/calendar/CalendarTaskStore.h"
+#include "core/calendar/ChineseCalendar.h"
 #include "core/annotation/AnnotationItem.h"
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/QrScanner.h"
@@ -3191,6 +3195,252 @@ private slots:
         s2.load();
         QCOMPARE(s2.size(), 0);
         QVERIFY(QFile::exists(path + QStringLiteral(".bad")));
+    }
+
+    // ============================================================
+    // T-054：桌面日历（照搬 rlqd 复刻）——农历引擎 / 布局 / 存储 / 设置
+    // ============================================================
+
+    // 节日锚点（solarlunar 权威库逐日真值校验，见 temp_scripts/script_gen_lunar_truth.js）
+    void chinese_calendar_festival_anchors()
+    {
+        QCOMPARE(ChineseCalendar::festival(QDate(2020, 1, 25)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2024, 2, 10)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2025, 1, 29)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 2, 17)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2027, 2, 6)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2028, 1, 26)), QStringLiteral("春节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2025, 10, 6)), QStringLiteral("中秋节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 9, 25)), QStringLiteral("中秋节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2024, 6, 10)), QStringLiteral("端午节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2025, 5, 31)), QStringLiteral("端午节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 6, 19)), QStringLiteral("端午节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2025, 2, 12)), QStringLiteral("元宵节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2025, 1, 28)), QStringLiteral("除夕"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 2, 16)), QStringLiteral("除夕"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 10, 1)), QStringLiteral("国庆节"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 12, 25)), QStringLiteral("圣诞夜"));
+        QCOMPARE(ChineseCalendar::festival(QDate(2026, 11, 16)), QString());
+    }
+
+    void chinese_calendar_lunar_dates_and_labels()
+    {
+        int y = 0, m = 0, d = 0;
+        QVERIFY(ChineseCalendar::getLunar(QDate(2026, 11, 16), &y, &m, &d));
+        QCOMPARE(y, 2026);
+        QCOMPARE(m, 10);
+        QCOMPARE(d, 8);
+        QCOMPARE(ChineseCalendar::lunarMonthName(QDate(2026, 11, 16)), QStringLiteral("十月"));
+        QCOMPARE(ChineseCalendar::lunarDayName(QDate(2026, 11, 16)), QStringLiteral("初八"));
+        // 闰月真值：2020 闰四月 / 2023 闰二月 / 2025 闰六月
+        QVERIFY(ChineseCalendar::isLeapLunarMonth(QDate(2020, 5, 23)));
+        QCOMPARE(ChineseCalendar::lunarMonthName(QDate(2020, 5, 23)), QStringLiteral("闰四月"));
+        QCOMPARE(ChineseCalendar::lunarDayName(QDate(2020, 5, 23)), QStringLiteral("初一"));
+        QVERIFY(ChineseCalendar::isLeapLunarMonth(QDate(2023, 3, 22)));
+        QCOMPARE(ChineseCalendar::lunarMonthName(QDate(2023, 3, 22)), QStringLiteral("闰二月"));
+        QVERIFY(ChineseCalendar::isLeapLunarMonth(QDate(2025, 7, 25)));
+        QCOMPARE(ChineseCalendar::lunarMonthName(QDate(2025, 7, 25)), QStringLiteral("闰六月"));
+        QCOMPARE(ChineseCalendar::lunarDayName(QDate(2025, 7, 25)), QStringLiteral("初一"));
+        // 月初标签（LunarMonth 类；2026-02-17 是春节走 Holiday 分支，取十一月月初）
+        const DayLabel label = ChineseCalendar::dayLabel(QDate(2026, 12, 9), true);
+        QCOMPARE(label.kind, DayLabelKind::LunarMonth);
+        QCOMPARE(label.text, QStringLiteral("农历冬月"));
+        // 节气优先于节日/农历
+        const DayLabel termLabel = ChineseCalendar::dayLabel(QDate(2026, 11, 7), true);
+        QCOMPARE(termLabel.kind, DayLabelKind::SolarTerm);
+        QCOMPARE(termLabel.text, QStringLiteral("立冬"));
+        const DayLabel festLabel = ChineseCalendar::dayLabel(QDate(2026, 10, 1), true);
+        QCOMPARE(festLabel.kind, DayLabelKind::Holiday);
+        QCOMPARE(festLabel.text, QStringLiteral("国庆节"));
+        // showLunar=false 时普通日不产农历文案
+        const DayLabel plain = ChineseCalendar::dayLabel(QDate(2026, 11, 20), false);
+        QVERIFY(plain.text.isEmpty());
+        // 出表日期不崩溃且返回空
+        int y2 = 0, m2 = 0, d2 = 0;
+        QVERIFY(!ChineseCalendar::getLunar(QDate(1899, 12, 31), &y2, &m2, &d2));
+        QCOMPARE(y2, 0);
+    }
+
+    void chinese_calendar_solar_terms_2026()
+    {
+        // rlqd 同款分钟级近似公式在 2026 年的 24 个节气（与 C# 公式逐日比对）
+        const QVector<QPair<QDate, QString>> expected = {
+            { QDate(2026, 1, 5), QStringLiteral("小寒") },
+            { QDate(2026, 1, 20), QStringLiteral("大寒") },
+            { QDate(2026, 2, 4), QStringLiteral("立春") },
+            { QDate(2026, 2, 18), QStringLiteral("雨水") },
+            { QDate(2026, 3, 5), QStringLiteral("惊蛰") },
+            { QDate(2026, 3, 20), QStringLiteral("春分") },
+            { QDate(2026, 4, 5), QStringLiteral("清明") },
+            { QDate(2026, 4, 20), QStringLiteral("谷雨") },
+            { QDate(2026, 5, 5), QStringLiteral("立夏") },
+            { QDate(2026, 5, 21), QStringLiteral("小满") },
+            { QDate(2026, 6, 6), QStringLiteral("芒种") },
+            { QDate(2026, 6, 21), QStringLiteral("夏至") },
+            { QDate(2026, 7, 7), QStringLiteral("小暑") },
+            { QDate(2026, 7, 23), QStringLiteral("大暑") },
+            { QDate(2026, 8, 7), QStringLiteral("立秋") },
+            { QDate(2026, 8, 23), QStringLiteral("处暑") },
+            { QDate(2026, 9, 7), QStringLiteral("白露") },
+            { QDate(2026, 9, 23), QStringLiteral("秋分") },
+            { QDate(2026, 10, 8), QStringLiteral("寒露") },
+            { QDate(2026, 10, 23), QStringLiteral("霜降") },
+            { QDate(2026, 11, 7), QStringLiteral("立冬") },
+            { QDate(2026, 11, 22), QStringLiteral("小雪") },
+            { QDate(2026, 12, 7), QStringLiteral("大雪") },
+            { QDate(2026, 12, 22), QStringLiteral("冬至") }
+        };
+        for (const auto &e : expected)
+            QCOMPARE(ChineseCalendar::solarTerm(e.first), e.second);
+        // 非节气日为空
+        QVERIFY(ChineseCalendar::solarTerm(QDate(2026, 11, 16)).isEmpty());
+    }
+
+    void chinese_calendar_iso_week_number()
+    {
+        // ISO 8601：2026 W1 起于 2025-12-29（周一）；2026-11-16 在第 47 周
+        QCOMPARE(ChineseCalendar::weekNumber(QDate(2025, 12, 29)), 1);
+        QCOMPARE(ChineseCalendar::weekNumber(QDate(2026, 1, 1)), 1);
+        QCOMPARE(ChineseCalendar::weekNumber(QDate(2026, 11, 16)), 47);
+        QCOMPARE(ChineseCalendar::weekNumber(QDate(2024, 12, 30)), 1); // 2025 W1
+        QCOMPARE(ChineseCalendar::weekNumber(QDate(2021, 1, 1)), 53);  // 2020 W53
+    }
+
+    void calendar_layout_monday_start_and_hit_test()
+    {
+        // 2026-11-01 是周日 → skipPartial（首周只有一天则跳过），首格 11-02（周一）
+        const CalendarLayout layout(QRect(640, 20, 1260, 795), 2026, 11);
+        QCOMPARE(layout.firstCellDate, QDate(2026, 11, 2));
+        QCOMPARE(layout.rows, 5);
+        QCOMPARE(layout.cellDate(0, 0), QDate(2026, 11, 2));
+        QCOMPARE(layout.cellDate(2, 0), QDate(2026, 11, 16));
+        QCOMPARE(layout.inDisplayMonth(QDate(2026, 11, 16)), true);
+        QCOMPARE(layout.inDisplayMonth(QDate(2026, 10, 31)), false);
+        // 命中测试：格内命中、头部按钮命中、格外不命中
+        int row = 0, col = 0;
+        QDate date;
+        QRect cell;
+        const QRect c21 = layout.cellRect(2, 1);
+        QVERIFY(layout.tryGetCell(c21.center(), &row, &col, &date, &cell));
+        QCOMPARE(row, 2);
+        QCOMPARE(col, 1);
+        QCOMPARE(date, QDate(2026, 11, 17));
+        QCOMPARE(layout.tryGetCell(QPoint(-500, -500), &row, &col, &date, &cell), false);
+        QVERIFY(!layout.headerButtons.isEmpty());
+        QCOMPARE(layout.headerButtons.size(), 7);
+        const int hit = layout.hitHeader(layout.headerButtons.at(6).center());
+        QCOMPARE(hit, 6);
+        QCOMPARE(layout.hitHeader(QPoint(-1, -1)), -1);
+        // 周日开月的 skipPartial：2026-02-01 是周日 → 首格 02-02
+        const CalendarLayout feb(QRect(0, 0, 1260, 795), 2026, 2);
+        QCOMPARE(feb.firstCellDate, QDate(2026, 2, 2));
+    }
+
+    void calendar_task_store_roundtrip_and_legacy()
+    {
+        // 数据目录重定向到临时目录，绝不写真实用户数据
+        QTemporaryDir dataDir;
+        QVERIFY(dataDir.isValid());
+        CalendarSettings::setDataDirOverride(dataDir.path());
+        // 新格式 JSON 往返
+        {
+            CalendarTaskStore store;
+            QVector<CalendarTaskItem> tasks;
+            tasks.append({ QStringLiteral("写周报"), false, QStringLiteral("09:00") });
+            tasks.append({ QStringLiteral("已完成的待办"), true, {} });
+            store.set(QDate(2026, 11, 16), tasks);
+            const QString json = store.exportJson();
+            CalendarTaskStore parsed;
+            QVERIFY(parsed.fromJson(json));
+            const QVector<CalendarTaskItem> back = parsed.get(QDate(2026, 11, 16));
+            QCOMPARE(back.size(), 2);
+            QCOMPARE(back.at(0).text, QStringLiteral("写周报"));
+            QCOMPARE(back.at(0).time, QStringLiteral("09:00"));
+            QCOMPARE(back.at(1).done, true);
+        }
+        // 空列表删除键
+        {
+            CalendarTaskStore store;
+            store.set(QDate(2026, 11, 16), { { QStringLiteral("x"), false, {} } });
+            QCOMPARE(store.hasTasks(QDate(2026, 11, 16)), true);
+            store.set(QDate(2026, 11, 16), {});
+            QCOMPARE(store.hasTasks(QDate(2026, 11, 16)), false);
+        }
+        // 旧格式（DesktopCal 导出 {"All":[...]}）兼容
+        {
+            CalendarTaskStore store;
+            QVERIFY(store.fromJson(QStringLiteral(
+                "{\"All\":[{\"Key\":\"2026-11-18\",\"Value\":[{\"Text\":\"旧格式任务\","
+                "\"Done\":false,\"Time\":null}]}]}")));
+            const QVector<CalendarTaskItem> tasks = store.get(QDate(2026, 11, 18));
+            QCOMPARE(tasks.size(), 1);
+            QCOMPARE(tasks.at(0).text, QStringLiteral("旧格式任务"));
+        }
+        // 非日期键被忽略；非法 JSON 拒绝
+        {
+            CalendarTaskStore store;
+            QVERIFY(store.fromJson(QStringLiteral("{\"hello\":[],\"2026-11-18\":[]}")));
+            QCOMPARE(store.hasTasks(QDate(2026, 11, 18)), false);
+            QVERIFY(!store.fromJson(QStringLiteral("not json")));
+            QVERIFY(!store.fromJson(QStringLiteral("[1,2]")));
+        }
+        // 合并
+        {
+            CalendarTaskStore base;
+            base.set(QDate(2026, 11, 18), { { QStringLiteral("原任务"), false, {} } });
+            CalendarTaskStore patch;
+            patch.set(QDate(2026, 11, 19), { { QStringLiteral("新任务"), false, {} } });
+            base.mergeFrom(patch);
+            QCOMPARE(base.get(QDate(2026, 11, 18)).size(), 1);
+            QCOMPARE(base.get(QDate(2026, 11, 19)).size(), 1);
+        }
+        // 落盘往返（重定向下 settings.json / tasks.json 真实读写）
+        {
+            CalendarTaskStore store;
+            store.set(QDate(2026, 11, 20), { { QStringLiteral("落盘任务"), false, {} } });
+            CalendarTaskStore reloaded = CalendarTaskStore::load();
+            QCOMPARE(reloaded.get(QDate(2026, 11, 20)).size(), 1);
+            QCOMPARE(reloaded.get(QDate(2026, 11, 20)).at(0).text, QStringLiteral("落盘任务"));
+            CalendarSettings saved;
+            saved.x = 42;
+            saved.save();
+            QCOMPARE(CalendarSettings::load().x, 42);
+        }
+        CalendarSettings::setDataDirOverride(QString());
+    }
+
+    void calendar_settings_roundtrip()
+    {
+        CalendarSettings s;
+        QCOMPARE(s.x, 640);
+        QCOMPARE(s.y, 20);
+        QCOMPARE(s.width, 1260);
+        QCOMPARE(s.height, 795);
+        QCOMPARE(s.glassEffect, true);
+        QCOMPARE(s.fontScale, 100);
+        s.x = 100;
+        s.y = 200;
+        s.width = 800;
+        s.height = 600;
+        s.hidden = true;
+        s.showLunar = false;
+        s.showWeekNumbers = false;
+        s.showEvents = false;
+        s.glassEffect = false;
+        s.fontScale = 135;
+        s.showGuide = false;
+        s.showNextMonthPill = false;
+        const QJsonObject o = s.toJson();
+        CalendarSettings back;
+        back.fromJson(o);
+        QCOMPARE(back.x, 100);
+        QCOMPARE(back.y, 200);
+        QCOMPARE(back.width, 800);
+        QCOMPARE(back.height, 600);
+        QCOMPARE(back.hidden, true);
+        QCOMPARE(back.showLunar, false);
+        QCOMPARE(back.fontScale, 135);
+        QCOMPARE(back.rect(), QRect(100, 200, 800, 600));
     }
 };
 

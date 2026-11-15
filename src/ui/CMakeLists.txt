@@ -121,6 +121,37 @@ target_link_libraries(poptools_ui_goody PUBLIC
 )
 target_include_directories(poptools_ui_goody PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# ---- 桌面日历（照搬 rlqd 复刻：注入 DLL + 共享内存画布 + QPainter 渲染） ----
+add_library(poptools_ui_calendar STATIC
+    calendar/CalendarSharedCanvas.cpp
+    calendar/CalendarSharedCanvas.h
+    calendar/WallpaperProvider.cpp
+    calendar/WallpaperProvider.h
+    calendar/CalendarRenderer.cpp
+    calendar/CalendarRenderer.h
+    calendar/CalendarHostWidget.cpp
+    calendar/CalendarHostWidget.h
+    calendar/CalendarMenuForm.cpp
+    calendar/CalendarMenuForm.h
+    calendar/CalendarEventEditor.cpp
+    calendar/CalendarEventEditor.h
+    calendar/CalendarSettingsForm.cpp
+    calendar/CalendarSettingsForm.h
+    calendar/CalendarSearchForm.cpp
+    calendar/CalendarSearchForm.h
+    calendar/CalendarAdjustOverlay.cpp
+    calendar/CalendarAdjustOverlay.h
+)
+target_link_libraries(poptools_ui_calendar PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    user32
+    gdi32
+)
+target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
 add_library(poptools_ui_settings STATIC
     settings/SettingsDialog.cpp
@@ -140,6 +171,7 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_capture
     poptools_ui_pin
     poptools_ui_translate
+    poptools_ui_calendar
     poptools_ui_goody
     poptools_ui_settings
     poptools_ui_shared

@@ -18,4 +18,9 @@
         <file alias="icons/save.svg">icons/save.svg</file>
         <file alias="icons/copy.svg">icons/copy.svg</file>
     </qresource>
+    <qresource prefix="/calendar">
+        <file alias="9GridElementBkgnd.png">calendar/9GridElementBkgnd.png</file>
+        <file alias="9GridEleBreakDay.png">calendar/9GridEleBreakDay.png</file>
+        <file alias="9GridEleTodayHighlight-60x60.png">calendar/9GridEleTodayHighlight-60x60.png</file>
+    </qresource>
 </RCC>

@@ -43,6 +43,14 @@ add_library(poptools_core STATIC
     annotation/AnnotationPainter.cpp
     annotation/AnnotationPainter.h
     annotation/AnnotationTypes.h
+    calendar/ChineseCalendar.cpp
+    calendar/ChineseCalendar.h
+    calendar/CalendarLayout.cpp
+    calendar/CalendarLayout.h
+    calendar/CalendarSettings.cpp
+    calendar/CalendarSettings.h
+    calendar/CalendarTaskStore.cpp
+    calendar/CalendarTaskStore.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp

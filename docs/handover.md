@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
-> 最后更新：2026-11-16 00:33（T-054 清零阶段完成：日历/收纳盒痕迹清零，ctest 复绿中；移植阶段进行中） · Agent_20261116003308
+> 最后更新：2026-11-16 01:40（T-054 结算：日历/收纳盒清零 + rlqd 复刻照搬移植 Qt 桌面日历，ctest 96 绿，真机目测待用户） · Agent_20261116003308
 
 ## 项目快照
 
@@ -32,8 +32,9 @@
   - `src/main.cpp` — 程序入口
   - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施；CMake 目标：`poptools_app_infra`（基础设施，可执行与测试共链）+ `poptools_module_<id>`（每功能模块一个静态库，含其界面库）+ 聚合 `poptools_modules`（T-036 起「拔插=删一个目标」字面成立）
   - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译 / activitymonitor / goody / calendar 桌面日历），各自自包含
-  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、monitor 活动监控（键盘钩子/文本组装/输入状态机/前台跟踪/OCR 快照管线/UIA 取文与剪贴板流/JSONL 存储，T-045/T-047）、ocr OCR 服务、settings 设置、translation 翻译与划词翻译、assistant Goody 助手域（LLM 流式客户端/工具注册表/权限/会话/每日记录/记忆/MCP，T-045））
-  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框：左侧导航分页，跟随系统明暗主题），`poptools_ui_goody`（悬浮球+卡片聊天窗，T-045/T-050）/ `poptools_ui_shared`（DesktopStack 贴桌 Z 序协调器），聚合为 INTERFACE 目标 `poptools_ui`
+  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、calendar 桌面日历域（农历/节气/节日、布局命中、任务与设置 JSON 存储，T-054）、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、monitor 活动监控（键盘钩子/文本组装/输入状态机/前台跟踪/OCR 快照管线/UIA 取文与剪贴板流/JSONL 存储，T-045/T-047）、ocr OCR 服务、settings 设置、translation 翻译与划词翻译、assistant Goody 助手域（LLM 流式客户端/工具注册表/权限/会话/每日记录/记忆/MCP，T-045））
+  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框：左侧导航分页，跟随系统明暗主题），`poptools_ui_goody`（悬浮球+卡片聊天窗，T-045/T-050）/ `poptools_ui_calendar`（桌面日历：共享内存画布/渲染器/宿主控制器/五窗，T-054）/ `poptools_ui_shared`（DesktopStack 贴桌 Z 序协调器），聚合为 INTERFACE 目标 `poptools_ui`
+  - `src/hook/` — 桌面日历 Explorer 注入 DLL 源码 `calendar_hook.cpp`（纯 Win32，CMake 目标 `poptools_calendar_hook` → `PopToolsCalendarHook.dll` 与 exe 同目录，T-054）
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
   - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
@@ -53,19 +54,24 @@
   - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 RapidOCR-json.exe 两个进程**，见坑 P-008）
-  - 测试：`ctest -C Release --test-dir build --output-on-failure`（域逻辑 QtTest——标注画板/监控键入与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（96 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控键入与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
   - 运行：`build/Release/PopTools.exe`
   - 性能基线：`python scripts/perf_baseline.py`（启动耗时+内存采样，追加 temp_scripts/out/perf_baseline.jsonl；发版前跑一次对照历史）
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.4.0 已发布**（2026-11-02，GitHub Release 直发）；**T-054 进行中**（用户指令：日历+收纳盒痕迹清零后照搬 E:\rlqd 移植 Qt 桌面日历；清零已完成，移植进行中）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.4.0 已发布**（2026-11-02，GitHub Release 直发）；**T-054 已结算**（日历/收纳盒痕迹清零 + 照搬 E:\rlqd 复刻移植 Qt 桌面日历，ctest 96 绿，**真机目测待用户**）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261116003308
+
+### T-054 桌面日历重写：日历/收纳盒痕迹清零 + 照搬 rlqd 复刻移植 Qt
+- **执行智能体**：Agent_20261116003308（用户指令两步走：先清零不留痕迹，再照搬移植）
+- **结果**：✅ 清零（独立提交）：旧日历/YYNote 在途实现/收纳盒/desktopband 代码+设置+测试+文档全清，ctest 89 绿；移植：注入 DLL `PopToolsCalendarHook.dll`（照搬 rlqd DesktopHook：WH_CALLWNDPROC 注入 + 子类化 SHELLDLL_DefView/SysListView32 + 共享内存 DIB AlphaBlend）+ Qt 应用侧（共享画布/QPainter 渲染/宿主控制器/五窗）+ 农历引擎（solarlunar 权威表脚本生成 + 2020-2030 逐日真值校验），ctest 96 绿（+7 用例），DLL 加载冒烟通过；**真机目测待用户**
+- **相关坑**：P-054、P-055 ｜ 细档：[handover/t054_rlqd_calendar_port.md](handover/t054_rlqd_calendar_port.md)
 
 ### T-050 Goody 管家界面升级·阶段一悬浮球 + 阶段二聊天窗重构（阶段三待开工）
 - **执行智能体**：Agent_20261112003400（夜间全自动，子代理开发/复审流水线）
@@ -123,17 +129,21 @@
 
 ## 当前任务
 
-**T-054 桌面日历重写（照搬 E:\rlqd → Qt）+ 日历/收纳盒痕迹清零（进行中）**——需求单 requirements/20261116-rlqd-calendar-port.md：
-- 清零阶段 ✅：旧日历（T-042/T-043/T-051/T-052 系列）、2026-11-15 YYNote 在途实现、收纳盒（T-044）、desktopband 体系的代码/设置键/设置页/测试/文档痕迹全部清除；交接文档全层级（主档/细档/归档）同步去痕。
-- 移植阶段（进行中）：E:\rlqd\clone（DesktopCal 3.33 行为复刻，用户认定为已实现核心需求，**严禁改动原目录**）——Win32 注入 DLL（WH_CALLWNDPROC 注入 explorer、子类化 SHELLDLL_DefView/SysListView32、WM_ERASEBKGND AlphaBlend 共享内存位图）+ Qt 应用侧（QPainter 渲染 → 共享 DIB；日程编辑器/主菜单/设置/调整/搜索五窗）；数据落 `%LOCALAPPDATA%\PopTools\calendar\`（JSON 与 rlqd 同构）。
-- 验收：日历在壁纸之上/图标之下，右键/框选/图标拖动透传，双击日期开编辑器，Explorer 重启自愈；ctest 全绿；用户真机目测。
+**T-054 已结算，待用户真机验收**——验收清单（对照 rlqd README「已验证行为」）：
+- ①启动 PopTools.exe（构建前先杀 PopTools.exe/RapidOCR-json.exe；注入 DLL `PopToolsCalendarHook.dll` 已在 build/Release 与 exe 同目录）→ 数秒内桌面出现日历：**壁纸之上、图标之下**（图标可拖过日历、可覆盖日历）
+- ②右键日历区域 → Windows 桌面右键菜单；日历区域拖动 → 桌面框选正常；双击桌面图标 → 启动图标本身（不误开编辑器）
+- ③**双击日期空白处** → 当日日程编辑器（一行一条，右上 ✓ 保存）；头部按钮：上一页/下一页/插件菜单/账户提示/日历设置/主菜单
+- ④主菜单：内容搜索/选择日期/导出/导入/隐藏日历清单（托盘恢复）/隐藏日历内容/调整位置和大小（拖边缘缩放、拖内部移动、✓/×）
+- ⑤杀 explorer 重启 → 2s 内日历自愈；托盘「停用桌面日历」→ 日历消失且不再自愈，「启用」恢复
+- ⑥数据：`%LOCALAPPDATA%\PopTools\calendar\{settings.json,tasks.json}`；农历/节气/节日与 2026 真历核对
+- 异常排查：`%TEMP%\PopToolsCalendarHook.log`（注入侧）+ build/Release/crash/（崩溃自诊）
 
 **已定待开工：T-050 阶段三（管家总览 + 全历史检索）**——需求单 requirements/20261111-goody-ui.md 附录 A（体量 M）：
 - HistorySearchTool：monitor 五流 + goody/daily + 聊天史 + memory 索引统一检索；域侧已就绪
 
-**遗留候修（非阻塞，P3 级）**：R5-B3（PinWindow 数量上限）/ R5-B4（F3 剪贴板无图静默）；R6-C17/C18 缓议；SnapshotOcrPipeline 归属防护残余理论窗口；ClipboardListener 哈希口径；ChatSession 序列口径；流式光标"▍"
+**遗留候修（非阻塞，P3 级）**：R5-B3（PinWindow 数量上限）/ R5-B4（F3 剪贴板无图静默）；R6-C17/C18 缓议；SnapshotOcrPipeline 归属防护残余理论窗口；ClipboardListener 哈希口径；ChatSession 序列口径；流式光标"▍"；日历 DPR 变更/多屏未自适应（主屏物理一次构建，见细档 t054 §2）
 
-**移交备忘**：①API Key 在本机 build/Release/PopTools.ini，不入仓库、不许读取外传；②重建前杀 PopTools.exe + RapidOCR-json.exe；③崩溃自诊日志在 build/Release/crash/；④本机屏幕 150% DPI（物理=逻辑×1.5）；⑤跑 ctest 前 GetAsyncKeyState 自检无 Ctrl/Alt 残留（历史夜间实验曾泄漏修饰键卡下，见 P-046）
+**移交备忘**：①API Key 在本机 build/Release/PopTools.ini，不入仓库、不许读取外传；②重建前杀 PopTools.exe + RapidOCR-json.exe；③崩溃自诊日志在 build/Release/crash/；④本机屏幕 150% DPI（物理=逻辑×1.5）；⑤跑 ctest 前 GetAsyncKeyState 自检无 Ctrl/Alt 残留（历史夜间实验曾泄漏修饰键卡下，见 P-046）；⑥桌面日历与 rlqd 复刻版/原版 DesktopCal 不可同时运行（都子类化同两个桌面窗口）
 
 ### 功能候选（未排期——下一会话可直接从表内挑活）
 
@@ -161,6 +171,18 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261116003308
+
+### P-054 农历权威表手抄入源码 → 整体错位 20 项
+- **关联任务**：T-054 ｜ 记录智能体：Agent_20261116003308
+- **现象**：手抄 201 项农历压缩表进 ChineseCalendar.cpp，从 1910 项起整体错位（丢一个重复值），单测日/月全错
+- **原因**：手工转录大体量数字常量表必然出错——与已归档 P-028 同一坑重踩
+- **解决**：权威表文件 → 脚本（temp_scripts/script_gen_lunar_table.js）程序化生成表 + 脚本比对 diff=0 才收工。教训重申：**大常量表永远脚本生成 + 程序化 diff，禁手抄**
+
+### P-055 农历压缩表存 quint16 → 闰大月标志被静默截断
+- **关联任务**：T-054 ｜ 记录智能体：Agent_20261116003308
+- **现象**：表逐项 diff 全对，2026-11-16 却算成农历十月廿十（+12 天）；12 个闰八月~闰腊月年份全偏
+- **原因**：`constexpr quint16 kLunarInfo[201]`——闰八~闰十二月年份表值 ≥ 0x10000（bit16=闰月大小），quint16 静默截断闰月标志（MSVC 未报 narrowing 错误），闰月天数丢失
+- **解决**：表改 `quint32` 并加注释；闰月判定类常量表用 `quint32` 起步。教训：**常量数组的位含义超出 16 位时，容器类型按最大位宽选**，narrowing 在 constexpr 数组里不保证报错
 
 ### P-031 桌面层嵌窗两条弯路：SetParent 不被合成与点击激活横跳
 - **关联任务**：T-043（已清档）｜ 记录智能体：Agent_20261108204000
@@ -269,3 +291,4 @@
 | 2026-11-12 01:00 | Agent_20261111234632 | 当前任务 / 踩坑记录 / 细档 | 新增 T-049/R6 批量修复轮计划（细档 t049_r6_plan.md：P-035 修法 + 探查工作单 A~E + 执行顺序）；新增 P-035；头部时间更新 | 用户报 F1 糊屏 bug 诊断定案；修复执行交后续 AI，本会话只出计划 |
 | 2026-11-12 07:45 | Agent_20261112003400 | 全文（结算） | 夜间批次结算：T-046 补 R5 结算注记；新增 T-049/T-047/T-050 条目；当前任务重写（T-050 阶段三待开工 + 晨起验收清单 + 遗留候修）；新增 P-038、P-039；冷坑 5 条与 T-037~T-040 归档；快照/红线/目录/命令刷新 | 夜间全自动 7 提交（ead3339..5a00f7e），ctest 40→108 绿，R5/R6/T-047/T-050 阶段一二全部收口 |
 | 2026-11-16 00:33 | Agent_20261116003308 | 全文（破坏性清理，用户指令） | T-054 清零阶段：删除旧日历/YYNote 在途实现/收纳盒/desktopband 全部代码、设置键、测试与文档痕迹；删除 T-042/T-043/T-044/T-048/T-053 条目与 P-036/P-037 坑（编号不复用）；细档去 T-048 节、归档去 P-028 与相关台账行；快照/当前任务/红线/命令刷新 | 日历+收纳盒全量清零（代码+文档），仓库回无痕迹基线；移植阶段进行中 |
+| 2026-11-16 01:40 | Agent_20261116003308 | 历史任务 / 当前任务 / 踩坑记录 / 项目快照 / 头部 / 细档 | T-054 结算：新增条目与细档 t054_rlqd_calendar_port.md；当前任务改写为真机验收清单；新增 P-054、P-055；快照目录/命令/ctest 96/状态刷新 | 注入 DLL + Qt 应用侧移植完成，ctest 89→96 绿，真机目测待用户 |

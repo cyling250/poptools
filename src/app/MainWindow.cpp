@@ -7,6 +7,7 @@
 #include "core/assistant/ToolRegistry.h"
 #include "core/ocr/RapidOcrService.h"
 #include "modules/ActivityMonitorModule.h"
+#include "modules/CalendarModule.h"
 #include "modules/CaptureModule.h"
 #include "modules/GoodyModule.h"
 #include "modules/PinModule.h"
@@ -47,6 +48,7 @@ MainWindow::MainWindow(QObject *parent)
     m_registry.add(std::make_unique<SelectionTranslateModule>());
     m_registry.add(std::make_unique<ActivityMonitorModule>());
     m_registry.add(std::make_unique<GoodyModule>());
+    m_registry.add(std::make_unique<CalendarModule>());
     m_registry.initAll(*m_services);
 
     // 能力槽完整性自检：拔掉 CaptureModule 时贴图会静默退化为"剪贴板 + 鼠标位置"，
