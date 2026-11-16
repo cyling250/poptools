@@ -1,11 +1,11 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
-> 最后更新：2026-11-16 01:40（T-054 结算：日历/收纳盒清零 + rlqd 复刻照搬移植 Qt 桌面日历，ctest 96 绿，真机目测待用户） · Agent_20261116003308
+> 最后更新：2026-11-16 18:03（T-056 增补：日程编辑器"点外关不掉"修复——WH_MOUSE_LL 兜底钩子随编辑器装卸，真机注入+真实点击闭环验证过，ctest 96 绿，真机回归待用户） · Agent_20261116165900
 
 ## 项目快照
 
-> 维护智能体：Agent_20261116003308
+> 维护智能体：Agent_20261116165900
 
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（RapidOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图 + 活动监控（键入/时间线/OCR 快照本地日志）+ Goody 大模型管家（T-045）+ 桌面日历（T-054 起，照搬 E:\rlqd 注入机制），持续新增小工具
@@ -37,7 +37,7 @@
   - `src/hook/` — 桌面日历 Explorer 注入 DLL 源码 `calendar_hook.cpp`（纯 Win32，CMake 目标 `poptools_calendar_hook` → `PopToolsCalendarHook.dll` 与 exe 同目录，T-054）
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
-  - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_paddleocr.py），走本机代理 `127.0.0.1:7897`
+  - `scripts/` — 第三方依赖一键下载脚本（install_qt.py / install_rapidocr.py / install_zxing.py；install_paddleocr.py 为旧引擎遗留备查），走本机代理 `127.0.0.1:17890`
   - `tools/` — 第三方绿色套件（qt / rapidocr / zxing），不入库，由脚本生成（install_qt.py / install_rapidocr.py / install_zxing.py；install_paddleocr.py 为旧引擎遗留备查）
   - `packaging/` — Inno Setup 6 安装包脚本 `PopTools.iss`（AppId 已随更名更换为全新 GUID），打包源为 `build/Release` 整目录（T-027 起排除 `poptools_domain_tests.exe`）；`PopTools.ico` 不再手工维护，由 `scripts/make_ico.py` 从 app_icon.svg 生成（Edge 渲染 512 主图 → Pillow 合成 7 帧，见 T-026）
   - `dist/` — 安装包输出（已忽略；仅保留最新 `PopTools-Setup-0.4.0-20261101_2359.exe`，发新包后删旧包）
@@ -66,7 +66,17 @@
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
-> 维护智能体：Agent_20261116003308
+> 维护智能体：Agent_20261116165900
+
+### T-056 桌面日历首轮目测修复：表头错位 / 今日双框 / 账户功能 / 弹窗卡死
+- **执行智能体**：Agent_20261116165900（用户真机目测报 4 问题，注入协议取证 + 修复闭环）
+- **结果**：✅ 四修全落地，ctest 96 绿：①星期表头改矩形居中绘制（QFontMetrics 独立测宽与渲染引擎系统性偏差 ~10px）；②今日高亮删白线框、发光环外扩 11px 压格边（贴图环带实测内缩 15.5px）；③删云/账户按钮与菜单项（头部 7→5，openMainMenu 索引 6→4）；④卡死根因 = QDialog::done() 只 hide 不析构 → m_modal 永久卡死——改 finished+deleteLater+trackModal(QPointer 对号) 七处弹窗，另修无 parent 弹窗落副屏问题（centerOnPanel 锚定面板）；注入协议闭环自验：开→关→日历仍响应→可重复开
+- **相关坑**：P-058、P-059、P-060 ｜ 未提交待用户。增补（18:03）：用户报编辑器外点偶尔关不掉——根因 P-060，以 GlobalMouseHook 兜底修复（openEditor 内随编辑器装卸），真实点击闭环自验：外点关/内点不误关/收尾关三步全过
+
+### T-055 净克隆环境重建：依赖三件套 + VS2026 配置构建 + ctest 96 绿
+- **执行智能体**：Agent_20261116165900
+- **结果**：✅ tools/（qt 6.8.3 / rapidocr 含 rec 裁剪 / zxing）+ .venv（uv，py3.12.14）+ build/Release 全量产物（exe / 注入 DLL / rapidocr 部署），ctest 96/96 绿；顺手修脚本两处——代理 7897→17890（qt/rapidocr/zxing 三脚本）与 7z MSI 路径 bug（P-057）；改动未提交待用户
+- **相关坑**：P-057
 
 ### T-054 桌面日历重写：日历/收纳盒痕迹清零 + 照搬 rlqd 复刻移植 Qt
 - **执行智能体**：Agent_20261116003308（用户指令两步走：先清零不留痕迹，再照搬移植）
@@ -130,6 +140,7 @@
 ## 当前任务
 
 **T-054 已结算，待用户真机验收**——验收清单（对照 rlqd README「已验证行为」）：
+- **T-056 修复回归重点**（2026-11-16 首轮目测 4 问题已修）：①星期表头与格子对齐；②今日高亮单框（发光环贴格边）；③头部只剩 5 按钮（设置/插件/上一页/下一页/主菜单，整排右移 64px 属正常）；④设置/菜单/搜索/信息框等弹窗开→关后日历不再冻结（曾现卡死的旧 exe 已换），且弹窗一律开在日历屏不再落副屏
 - ①启动 PopTools.exe（构建前先杀 PopTools.exe/RapidOCR-json.exe；注入 DLL `PopToolsCalendarHook.dll` 已在 build/Release 与 exe 同目录）→ 数秒内桌面出现日历：**壁纸之上、图标之下**（图标可拖过日历、可覆盖日历）
 - ②右键日历区域 → Windows 桌面右键菜单；日历区域拖动 → 桌面框选正常；双击桌面图标 → 启动图标本身（不误开编辑器）
 - ③**双击日期空白处** → 当日日程编辑器（一行一条，右上 ✓ 保存）；头部按钮：上一页/下一页/插件菜单/账户提示/日历设置/主菜单
@@ -170,7 +181,7 @@
 ## 踩坑记录
 
 > 每条坑必须链接到产生它的历史任务条目。
-> 维护智能体：Agent_20261116003308
+> 维护智能体：Agent_20261116165900
 
 ### P-054 农历权威表手抄入源码 → 整体错位 20 项
 - **关联任务**：T-054 ｜ 记录智能体：Agent_20261116003308
@@ -189,6 +200,30 @@
 - **现象**：SetWindowsHookExW 成功（err=0）但 DLL 从未进 explorer（模块列表无、注入侧日志零行、看门狗每 2s 重复 StartDock）；系统对加载失败的注入 DLL 静默跳过钩子
 - **原因**：CMake 默认 /MD 动态 CRT——注入进程内解析 CRT 依赖失败即静默不加载；rlqd 原 build.bat 的 `cl /LD` 默认 /MT 静态 CRT 恰好规避
 - **解决**：钩子 DLL 目标钉死 `MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"`；另补 SendMessageTimeout(WM_NULL) 强制触发 WH_CALLWNDPROC（该钩子只拦 SendMessage，原版靠环境消息碰运气）。教训：**注入类 DLL 一律静态 CRT**；注入成功与否以 explorer 侧日志/模块列表为准，钩子句柄非空 ≠ 注入成功
+
+### P-057 7-Zip 24.09 MSI 管理员解压落到 Files/Files 双层路径
+- **关联任务**：T-055 ｜ 记录智能体：Agent_20261116165900
+- **现象**：install_rapidocr.py 的 msiexec /a 结束后报 7z.exe 不存在；实际解到 temp_scripts/tool/7zip/Files/**Files**/7-Zip/（多一层 Files）
+- **原因**：24.09 MSI 目录表自带 Files 目录前缀，脚本 TARGETDIR 又拼了一层 Files；旧版 MSI 布局无此前缀，故搬迁前未触发
+- **解决**：ensure_7zip 改为在 TOOLS_7ZIP 下递归 glob 定位 7z.exe（兼容新旧布局），找不到才解压。教训：第三方 MSI 解包落点别按目录表硬编码，定位动态化
+
+### P-058 QDialog::done() 只 hide 不析构，destroyed 不触发致日历永久冻结
+- **关联任务**：T-056 ｜ 记录智能体：Agent_20261116165900
+- **现象**：点日历设置后日历整体冻结（无 hover 无点击）；取证：窗口队列全活、无线程自旋、无设置窗 HWND、SHM seq 恒定
+- **原因**：QDialog 确定/取消/关窗/ESC 走 done() 只 hide——QObject::destroyed 永不触发，宿主 m_modal 卡死 true，nativeEvent 吞掉全部 DLL 事件；五个弹窗（设置/搜索/选日期/信息框）全中，仅带 WA_DeleteOnClose 的菜单/编辑器/覆盖层幸免
+- **解决**：改监听 QDialog::finished（done() 必发）+ deleteLater + trackModal（QPointer 对号复位，防菜单「关旧开新」竞态误清）。教训：**hide ≠ destroy，弹窗收尾逻辑禁止只挂 destroyed**；活体取证三板斧（窗口枚举/线程 CPU/SHM seq）比 dump 快
+
+### P-059 无 parent 的 QDialog 默认落「活动屏」，多屏机器开到副屏
+- **关联任务**：T-056 ｜ 记录智能体：Agent_20261116165900
+- **现象**：点日历设置"毫无反应"（窗实际开在 1920 外的副屏 2632 处），叠加 P-058 后用户感知即"卡死"
+- **原因**：无 parent 顶层窗由系统按活动屏放置；本项目弹窗一律 nullptr parent
+- **解决**：centerOnPanel 统一锚定日历面板中心（物理÷dpr；QMessageBox show 后尺寸才定，随即再搬）。教训：**多屏环境下无 parent 弹窗必须显式定位到业务屏**
+
+### P-060 后台进程 activateWindow 偶发被前台锁拒绝，靠失焦关窗的浮窗会"关不掉"
+- **关联任务**：T-056 ｜ 记录智能体：Agent_20261116165900
+- **现象**：日程编辑器双击打开后，点外面有时能关有时不能，无规律
+- **原因**：编辑器仅靠 WindowDeactivate 关闭；双击经桌面转发（前台=explorer），后台进程的 activateWindow 受 Windows 前台锁限制时灵时不灵——从未激活过就永不"失焦"
+- **解决**：打开编辑器期间装卸共享 WH_MOUSE_LL（GlobalMouseHook，划词卡片先例）：点编辑器外即 saveAndClose，销毁即卸钩。教训：**浮窗"点外关闭"不能只依赖激活态（失焦/Deactivate），须系统级鼠标钩子兜底**
 
 ### P-031 桌面层嵌窗两条弯路：SetParent 不被合成与点击激活横跳
 - **关联任务**：T-043（已清档）｜ 记录智能体：Agent_20261108204000
@@ -284,7 +319,7 @@
 
 ## 修改台账
 
-> 维护智能体：Agent_20261116003308
+> 维护智能体：Agent_20261116165900
 
 > 更早台账（2026-11-01 ~ 11-08）→ [handover/archive/ledger-arch.md](handover/archive/ledger-arch.md)
 
@@ -299,3 +334,6 @@
 | 2026-11-16 00:33 | Agent_20261116003308 | 全文（破坏性清理，用户指令） | T-054 清零阶段：删除旧日历/YYNote 在途实现/收纳盒/desktopband 全部代码、设置键、测试与文档痕迹；删除 T-042/T-043/T-044/T-048/T-053 条目与 P-036/P-037 坑（编号不复用）；细档去 T-048 节、归档去 P-028 与相关台账行；快照/当前任务/红线/命令刷新 | 日历+收纳盒全量清零（代码+文档），仓库回无痕迹基线；移植阶段进行中 |
 | 2026-11-16 01:40 | Agent_20261116003308 | 历史任务 / 当前任务 / 踩坑记录 / 项目快照 / 头部 / 细档 | T-054 结算：新增条目与细档 t054_rlqd_calendar_port.md；当前任务改写为真机验收清单；新增 P-054、P-055；快照目录/命令/ctest 96/状态刷新 | 注入 DLL + Qt 应用侧移植完成，ctest 89→96 绿，真机目测待用户 |
 | 2026-11-16 10:45 | Agent_20261116003308 | 踩坑记录 / 细档 / hook 源码 / CMake | 用户首次拉起：注入静默失败（P-056）——钩子 DLL 改静态 CRT + SendMessage 强触发；explorer 侧日志确认注入成功（双子类化 + DIB 1920×1080） | 日历首次真实上屏，用户目测进行中 |
+| 2026-11-16 16:59 | Agent_20261116165900 | 头部 / 历史任务 / 踩坑记录 / 项目快照 / 修改台账 | 新增 T-055、P-057；快照 scripts 行补全脚本清单并把代理端口对齐 17890 | 净克隆环境重建（tools 三件套 + .venv + build + ctest 96 绿）；脚本双修复未提交待用户 |
+| 2026-11-16 17:50 | Agent_20261116165900 | 头部 / 历史任务 / 当前任务 / 踩坑记录 / 修改台账 | 新增 T-056、P-058、P-059；当前任务补 T-056 回归重点 | 日历首轮目测 4 问题修复（表头对齐/今日单框/删账户/弹窗卡死根因+副屏），ctest 96 绿，未提交待用户 |
+| 2026-11-16 18:03 | Agent_20261116165900 | 头部 / 历史任务 / 踩坑记录 / 修改台账 | T-056 增补编辑器外点修复；新增 P-060 | GlobalMouseHook 兜底"点外即关"，真实点击三步自验全过，ctest 96 绿，未提交待用户 |

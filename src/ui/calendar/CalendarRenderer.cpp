@@ -210,12 +210,11 @@ CalendarLayout CalendarRenderer::render(QPainter *g, CalendarSharedCanvas &canva
             }
 
             if (date == today) {
+                // 单框方案：发光环贴图外扩 11px 绘制，让环带正压在格边上（贴图环带
+                // 中心内缩 ~15.5px，经 sb20→db14 映射后落在绘制矩形内缩 ~11px 处，
+                // 外扩 11px 恰好抵消）。原「外圈白线 + 内圈发光」双框废弃
                 if (!m_todayGlow.isNull())
-                    drawNineSliceBorder(g, m_todayGlow, cell, 20, 14);
-                QPen hp(QColor(255, 255, 244, 215), 1.1);
-                g->setPen(hp);
-                g->setBrush(Qt::NoBrush);
-                g->drawRect(QRectF(cell));
+                    drawNineSliceBorder(g, m_todayGlow, cell.adjusted(-11, -11, 11, 11), 20, 14);
             }
         }
     }
@@ -240,17 +239,18 @@ CalendarLayout CalendarRenderer::render(QPainter *g, CalendarSharedCanvas &canva
                     QPointF(layout.gridContent.right() + 1, layout.weekHeader.bottom() + 1));
     }
 
-    // 星期表头
+    // 星期表头（矩形居中绘制：独立 QFontMetrics 测宽与 QPainter 实际渲染的
+    // 字形宽度存在系统性偏差（SimSun 小字号尤甚），手算 (cellWidth-w)/2 会整体
+    // 左偏约 10px；drawText(rect, AlignHCenter) 让测量与渲染走同一引擎）
     {
-        const QFontMetrics wfm(weekHeaderFont);
         for (int c = 0; c < 7; ++c) {
             const QDate day(2020, 1, 6 + c); // 2020-01-06 = 周一 … 01-12 = 周日
             const QString text = ChineseCalendar::weekdayShort(day);
-            const qreal w = wfm.horizontalAdvance(text);
-            drawShadowText(g, text, weekHeaderFont, QColor(226, 226, 226, 255),
-                           QPointF(layout.gridContent.left() + c * layout.cellWidth
-                                       + (layout.cellWidth - w) / 2.0,
-                                   layout.weekHeader.top() + 3));
+            const QRectF col(layout.gridContent.left() + c * layout.cellWidth,
+                             layout.weekHeader.top() + 3, layout.cellWidth,
+                             layout.kWeekHeaderHeight);
+            drawShadowTextInRect(g, text, weekHeaderFont, QColor(226, 226, 226, 255), col,
+                                 Qt::AlignHCenter | Qt::AlignTop);
         }
     }
 
@@ -389,6 +389,17 @@ void CalendarRenderer::drawShadowText(QPainter *g, const QString &text, const QF
     }
 }
 
+void CalendarRenderer::drawShadowTextInRect(QPainter *g, const QString &text, const QFont &f,
+                                            const QColor &color, const QRectF &rect,
+                                            Qt::Alignment align)
+{
+    g->setFont(f);
+    g->setPen(QColor(0, 0, 0, 120));
+    g->drawText(rect.adjusted(1, 1, 1, 1), align, text);
+    g->setPen(color);
+    g->drawText(rect, align, text);
+}
+
 void CalendarRenderer::drawNineSlice(QPainter *g, const QImage &img, const QRect &dst, int border)
 {
     const int w = img.width(), h = img.height();
@@ -452,25 +463,6 @@ void CalendarRenderer::drawHeaderIcon(QPainter *g, HeaderButtonKind kind, const 
             g->drawLine(QPointF(cx, cy + 4), QPointF(cx, cy + 7));
             g->drawLine(QPointF(cx - 3, cy + 7), QPointF(cx + 3, cy + 7));
             break;
-        case HeaderButtonKind::Cloud: {
-            QPainterPath path;
-            path.arcMoveTo(QRectF(cx - 8, cy - 2, 9, 9), 180);
-            path.arcTo(QRectF(cx - 8, cy - 2, 9, 9), 180, 180);
-            path.arcTo(QRectF(cx - 1, cy - 8, 10, 10), 200, 160);
-            path.arcTo(QRectF(cx + 1, cy - 2, 8, 8), 270, 170);
-            path.lineTo(cx + 8, cy + 6);
-            path.lineTo(cx - 7, cy + 6);
-            g->drawPath(path);
-            break;
-        }
-        case HeaderButtonKind::Account: {
-            g->drawEllipse(QPointF(cx, cy - 3.8), 3.2, 3.2);
-            QPainterPath path;
-            path.arcMoveTo(QRectF(cx - 7, cy + 1, 14, 12), 180);
-            path.arcTo(QRectF(cx - 7, cy + 1, 14, 12), 180, 180);
-            g->drawPath(path);
-            break;
-        }
         case HeaderButtonKind::Previous:
             g->drawPolyline(QVector<QPointF>{ QPointF(cx + 3, cy - 6), QPointF(cx - 3, cy),
                                               QPointF(cx + 3, cy + 6) });

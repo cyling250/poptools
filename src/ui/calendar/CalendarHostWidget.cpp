@@ -6,6 +6,8 @@
 #include "CalendarSearchForm.h"
 #include "CalendarSettingsForm.h"
 
+#include "core/hotkey/GlobalMouseHook.h"
+
 #include <QApplication>
 #include <QDateTime>
 #include <QDir>
@@ -275,10 +277,6 @@ void CalendarHostWidget::updateHover(const QPoint &p)
         switch (CalendarLayout::headerKinds[hh]) {
             case HeaderButtonKind::Settings: hint = QStringLiteral("日历设置"); break;
             case HeaderButtonKind::Plugin: hint = QStringLiteral("插件"); break;
-            case HeaderButtonKind::Cloud:
-                hint = QStringLiteral("登录后，可以同步和备份您的数据");
-                break;
-            case HeaderButtonKind::Account: hint = QStringLiteral("账号中心"); break;
             case HeaderButtonKind::Previous: hint = QStringLiteral("上一页"); break;
             case HeaderButtonKind::Next: hint = QStringLiteral("下一页"); break;
             case HeaderButtonKind::Menu: hint = QStringLiteral("更多"); break;
@@ -327,11 +325,6 @@ void CalendarHostWidget::handleSingleClick(const QPoint &p)
             case HeaderButtonKind::Plugin:
                 openPluginMenu();
                 break;
-            case HeaderButtonKind::Cloud:
-            case HeaderButtonKind::Account:
-                showInfo(QStringLiteral("账户设置"),
-                         QStringLiteral("本地模式：数据保存在本机，无需登录。"));
-                break;
         }
         return;
     }
@@ -379,10 +372,24 @@ void CalendarHostWidget::openEditor(const QDate &date, const QRect &cell)
     x = std::max(m_screen.left() + 10, x);
     y = std::max(m_screen.top() + 10, y);
     auto *editor = new CalendarEventEditor(date, &m_store, logicalPos(QPoint(x, y)), nullptr);
-    connect(editor, &QObject::destroyed, this, [this] {
-        m_modal = false;
-        render();
-    });
+    trackModal(editor);
+    // 外点关闭兜底：编辑器靠 WindowDeactivate 关闭，但双击源自桌面（前台进程是
+    // explorer），activateWindow 作为后台进程常被 Windows 前台锁拒绝——编辑器
+    // 从未激活过，外点就永远不会"失焦"，表现即"有时点外面关不掉、且无规律"
+    //（实为激活是否成功无规律）。共享 WH_MOUSE_LL 按需装卸（划词卡片先例，
+    // 红线 2）：点编辑器外即保存关闭，编辑器销毁即卸钩
+    if (!m_editorHook) {
+        m_editorHook = new GlobalMouseHook(this);
+        connect(m_editorHook, &GlobalMouseHook::mousePressed, this,
+                [this](const QPoint &nativePos) {
+                    auto *ed = qobject_cast<CalendarEventEditor *>(m_modalWidget.data());
+                    if (ed && !ed->frameGeometry().contains(logicalPos(nativePos)))
+                        ed->saveAndClose();
+                });
+    }
+    m_editorHook->start();
+    connect(editor, &QObject::destroyed, this,
+            [this] { if (m_editorHook) m_editorHook->stop(); });
     editor->show();
     editor->raise();
     editor->activateWindow();
@@ -392,8 +399,7 @@ void CalendarHostWidget::openMainMenu()
 {
     if (!m_layout.has_value())
         return;
-    m_modal = true;
-    const QRect b = m_layout->headerButtons.at(6);
+    const QRect b = m_layout->headerButtons.at(4);
     int x = std::clamp(b.left() + b.width() - 200, m_screen.left() + 6,
                        m_screen.right() + 1 - 206);
     int y = std::clamp(b.bottom() + 1 + 4, m_screen.top() + 6, m_screen.bottom() + 1 - 500);
@@ -425,8 +431,6 @@ void CalendarHostWidget::openMainMenu()
         { QStringLiteral("打印"), [this] { showInfo(QStringLiteral("打印"), QStringLiteral("暂未实现打印。")); },
           true, false, false },
         { QStringLiteral("日历设置"), [this] { openSettings(); }, false, false, false },
-        { QStringLiteral("账户设置"), [this] { showInfo(QStringLiteral("账户设置"), QStringLiteral("本地模式，无需登录。")); },
-          true, false, false },
         { QStringLiteral("功能介绍"),
           [this] {
               showInfo(QStringLiteral("功能介绍"),
@@ -443,10 +447,7 @@ void CalendarHostWidget::openMainMenu()
          false, false, false }
     };
     auto *menu = new CalendarMenuForm(std::move(items), logicalPos(QPoint(x, y)), nullptr);
-    connect(menu, &QObject::destroyed, this, [this] {
-        m_modal = false;
-        render();
-    });
+    trackModal(menu);
     menu->show();
     menu->raise();
 }
@@ -490,29 +491,38 @@ void CalendarHostWidget::openPluginMenu()
           false, false, false }
     };
     auto *menu = new CalendarMenuForm(std::move(items), logicalPos(QPoint(x, y)), nullptr);
-    connect(menu, &QObject::destroyed, this, [this] {
-        m_modal = false;
-        render();
-    });
+    trackModal(menu);
     menu->show();
     menu->raise();
 }
 
+void CalendarHostWidget::centerOnPanel(QWidget *w)
+{
+    // 弹窗锚定日历面板中心（无 parent 的 QDialog 默认落在"活动屏"，多屏机器上
+    // 曾开到副屏导致用户以为日历无响应）。物理 → 逻辑换算见坐标约定
+    const QRect panel = m_settings.rect();
+    const QPoint tl = logicalPos(QPoint(panel.left(), panel.top()));
+    const QPoint br = logicalPos(QPoint(panel.right(), panel.bottom()));
+    w->move(tl.x() + (br.x() - tl.x() - w->width()) / 2,
+            tl.y() + (br.y() - tl.y() - w->height()) / 2);
+}
+
 void CalendarHostWidget::openSettings()
 {
-    m_modal = true;
     auto *form = new CalendarSettingsForm(m_settings, nullptr);
-    connect(form, &QObject::destroyed, this, [this] {
-        m_modal = false;
-        if (m_settingsAccepted) {
+    // QDialog::done()（确定/取消/关窗/ESC）只 hide 不析构——QObject::destroyed
+    // 永不触发，m_modal 会永久卡死（日历冻结 bug 的根因）。改监听 finished
+    //（done() 必发），收尾后 deleteLater，复位交给 trackModal 的 destroyed 守卫
+    connect(form, &QDialog::finished, this, [this, form](int result) {
+        if (result == QDialog::Accepted) {
             m_settings.save();
             if (m_renderer)
                 m_renderer->refreshWallpaper();
-            render();
         }
-        m_settingsAccepted = false;
+        form->deleteLater();
     });
-    connect(form, &QDialog::accepted, this, [this] { m_settingsAccepted = true; });
+    trackModal(form);
+    centerOnPanel(form);
     form->show();
     form->raise();
     form->activateWindow();
@@ -574,21 +584,25 @@ void CalendarHostWidget::showCalendar()
 void CalendarHostWidget::searchTasks()
 {
     auto *form = new CalendarSearchForm(m_store, nullptr);
-    connect(form, &QDialog::accepted, this, [this, form] {
-        const QDate d = form->selectedDate();
-        if (!d.isValid())
-            return;
-        m_year = d.year();
-        m_month = d.month();
-        render();
-        if (m_layout.has_value()) {
-            const int row = int(QDate(m_layout->firstCellDate).daysTo(d) / 7);
-            const int col = int(QDate(m_layout->firstCellDate).daysTo(d) % 7);
-            if (row >= 0 && row < m_layout->rows && col >= 0 && col < 7)
-                openEditor(d, m_layout->cellRect(row, col));
+    connect(form, &QDialog::finished, this, [this, form](int result) {
+        if (result == QDialog::Accepted) {
+            const QDate d = form->selectedDate();
+            if (d.isValid()) {
+                m_year = d.year();
+                m_month = d.month();
+                render();
+                if (m_layout.has_value()) {
+                    const int row = int(QDate(m_layout->firstCellDate).daysTo(d) / 7);
+                    const int col = int(QDate(m_layout->firstCellDate).daysTo(d) % 7);
+                    if (row >= 0 && row < m_layout->rows && col >= 0 && col < 7)
+                        openEditor(d, m_layout->cellRect(row, col));
+                }
+            }
         }
+        form->deleteLater();
     });
-    connect(form, &QObject::destroyed, this, [this] { m_modal = false; });
+    trackModal(form);
+    centerOnPanel(form);
     form->show();
     form->raise();
     form->activateWindow();
@@ -597,15 +611,19 @@ void CalendarHostWidget::searchTasks()
 void CalendarHostWidget::pickDate()
 {
     auto *form = new CalendarDatePickerForm(m_today, nullptr);
-    connect(form, &QDialog::accepted, this, [this, form] {
-        const QDate d = form->selectedDate();
-        if (d.isValid()) {
-            m_year = d.year();
-            m_month = d.month();
-            render();
+    connect(form, &QDialog::finished, this, [this, form](int result) {
+        if (result == QDialog::Accepted) {
+            const QDate d = form->selectedDate();
+            if (d.isValid()) {
+                m_year = d.year();
+                m_month = d.month();
+                render();
+            }
         }
+        form->deleteLater();
     });
-    connect(form, &QObject::destroyed, this, [this] { m_modal = false; });
+    trackModal(form);
+    centerOnPanel(form);
     form->show();
     form->raise();
     form->activateWindow();
@@ -651,13 +669,30 @@ void CalendarHostWidget::importTasks()
 
 void CalendarHostWidget::showInfo(const QString &title, const QString &text)
 {
-    m_modal = true;
     QMessageBox *box = new QMessageBox(QMessageBox::Information, title, text,
                                        QMessageBox::Ok, nullptr);
-    connect(box, &QObject::destroyed, this, [this] { m_modal = false; });
+    connect(box, &QDialog::finished, this, [box](int) { box->deleteLater(); });
+    trackModal(box);
     box->show();
+    centerOnPanel(box); // show 后尺寸才定，随即搬回日历所在屏
     box->raise();
     box->activateWindow();
+}
+
+void CalendarHostWidget::trackModal(QWidget *w)
+{
+    // 弹窗登记：m_modal=true 直到该窗真正销毁。用 QPointer 对号防串——
+    // 菜单点菜单项时「close(异步销毁) → action 开新弹窗」存在竞态，
+    // 旧菜单的 destroyed 若无条件复位会把新弹窗的模态态误清
+    m_modal = true;
+    m_modalWidget = w;
+    connect(w, &QObject::destroyed, this, [this, w] {
+        if (m_modalWidget == w) {
+            m_modalWidget = nullptr;
+            m_modal = false;
+            render();
+        }
+    });
 }
 
 } // namespace poptools

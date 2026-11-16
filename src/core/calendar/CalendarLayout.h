@@ -10,8 +10,6 @@ enum class HeaderButtonKind
 {
     Settings,
     Plugin,
-    Cloud,
-    Account,
     Previous,
     Next,
     Menu
@@ -33,11 +31,10 @@ public:
     QRect weekNumberArea;
     QRect nextMonthPill;
     QRect guidePill;
-    QVector<QRect> headerButtons;             // 7 个，右起往左
-    static constexpr HeaderButtonKind headerKinds[7] = {
-        HeaderButtonKind::Settings, HeaderButtonKind::Plugin, HeaderButtonKind::Cloud,
-        HeaderButtonKind::Account, HeaderButtonKind::Previous, HeaderButtonKind::Next,
-        HeaderButtonKind::Menu
+    QVector<QRect> headerButtons;             // 5 个，右起往左
+    static constexpr HeaderButtonKind headerKinds[5] = {
+        HeaderButtonKind::Settings, HeaderButtonKind::Plugin, HeaderButtonKind::Previous,
+        HeaderButtonKind::Next, HeaderButtonKind::Menu
     };
 
     int year = 0;

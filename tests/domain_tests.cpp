@@ -3327,9 +3327,9 @@ private slots:
         QCOMPARE(date, QDate(2026, 11, 17));
         QCOMPARE(layout.tryGetCell(QPoint(-500, -500), &row, &col, &date, &cell), false);
         QVERIFY(!layout.headerButtons.isEmpty());
-        QCOMPARE(layout.headerButtons.size(), 7);
-        const int hit = layout.hitHeader(layout.headerButtons.at(6).center());
-        QCOMPARE(hit, 6);
+        QCOMPARE(layout.headerButtons.size(), 5); // T-055 后 5 按钮（删云同步/账户）
+        const int hit = layout.hitHeader(layout.headerButtons.at(4).center());
+        QCOMPARE(hit, 4);
         QCOMPARE(layout.hitHeader(QPoint(-1, -1)), -1);
         // 周日开月的 skipPartial：2026-02-01 是周日 → 首格 02-02
         const CalendarLayout feb(QRect(0, 0, 1260, 795), 2026, 2);

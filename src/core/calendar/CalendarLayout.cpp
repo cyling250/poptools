@@ -34,8 +34,8 @@ CalendarLayout::CalendarLayout(const QRect &panelRect, int year_, int month_)
     cellHeight = std::max(1, gridContent.height() / rows);
 
     int bx = panel.right() - 12 - 26;
-    headerButtons.resize(7);
-    for (int i = 6; i >= 0; --i) {
+    headerButtons.resize(5);
+    for (int i = 4; i >= 0; --i) {
         headerButtons[i] = QRect(bx, panel.top() + 12, 26, 26);
         bx -= 32;
     }

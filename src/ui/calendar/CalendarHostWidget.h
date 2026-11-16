@@ -2,6 +2,7 @@
 
 #include <QDate>
 #include <QObject>
+#include <QPointer>
 #include <QPoint>
 #include <QWidget>
 
@@ -19,6 +20,8 @@ class QTimer;
 class QLibrary;
 
 namespace poptools {
+
+class GlobalMouseHook;
 
 // ============================================================
 // 桌面日历宿主控制器（照搬 rlqd CalendarClone/HostForm.cs）：
@@ -69,6 +72,8 @@ private:
     void handleSingleClick(const QPoint &p);
     void handleDoubleClick(const QPoint &p);
     void notifyHookUpdate();
+    void trackModal(QWidget *w);
+    void centerOnPanel(QWidget *w);
 
     CalendarSharedCanvas m_canvas;
     std::unique_ptr<CalendarRenderer> m_renderer;
@@ -87,11 +92,12 @@ private:
     bool m_modal = false;
     bool m_adjusting = false;
     bool m_stopped = false;
-    bool m_settingsAccepted = false;
+    QPointer<QWidget> m_modalWidget;
     QTimer *m_clock = nullptr;
     QTimer *m_wallpaperTimer = nullptr;
     QTimer *m_watchdog = nullptr;
     QLibrary *m_hookLib = nullptr;
+    GlobalMouseHook *m_editorHook = nullptr; // 日程编辑器外点关闭兜底（随编辑器装卸）
     int (*m_startDock)(HWND) = nullptr;
     int (*m_stopDock)() = nullptr;
 };

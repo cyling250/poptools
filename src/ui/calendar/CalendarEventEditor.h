@@ -23,6 +23,9 @@ public:
     CalendarEventEditor(const QDate &date, CalendarTaskStore *store, const QPoint &pos,
                         QWidget *parent = nullptr);
 
+    // 收集文本保存回任务库并关闭（公开：宿主的全局鼠标钩子兜底"点外即关"调用）
+    void saveAndClose();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
@@ -34,7 +37,6 @@ private:
     int hitTool(const QPoint &p) const;
     void handleTool(int index);
     void insertTime();
-    void saveAndClose();
     void drawToolIcon(QPainter *g, int index, const QRect &r);
 
     QDate m_date;

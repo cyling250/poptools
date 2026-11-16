@@ -41,6 +41,8 @@ private:
     void drawShadow(QPainter *g, const QRect &panel);
     void drawShadowText(QPainter *g, const QString &text, const QFont &f, const QColor &color,
                         const QPointF &pos, qreal maxWidth = 0);
+    void drawShadowTextInRect(QPainter *g, const QString &text, const QFont &f,
+                              const QColor &color, const QRectF &rect, Qt::Alignment align);
     void drawNineSlice(QPainter *g, const QImage &img, const QRect &dst, int border);
     void drawNineSliceBorder(QPainter *g, const QImage &img, const QRect &dst, int srcBorder,
                              int destBorder);
