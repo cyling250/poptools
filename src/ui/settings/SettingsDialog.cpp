@@ -5,6 +5,8 @@
 #include "core/translation/ApiTester.h"
 #include "ui/ThemeColors.h"
 
+#include <algorithm>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -14,23 +16,23 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <algorithm>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
-#include <QRegularExpression>
-#include <QSlider>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyleHints>
+#include <QTime>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 namespace poptools {
 
+// services 可为空（单测场景，日历功能按钮全部静默）；主题跟随系统明暗，
+// QSS 全量重设（applyTheme）
 SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
     : QDialog(parent)
     , m_services(services)
@@ -100,43 +102,9 @@ SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    // 点击 OK 时保存设置
-    connect(this, &QDialog::accepted, this, [this] {
-        Settings &s = Settings::instance();
-        s.setApiFormat(m_formatCombo->currentData().toString());
-        s.setApiBaseUrl(m_urlEdit->text().trimmed());
-        s.setApiKey(m_keyEdit->text().trimmed());
-        s.setApiModel(m_modelEdit->text().trimmed());
-        s.setTranslateDomains(parseDomains());
-        s.setTranslateTerms(parseTerms());
-        s.setPinSaveDir(m_dirEdit->text().trimmed());
-        s.setMonitorEnabled(m_monEnabledCheck->isChecked());
-        s.setMonitorMaskPasswords(m_monMaskCheck->isChecked());
-        s.setMonitorOcrSnapshot(m_monOcrCheck->isChecked());
-        s.setMonitorIdleThresholdSec(m_monIdleSpin->value());
-        s.setMonitorRetentionDays(m_monRetentionSpin->value());
-        s.setAssistantApiKey(m_gdyKeyEdit->text().trimmed());
-        s.setAssistantApiBaseUrl(m_gdyUrlEdit->text().trimmed());
-        s.setAssistantApiModel(m_gdyModelEdit->text().trimmed());
-        s.setAssistantPermMode(m_gdyPermCombo->currentData().toString());
-        s.setAssistantSummaryTime(m_gdyTimeEdit->text().trimmed());
-        s.setAssistantAutoSummarize(m_gdyAutoCheck->isChecked());
-        s.setAssistantBallEnabled(m_gdyBallCheck->isChecked()); // T-050
-        s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
-
-        // 桌面日历：写入 CalendarSettings JSON 并经能力槽通知宿主重载重绘
-        CalendarSettings cal = CalendarSettings::load();
-        cal.showLunar = m_calLunarCheck->isChecked();
-        cal.showWeekNumbers = m_calWeekNumCheck->isChecked();
-        cal.showEvents = m_calEventsCheck->isChecked();
-        cal.glassEffect = m_calGlassCheck->isChecked();
-        cal.showGuide = m_calGuideCheck->isChecked();
-        cal.hidden = !m_calListCheck->isChecked();
-        cal.fontScale = m_calFontSpin->value();
-        cal.save();
-        if (m_services && m_services->calendarApplySettings)
-            m_services->calendarApplySettings();
-    });
+    // 点击 OK 保存设置。仅 Accepted 时执行：先写 Settings/CalendarSettings，exec
+    // 返回后 MainWindow 再广播 settingsChanged——“先保存后广播”次序保证监听模块读到新值
+    connect(this, &QDialog::accepted, this, [this] { applySettingsFromForm(); });
 
     applyTheme();
 }
@@ -144,6 +112,54 @@ SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
 void SettingsDialog::openCalendarPage()
 {
     m_nav->setCurrentRow(m_nav->count() - 1); // 桌面日历页固定在导航末位
+}
+
+// OK 保存：表单当前值 → Settings / CalendarSettings（QDialog::accepted 触发，
+// Cancel/Esc 不会走到这里）
+void SettingsDialog::applySettingsFromForm()
+{
+    Settings &s = Settings::instance();
+    s.setApiFormat(m_formatCombo->currentData().toString());
+    s.setApiBaseUrl(m_urlEdit->text().trimmed());
+    s.setApiKey(m_keyEdit->text().trimmed());
+    s.setApiModel(m_modelEdit->text().trimmed());
+    s.setTranslateDomains(parseDomains());
+    s.setTranslateTerms(parseTerms());
+    s.setPinSaveDir(m_dirEdit->text().trimmed());
+    s.setMonitorEnabled(m_monEnabledCheck->isChecked());
+    s.setMonitorMaskPasswords(m_monMaskCheck->isChecked());
+    s.setMonitorOcrSnapshot(m_monOcrCheck->isChecked());
+    s.setMonitorIdleThresholdSec(m_monIdleSpin->value());
+    s.setMonitorRetentionDays(m_monRetentionSpin->value());
+    s.setAssistantApiKey(m_gdyKeyEdit->text().trimmed());
+    s.setAssistantApiBaseUrl(m_gdyUrlEdit->text().trimmed());
+    s.setAssistantApiModel(m_gdyModelEdit->text().trimmed());
+    s.setAssistantPermMode(m_gdyPermCombo->currentData().toString());
+    // T-062 修复: HH:mm 校验器允许 Intermediate 残留（如“2:”）留存到确定，
+    // 此前坏值直写 ini（读侧回退 22:00，会把用户原有效时刻一并冲掉）；现在
+    // 无效时刻不落盘，保留磁盘上的最近有效值
+    const QString summaryTime = m_gdyTimeEdit->text().trimmed();
+    s.setAssistantSummaryTime(QTime::fromString(summaryTime, QStringLiteral("HH:mm")).isValid()
+                                  ? summaryTime
+                                  : Settings::instance().assistantSummaryTime());
+    s.setAssistantAutoSummarize(m_gdyAutoCheck->isChecked());
+    s.setAssistantBallEnabled(m_gdyBallCheck->isChecked()); // T-050
+    s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
+
+    // 桌面日历：load→改→save 只覆写本页暴露的 7 个字段；几何(x/y/width/height)与
+    // showNextMonthPill 取磁盘最新值——对话框打开期间日历宿主的“调整位置和大小”
+    // 等即时修改不会被本页保存覆盖。写入 JSON 后经能力槽通知宿主重载重绘
+    CalendarSettings cal = CalendarSettings::load();
+    cal.showLunar = m_calLunarCheck->isChecked();
+    cal.showWeekNumbers = m_calWeekNumCheck->isChecked();
+    cal.showEvents = m_calEventsCheck->isChecked();
+    cal.glassEffect = m_calGlassCheck->isChecked();
+    cal.showGuide = m_calGuideCheck->isChecked();
+    cal.hidden = !m_calListCheck->isChecked();
+    cal.fontScale = m_calFontSpin->value();
+    cal.save();
+    if (m_services && m_services->calendarApplySettings)
+        m_services->calendarApplySettings();
 }
 
 // ---- 各页构建 ----
@@ -157,22 +173,45 @@ QWidget *newPage()
     lay->setSpacing(6);
     return page;
 }
+
+// 分区标题：加粗 13px 小节头，六页共用。颜色继承父级 QLabel 规则（纯黑/纯白
+// 随主题），此处只管字重与字号
+void addSectionTitle(QVBoxLayout *lay, const QString &title)
+{
+    auto *label = new QLabel(title);
+    label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+    lay->addWidget(label);
+}
+
+// 分节分隔线：objectName 走 applyTheme 的 #dialogSeparator ID 规则上色
+void addHSeparator(QWidget *page, QVBoxLayout *lay)
+{
+    auto *sep = new QFrame(page);
+    sep->setObjectName("dialogSeparator");
+    sep->setFrameShape(QFrame::HLine);
+    lay->addWidget(sep);
+}
+
+// 提示行：自动换行 + 12px 字号。文字颜色交 applyTheme 的 QLabel 规则
+//（纯黑/纯白随主题，T-030 约定：文字不允许灰色），此处只约束字号
+QLabel *makeHint(const QString &text)
+{
+    auto *label = new QLabel(text);
+    label->setWordWrap(true);
+    label->setStyleSheet("font-size: 12px;");
+    return label;
+}
 } // namespace
 
+// 通用页：应用简介 + 开机启动开关。开关即点即写注册表（HKCU Run），
+// 不经 OK/Cancel——与其它字段“确定才生效”的模型不同，文案按钮自翻转
 QWidget *SettingsDialog::buildGeneralPage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        // 颜色继承父级 QLabel 规则（纯黑/纯白），此处只管字重与字号
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
-
-    addSection(QStringLiteral("应用"));
+    addSectionTitle(lay, QStringLiteral("应用"));
     auto *infoLabel = new QLabel(
         QStringLiteral("PopTools —— Windows 全局实用工具箱\n截图（F1）· 贴图（F3）· 划词翻译（Ctrl+Alt+Shift+X）"),
         page);
@@ -194,24 +233,21 @@ QWidget *SettingsDialog::buildGeneralPage()
     return page;
 }
 
+// 截图与贴图页：贴图默认保存目录。留空 = F3 不自动落盘；目录不存在由
+// PinWindow 落盘侧 mkpath 兜底（PinWindow.cpp:129 saveToDefaultDir），此处不校验
 QWidget *SettingsDialog::buildCapturePage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
     auto addHint = [lay](const QString &text) {
         auto *label = new QLabel(text);
         lay->addWidget(label);
         return label;
     };
 
-    addSection(QStringLiteral("截图与贴图"));
+    addSectionTitle(lay, QStringLiteral("截图与贴图"));
     addHint(QStringLiteral("区域截图：F1　·　贴图：F3（热键可在 PopTools.ini 中修改）"));
     auto *captureForm = new QFormLayout;
     captureForm->setContentsMargins(0, 6, 0, 0);
@@ -237,26 +273,16 @@ QWidget *SettingsDialog::buildCapturePage()
     return page;
 }
 
+// 翻译页：API 表单（格式/URL/Key/Model）+ 测试连接（用表单现值发真实请求，
+// 未保存也能测）+ 领域/术语表注入项。切换格式仅改 Base URL 占位提示
 QWidget *SettingsDialog::buildTranslatePage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
-    auto addSeparator = [lay, page]() {
-        auto *sep = new QFrame(page);
-        sep->setObjectName("dialogSeparator"); // 颜色走 applyTheme 的 ID 规则
-        sep->setFrameShape(QFrame::HLine);
-        lay->addWidget(sep);
-    };
-
     // ---- 翻译 API ----
-    addSection("翻译 API");
+    addSectionTitle(lay, "翻译 API");
     auto *apiForm = new QFormLayout;
     apiForm->setContentsMargins(0, 0, 0, 0);
     apiForm->setSpacing(6);
@@ -267,17 +293,21 @@ QWidget *SettingsDialog::buildTranslatePage()
                            QStringLiteral("openai"));
     m_formatCombo->addItem(QStringLiteral("Anthropic（Claude / DeepSeek 兼容端点）"),
                            QStringLiteral("anthropic"));
+    // T-062 修复: connect 原在 m_urlEdit 构造之前，setCurrentIndex 触发
+    // currentIndexChanged 时 m_urlEdit 尚为 nullptr——保存过 anthropic 格式的
+    // 用户再开设置对话框即空指针崩溃。构造/连接/设初值全部提前到 setCurrentIndex 前
+    m_urlEdit = new QLineEdit(Settings::instance().apiBaseUrl(), page);
+    m_urlEdit->setPlaceholderText("https://api.deepseek.com/v1");
     // 切换格式时同步 Base URL 占位提示（Anthropic 端点挂在 …/anthropic 前缀下）
     connect(m_formatCombo, &QComboBox::currentIndexChanged, page, [this](int index) {
         m_urlEdit->setPlaceholderText(index == 1
             ? QStringLiteral("https://api.deepseek.com/anthropic")
             : QStringLiteral("https://api.deepseek.com/v1"));
     });
+    // apiFormat() 读侧已白名单归一（Settings.cpp），返回值恒在 combo 两项之内；
+    // qMax(0,…) 仅为防御未来 findData 失配（如新增枚举忘同步 addItem）
     m_formatCombo->setCurrentIndex(qMax(0, m_formatCombo->findData(Settings::instance().apiFormat())));
     apiForm->addRow("接口格式:", m_formatCombo);
-
-    m_urlEdit = new QLineEdit(Settings::instance().apiBaseUrl(), page);
-    m_urlEdit->setPlaceholderText("https://api.deepseek.com/v1");
     apiForm->addRow("Base URL:", m_urlEdit);
     m_keyEdit = new QLineEdit(Settings::instance().apiKey(), page);
     m_keyEdit->setEchoMode(QLineEdit::Password);
@@ -333,10 +363,10 @@ QWidget *SettingsDialog::buildTranslatePage()
     testRow->addWidget(m_testStatus, 1);
     lay->addLayout(testRow);
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 翻译领域与术语 ----
-    addSection("翻译领域与术语");
+    addSectionTitle(lay, "翻译领域与术语");
     auto *domainForm = new QFormLayout;
     domainForm->setContentsMargins(0, 0, 0, 0);
     domainForm->setSpacing(6);
@@ -363,15 +393,15 @@ QWidget *SettingsDialog::buildTranslatePage()
     return page;
 }
 
+// 活动监控页：三开关（隐私影响全写在 tooltip，总开关默认关）+ 空闲阈值/保留天数
+// 参数（读写两端各自钳制，见 Settings.cpp monitorIdleThresholdSec/monitorRetentionDays）
 QWidget *SettingsDialog::buildMonitorPage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto *label = new QLabel(QStringLiteral("记录"));
-    label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-    lay->addWidget(label);
+    addSectionTitle(lay, QStringLiteral("记录"));
 
     m_monEnabledCheck = new QCheckBox(
         QStringLiteral("开启活动监控（键入记录 + 窗口时间线 + 中文上屏快照）"), page);
@@ -397,17 +427,9 @@ QWidget *SettingsDialog::buildMonitorPage()
         "识别出新增文字后立即删除截图。"));
     lay->addWidget(m_monOcrCheck);
 
-    auto addSeparator = [lay, page]() {
-        auto *sep = new QFrame(page);
-        sep->setObjectName("dialogSeparator"); // 颜色走 applyTheme 的 ID 规则
-        sep->setFrameShape(QFrame::HLine);
-        lay->addWidget(sep);
-    };
-    addSeparator();
+    addHSeparator(page, lay);
 
-    auto *section2 = new QLabel(QStringLiteral("参数"));
-    section2->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-    lay->addWidget(section2);
+    addSectionTitle(lay, QStringLiteral("参数"));
 
     auto *form = new QFormLayout;
     form->setLabelAlignment(Qt::AlignRight);
@@ -426,39 +448,24 @@ QWidget *SettingsDialog::buildMonitorPage()
     form->addRow(QStringLiteral("日志保留天数:"), m_monRetentionSpin);
     lay->addLayout(form);
 
-    auto *hint = new QLabel(QStringLiteral(
+    lay->addWidget(makeHint(QStringLiteral(
         "日志位置：%LOCALAPPDATA%\\PopTools\\monitor\\<日期>\\（JSONL 文本，可用记事本打开）。\n"
-        "托盘菜单可一键启停；Goody 管家（内测中）将基于这些日志生成每日工作记录。"));
-    hint->setWordWrap(true);
-    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
-    // T-030 约定：文字不允许灰色）；此处只约束字号
-    hint->setStyleSheet("font-size: 12px;");
-    lay->addWidget(hint);
+        "托盘菜单可一键启停；Goody 管家（内测中）将基于这些日志生成每日工作记录。")));
 
     lay->addStretch();
     return page;
 }
 
+// Goody 管家页：独立 API 表单（与翻译页键位分离）+ 权限模式 + 总结时刻
+//（正则校验 HH:mm，坏值读侧回退 22:00）+ 悬浮球开关（T-050）+ 人格附言
 QWidget *SettingsDialog::buildGoodyPage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
-    auto addSeparator = [lay, page]() {
-        auto *sep = new QFrame(page);
-        sep->setObjectName("dialogSeparator");
-        sep->setFrameShape(QFrame::HLine);
-        lay->addWidget(sep);
-    };
-
     // ---- 大模型 API ----
-    addSection(QStringLiteral("大模型 API（OpenAI 兼容）"));
+    addSectionTitle(lay, QStringLiteral("大模型 API（OpenAI 兼容）"));
     auto *apiForm = new QFormLayout;
     apiForm->setLabelAlignment(Qt::AlignRight);
     m_gdyKeyEdit = new QLineEdit(page);
@@ -475,10 +482,10 @@ QWidget *SettingsDialog::buildGoodyPage()
     apiForm->addRow(QStringLiteral("模型:"), m_gdyModelEdit);
     lay->addLayout(apiForm);
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 权限与每日记录 ----
-    addSection(QStringLiteral("权限与每日记录"));
+    addSectionTitle(lay, QStringLiteral("权限与每日记录"));
     auto *permForm = new QFormLayout;
     permForm->setLabelAlignment(Qt::AlignRight);
     m_gdyPermCombo = new QComboBox(page);
@@ -496,7 +503,8 @@ QWidget *SettingsDialog::buildGoodyPage()
     m_gdyTimeEdit->setText(Settings::instance().assistantSummaryTime());
     m_gdyTimeEdit->setPlaceholderText(QStringLiteral("22:00"));
     m_gdyTimeEdit->setToolTip(QStringLiteral("每天到点后检查活动日志，为有记录但未总结的日子生成「本日工作记录」"));
-    // 输入即校验 HH:mm（R3 #15）：坏值此前会直写 ini，读端静默回退 22:00 无提示
+    // 输入即校验 HH:mm（R3 #15）；Intermediate 残留（如“2:”）可留存到确定，
+    // 保存侧不落坏值（见 applySettingsFromForm），读侧另有 22:00 回退兜底
     m_gdyTimeEdit->setValidator(
         new QRegularExpressionValidator(QRegularExpression(QStringLiteral(
             "^([01]?\\d|2[0-3]):[0-5]\\d$")), m_gdyTimeEdit));
@@ -506,63 +514,49 @@ QWidget *SettingsDialog::buildGoodyPage()
     permForm->addRow(QString(), m_gdyAutoCheck);
     lay->addLayout(permForm);
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 桌面悬浮球（T-050） ----
-    addSection(QStringLiteral("桌面悬浮球"));
+    addSectionTitle(lay, QStringLiteral("桌面悬浮球"));
     m_gdyBallCheck = new QCheckBox(
         QStringLiteral("在桌面显示 Goody 悬浮球（单击打开对话，可拖动并记忆位置；"
                        "Goody 工作时呼吸光效提示）"), page);
     m_gdyBallCheck->setChecked(Settings::instance().assistantBallEnabled());
     lay->addWidget(m_gdyBallCheck);
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 人格附言 ----
-    addSection(QStringLiteral("人格附言（可选，追加到 Goody 系统提示词末尾）"));
+    addSectionTitle(lay, QStringLiteral("人格附言（可选，追加到 Goody 系统提示词末尾）"));
     m_gdyAppendix = new QPlainTextEdit(page);
     m_gdyAppendix->setPlaceholderText(QStringLiteral("例如：称呼我为\"老板\"；记录风格口语化一点…"));
     m_gdyAppendix->setMaximumHeight(80);
     m_gdyAppendix->setPlainText(Settings::instance().assistantPersonaAppendix());
     lay->addWidget(m_gdyAppendix);
 
-    auto *hint = new QLabel(QStringLiteral(
+    lay->addWidget(makeHint(QStringLiteral(
         "呼出方式：Ctrl+Alt+G 或托盘菜单「Goody 管家」。\n"
-        "Key 只保存在本机 PopTools.ini，不会随仓库提交。"));
-    hint->setWordWrap(true);
-    // 提示文字颜色交给 applyTheme 的 QLabel 规则（纯黑/纯白随主题，
-    // T-030 约定：文字不允许灰色）；此处只约束字号
-    hint->setStyleSheet("font-size: 12px;");
-    lay->addWidget(hint);
+        "Key 只保存在本机 PopTools.ini，不会随仓库提交。")));
 
     lay->addStretch();
     return page;
 }
 
+// 桌面日历页：读 CalendarSettings JSON 填表。显示开关经 OK 保存（load→改→save
+// 保留未暴露字段，经 calendarApplySettings 通知宿主）；四个功能按钮经 AppServices
+// 其余四槽位（openSearch/pickDate/export/import）即时生效、无需保存
 QWidget *SettingsDialog::buildCalendarPage()
 {
     auto *page = newPage();
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    auto addSection = [lay](const QString &title) {
-        auto *label = new QLabel(title);
-        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
-        lay->addWidget(label);
-    };
-    auto addSeparator = [lay, page]() {
-        auto *sep = new QFrame(page);
-        sep->setObjectName("dialogSeparator");
-        sep->setFrameShape(QFrame::HLine);
-        lay->addWidget(sep);
-    };
-
     // 桌面日历本体（注入式贴壁纸日历）上只有翻页与「调整位置和大小」按钮
     //（需要即时可视反馈），其余开关与功能入口全部收编到本页
     const CalendarSettings cal = CalendarSettings::load();
 
     // ---- 显示内容 ----
-    addSection(QStringLiteral("显示内容"));
+    addSectionTitle(lay, QStringLiteral("显示内容"));
     m_calLunarCheck = new QCheckBox(QStringLiteral("显示农历 / 节气 / 节日"), page);
     m_calLunarCheck->setChecked(cal.showLunar);
     m_calWeekNumCheck = new QCheckBox(QStringLiteral("显示周数"), page);
@@ -584,6 +578,8 @@ QWidget *SettingsDialog::buildCalendarPage()
     m_calFontSpin = new QSpinBox(page);
     m_calFontSpin->setRange(70, 160);
     m_calFontSpin->setSingleStep(5);
+    // cal.fontScale 可能来自手改 JSON（CalendarSettings::fromJson 不钳制范围），
+    // 此处 clamp 与消费端 CalendarRenderer.cpp:120 clamp 构成双重保险
     m_calFontSpin->setValue(std::clamp(cal.fontScale, 70, 160));
     m_calFontSpin->setFixedWidth(80);
     m_calFontSpin->setSuffix(QStringLiteral("%"));
@@ -592,10 +588,10 @@ QWidget *SettingsDialog::buildCalendarPage()
     fontRow->addStretch();
     lay->addLayout(fontRow);
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 功能入口（即时生效） ----
-    addSection(QStringLiteral("功能入口（点击即生效，无需保存）"));
+    addSectionTitle(lay, QStringLiteral("功能入口（点击即生效，无需保存）"));
     auto *btnRow1 = new QHBoxLayout;
     auto *searchBtn = new QPushButton(QStringLiteral("内容搜索…"), page);
     auto *pickBtn = new QPushButton(QStringLiteral("选择日期…"), page);
@@ -627,20 +623,17 @@ QWidget *SettingsDialog::buildCalendarPage()
             m_services->calendarImportTasks();
     });
 
-    addSeparator();
+    addHSeparator(page, lay);
 
     // ---- 其他 ----
-    addSection(QStringLiteral("其他"));
+    addSectionTitle(lay, QStringLiteral("其他"));
     m_calGuideCheck = new QCheckBox(QStringLiteral("显示首次使用提示（调整位置入口气泡）"), page);
     m_calGuideCheck->setChecked(cal.showGuide);
     lay->addWidget(m_calGuideCheck);
-    auto *dirHint = new QLabel(QStringLiteral("数据目录：%1\n数据仅保存在本机。"
-                                              "日历上的翻页与「调整位置和大小」按钮即时生效，"
-                                              "本页修改点击下方「确定」后应用。")
-                                   .arg(CalendarSettings::dataDir()));
-    dirHint->setWordWrap(true);
-    dirHint->setStyleSheet("font-size: 12px;");
-    lay->addWidget(dirHint);
+    lay->addWidget(makeHint(QStringLiteral("数据目录：%1\n数据仅保存在本机。"
+                                           "日历上的翻页与「调整位置和大小」按钮即时生效，"
+                                           "本页修改点击下方「确定」后应用。")
+                                .arg(CalendarSettings::dataDir())));
 
     lay->addStretch();
     return page;
@@ -723,15 +716,13 @@ void SettingsDialog::applyTheme()
         "QToolButton { background: %6; border: 1px solid %7; border-radius: 6px;"
         "  padding: 3px 8px; color: %4; }"
         "QToolButton:hover { background: %8; border-color: %5; color: %5; }"
-        "QSlider::groove:horizontal { height: 4px; background: %10; border-radius: 2px; }"
-        "QSlider::sub-page:horizontal { height: 4px; background: %5; border-radius: 2px; }"
-        "QSlider::handle:horizontal { width: 14px; margin: -6px 0;"
-        "  border-radius: 7px; background: %1; border: 2px solid %5; }"
         "#dialogSeparator { color: %10; margin: 8px 0; }"
         "#okBtn { background: %5; color: #FFFFFF; border: 1px solid %5;"
         "  padding: 5px 16px; min-width: 70px; font-weight: 600; }"
         "#okBtn:hover { background: %9; }"
         "#cancelBtn { padding: 5px 16px; min-width: 70px; }")
+        // 两段 .arg 必须保持多参单趟替换形态：第一段管 %1-%9，第二段管 %10-%12。
+        // 若改链式单参 .arg(a).arg(b)…，%10 会被 %1 误吞（Qt 占位符按最长数字串解析）
         .arg(c.cardBg, c.editBg, c.editBorder, c.body, c.accent,
              c.ctrlBg, c.ctrlBorder, c.ctrlHover, c.accentHover)
         .arg(c.line, navBg, navSel));

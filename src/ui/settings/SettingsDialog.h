@@ -10,7 +10,6 @@ class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
-class QSlider;
 class QSpinBox;
 class QStackedWidget;
 class QToolButton;
@@ -47,6 +46,7 @@ private:
     QWidget *buildGoodyPage();
     QWidget *buildCalendarPage();
     void updateAutoStartButton();
+    void applySettingsFromForm(); // OK 保存：表单当前值 → Settings/CalendarSettings（accepted 时调用）
     QStringList parseDomains() const;                  // 逗号/顿号分隔的领域输入 → 列表
     QList<QPair<QString, QString>> parseTerms() const; // "原文=译文" 逐行 → 翻译对
 

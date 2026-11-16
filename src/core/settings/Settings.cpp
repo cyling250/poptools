@@ -96,12 +96,18 @@ void Settings::setApiModel(const QString &model)
     syncChecked();
 }
 
-// API 接口格式，默认 OpenAI 兼容（存量配置无此键时行为不变）
+// API 接口格式，默认 OpenAI 兼容（存量配置无此键时行为不变）。
+// T-062 修复: 读侧加白名单归一（同 assistantPermMode 惯例）——此前原样返回，
+// 未知值靠消费端 apiFormatFromSetting 与设置页 findData 双路回退 openai；
+// 归一后两条消费路径输出不变
 QString Settings::apiFormat() const
 {
-    return m_s.value("translate/apiFormat", "openai").toString();
+    const QString v = m_s.value("translate/apiFormat", "openai").toString();
+    return (v == "anthropic") ? v : QStringLiteral("openai");
 }
 
+// 写侧不校验（UI 下拉只发 openai/anthropic）；读侧 apiFormat 已做白名单归一，
+// 手改 ini 乱值无害
 void Settings::setApiFormat(const QString &format)
 {
     m_s.setValue("translate/apiFormat", format);
@@ -156,6 +162,8 @@ QList<Settings::TermPair> Settings::translateTerms() const
     return terms;
 }
 
+// 写侧防御：任一侧为空的项丢弃（UI parseTerms 已挡一道，防其他调用方漏网）；
+// 两个平行列表等长落盘，读侧按短边截齐
 void Settings::setTranslateTerms(const QList<TermPair> &terms)
 {
     QStringList sources, targets;
@@ -213,8 +221,7 @@ quint32 Settings::selectionTranslateHotKeyModifiers() const
 {
     const quint32 mod =
         m_s.value("hotkey/selectionTranslateMod", 0x0007 /* MOD_CONTROL|MOD_ALT|MOD_SHIFT */).toUInt();
-    if (!validHotkeyModifiers(mod))
-    {
+    if (!validHotkeyModifiers(mod)) {
         qWarning("Settings: 非法热键修饰键 hotkey/selectionTranslateMod=0x%x，回退默认",
                  mod);
         return 0x0007;
@@ -336,8 +343,7 @@ quint32 Settings::assistantHotKeyVk() const
 quint32 Settings::assistantHotKeyModifiers() const
 {
     const quint32 mod = m_s.value("assistant/hotkeyMod", 0x0003 /* MOD_CONTROL|MOD_ALT */).toUInt();
-    if (!validHotkeyModifiers(mod))
-    {
+    if (!validHotkeyModifiers(mod)) {
         qWarning("Settings: 非法热键修饰键 assistant/hotkeyMod=0x%x，回退默认", mod);
         return 0x0003;
     }
@@ -381,6 +387,8 @@ QString Settings::assistantPermMode() const
     return (v == "smart" || v == "auto") ? v : QStringLiteral("ask");
 }
 
+// 写侧不校验（UI 下拉只发 ask/smart/auto，手改 ini 乱值无害）；
+// 口径以读侧 assistantPermMode 为准（白名单外归一 ask）
 void Settings::setAssistantPermMode(const QString &mode)
 {
     m_s.setValue("assistant/permMode", mode);
