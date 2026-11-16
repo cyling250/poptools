@@ -12,11 +12,12 @@
 
 namespace poptools {
 
+// 装配：读仓库 → 逐盒建面板注册宿主 → 1.5s 延迟拉值守（重活后置，与日历同纪律）；
+// 贡献托盘「收纳盒管理」「显示·隐藏收纳盒」
 void BoxModule::init(AppServices &services)
 {
     m_services = &services;
-    m_catalog = new BoxCatalog();
-    *m_catalog = BoxCatalog::load();
+    m_catalog = new BoxCatalog(BoxCatalog::load());
 
     if (services.desktopSurface) {
         rebuildPanels();
@@ -29,6 +30,10 @@ void BoxModule::init(AppServices &services)
 
     const auto toggleShow = [this] {
         if (!m_catalog || !m_toggleAction)
+            return;
+        // T-062 修复: 零盒时翻转文案会变成谎话（桌面无盒可显隐，下一次点击又翻回，
+        // 还白落盘一次），直接不动（BUG-08）
+        if (m_catalog->boxes().isEmpty())
             return;
         const bool anyVisible =
             std::any_of(m_catalog->boxes().cbegin(), m_catalog->boxes().cend(),
@@ -48,6 +53,8 @@ void BoxModule::init(AppServices &services)
     m_toggleAction = services.addTrayAction(QStringLiteral("隐藏收纳盒"), toggleShow);
 }
 
+// 反注册全部面板并销毁实例（宿主槽位/命中随之失效）；托盘 action 归 AppServices，
+// 不在此析构
 void BoxModule::shutdown()
 {
     if (m_services && m_services->desktopSurface) {
@@ -123,6 +130,7 @@ void BoxModule::openManager(const QString &focusBoxId)
     dlg->activateWindow();
 }
 
+// 线性查盒 id → 面板实例；nullptr = 无此盒（刚解绑未重建）
 BoxPanel *BoxModule::panelFor(const QString &boxId) const
 {
     for (const PanelEntry &e : m_panels) {

@@ -12,7 +12,9 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QPointer>
 #include <QThreadPool>
 
 #include <memory>
@@ -66,10 +68,15 @@ QImage hiconToImage(HICON icon)
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
         QImage img(bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
-        if (!GetDIBits(GetDC(nullptr), ii.hbmColor, 0, bm.bmHeight, img.bits(), &bi,
-                       DIB_RGB_COLORS)) {
+        // GetDIBits 需要一个 DC 仅为调色板参数：用屏幕 DC 且用完即 ReleaseDC
+        //（T-062 修复: 原实现 GetDC 返回值未保存未释放，每枚图标漏一个 GDI 句柄，BUG-07）
+        HDC dc = GetDC(nullptr);
+        const bool got = dc && GetDIBits(dc, ii.hbmColor, 0, bm.bmHeight, img.bits(), &bi,
+                                         DIB_RGB_COLORS);
+        if (dc)
+            ReleaseDC(nullptr, dc);
+        if (!got)
             break;
-        }
         // 老图标可能整图 alpha=0（透明通道缺失）：按不透明处理，防全隐身
         int maxAlpha = 0;
         for (int y = 0; y < img.height() && maxAlpha == 0; ++y) {
@@ -100,14 +107,10 @@ QImage hiconToImage(HICON icon)
 
 } // namespace
 
+// 空构造；m_cache/m_inFlight 仅主线程访问（worker 只回传不入表），随 parent 析构
 IconService::IconService(QObject *parent)
     : QObject(parent)
 {
-}
-
-QImage IconService::cachedIcon(const QString &target) const
-{
-    return m_cache.value(target);
 }
 
 void IconService::requestIcon(const QString &target,
@@ -126,16 +129,26 @@ void IconService::requestIcon(const QString &target,
         return;
     m_inFlight.insert(target);
     // 红线 1：SHGetFileInfo/IImageList 是 shell 调用，禁入主线程——线程池提取，
-    // 结果经 invokeMethod 回主线程入缓存并通知渲染（接收者销毁则事件丢弃）
-    IconService *svc = this;
-    QThreadPool::globalInstance()->start([svc, target, cb] {
+    // 结果经 invokeMethod 回主线程入缓存并通知渲染。
+    // T-062 修复: worker 原来按值捕获裸 this（BUG-01）：提取是 shell 调用，耗时
+    // 数十至数百 ms，期间面板可能被 deleteLater（管理器增删改触发全面板重建），
+    // 之后 invokeMethod(svc) 以悬空指针为接收者是 UB。改为 QPointer 守卫 + 上下文
+    // 挂 qApp：结果必达主线程队列，落地时服务已亡则整包丢弃（qApp 生命周期覆盖
+    // 一切，队列事件在其析构后自然丢弃）。线程模型不变
+    QCoreApplication *app = QCoreApplication::instance();
+    QPointer<IconService> guard(this);
+    QThreadPool::globalInstance()->start([app, guard, target, cb] {
         const QImage img = extractIcon(target);
+        if (!app)
+            return; // 应用已退出，无处投递
         QMetaObject::invokeMethod(
-            svc,
-            [svc, target, img, cb] {
-                svc->m_inFlight.remove(target);
+            app,
+            [guard, target, img, cb] {
+                if (!guard)
+                    return; // 服务已亡（含其宿主面板）：负缓存随对象同亡，整包丢弃
+                guard->m_inFlight.remove(target);
                 // 失败也入负缓存（空图）：该 target 永不二次提取
-                svc->m_cache.insert(target, img);
+                guard->m_cache.insert(target, img);
                 if (cb)
                     cb(target, img);
             },
@@ -154,6 +167,8 @@ QImage IconService::extractIcon(const QString &target)
     SHFILEINFOW sfi = {};
     const DWORD_PTR idx = SHGetFileInfoW(path.c_str(), FILE_ATTRIBUTE_NORMAL, &sfi, sizeof(sfi),
                                          SHGFI_SYSICONINDEX);
+    // 返回值即系统图标索引；0 兼具"失败/索引0"歧义（索引0=未知类型图标），
+    // 命中 0 会回落 32px 路径——视觉无缺陷仅分辨率降档，可接受（BUG-10 登记，本批不动）
     if (idx) {
         IImageList *jumbo = nullptr;
         if (SUCCEEDED(SHGetImageList(SHIL_JUMBO, IID_IImageList,

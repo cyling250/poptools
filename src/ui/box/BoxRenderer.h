@@ -7,7 +7,6 @@
 
 #include "core/box/BoxLayout.h"
 #include "core/box/BoxCatalog.h"
-#include "ui/shared/DesktopSharedCanvas.h"
 #include "ui/shared/DesktopWallpaperProvider.h"
 
 class QPainter;
@@ -57,7 +56,7 @@ private:
     int m_width = 0;
     int m_height = 0;
     qreal m_dpr = 1.0;
-    mutable QHash<qreal, QFont> m_fontCache;
+    mutable QHash<int, QFont> m_fontCache; // 键 = 像素字号 + bold×1e6（见 font() 键折叠）
 };
 
 } // namespace poptools

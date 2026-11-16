@@ -40,8 +40,6 @@ private:
     QRect checkRectNow() const;         // ✓ 实时锚定面板右上
     QRect cancelRectNow() const;        // × 实时锚定面板右上
     int hitZone(const QPoint &localPt) const; // 0 无 / 1 内部 / 2 右缘 / 3 按钮
-    int colsForWidth(int widthPhysical) const;
-    QRect toPhysical(const QRect &logical) const;
 
     std::function<void(const QPoint &, int)> m_changed;
     std::function<void(const QPoint &, int)> m_confirmed;
@@ -49,13 +47,8 @@ private:
     std::function<QRect()> m_rectProvider;
     qreal m_dpr = 1.0;
     QRect m_screen; // 逻辑坐标
-    QPoint m_startTopLeft; // 物理
-    int m_startCols = 4;
     QPoint m_startLocal;
     int m_zone = 0;
-    bool m_finished = false;
-    QRect m_checkRect;
-    QRect m_cancelRect;
 };
 
 } // namespace poptools

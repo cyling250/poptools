@@ -10,10 +10,10 @@
 #include <QTimer>
 #include <QUrl>
 
-#include <algorithm>
-
 namespace poptools {
 
+// 一盒一面板：挂目录 watcher + 200ms 防抖重列；构造即首列（值守未启时 render
+// 走空守卫，不会画到无效画布）
 BoxPanel::BoxPanel(BoxCatalog *catalog, const QString &boxId, QObject *parent)
     : QObject(parent)
     , m_boxId(boxId)
@@ -32,8 +32,21 @@ BoxPanel::BoxPanel(BoxCatalog *catalog, const QString &boxId, QObject *parent)
     refreshEntries();
 }
 
-BoxPanel::~BoxPanel() = default;
+// T-062 修复: overlay 是无 parent 的独立顶层窗，四个回调全部捕获 this（BUG-03）——
+// 面板被 deleteLater（管理器增删改触发 rebuildPanels）后 overlay 若仍存活，
+// 下一次 paintEvent → rectProvider() 即悬空调用崩溃。hide 先掐断 paintEvent
+//（不再触 rectProvider），再排入销毁队列；overlay→panel 方向的 destroyed 连接
+// 以 panel 为接收者上下文，panel 析构时自动断连，安全
+BoxPanel::~BoxPanel()
+{
+    if (m_overlay) {
+        m_overlay->hide();
+        m_overlay->deleteLater();
+    }
+}
 
+// 当前盒定义副本（按 m_boxId 查仓库）；id 已被管理器解绑/仓库为空时返回空 Def
+//（x/y 为默认值）——调用方按空盒渲染而非崩溃。返回值拷贝，勿存引用
 const BoxDef BoxPanel::def() const
 {
     static const BoxDef kEmpty;
@@ -49,11 +62,14 @@ QRect BoxPanel::rectPhysical() const
     return m_layout.has_value() ? m_layout->panel : QRect();
 }
 
+// DesktopPanel：面板私有暂存帧；未渲染过返回 nullptr（宿主合成跳过）
 QImage *BoxPanel::frame()
 {
     return m_staging.isNull() ? nullptr : &m_staging;
 }
 
+// 值守开启：懒建渲染器（此时才有画布尺寸/DPR）+ 30s 壁纸刷新定时器 + 重列首绘。
+// 幂等（宿主可能补发）
 void BoxPanel::onDutyStarted()
 {
     if (!m_surface || !m_surface->canvas().isValid())
@@ -76,6 +92,9 @@ void BoxPanel::onDutyStarted()
     refreshEntries();
 }
 
+// 值守停止：仅停壁纸定时器。stopDuty 不销毁画布/renderer，commitSurface 也不检查
+// 值守态——停值守后目录 watcher 的防抖重列仍会照常重绘并发布（注入端已移除，
+// 无消费方；paintFrame 的守卫只拦从未开启过值守的早期动作，与基线行为一致）
 void BoxPanel::onDutyStopped()
 {
     if (m_wallpaperTimer)
@@ -118,6 +137,7 @@ void BoxPanel::refreshEntries()
     render();
 }
 
+// DesktopPanel：整帧重绘 + 整帧提交（commitSurface 空脏矩形）
 void BoxPanel::render()
 {
     renderFrame(QRect());
@@ -125,10 +145,28 @@ void BoxPanel::render()
 
 void BoxPanel::renderFrame(const QRect &commitDirty)
 {
-    if (m_adjusting || !m_renderer || !m_surface || !m_surface->canvas().isValid())
-        return;
+    if (m_adjusting)
+        return; // 调整模式由 renderDuringAdjust 专职绘制，常规路径避让
+    paintFrame(m_hover, m_selected, commitDirty);
+}
+
+// 调整模式实时预览：悬停/选中强制抹掉（哨兵/-1，overlay 语义下无意义）；整帧提交
+// ——面板矩形一直在变，脏矩形无从谈起
+void BoxPanel::renderDuringAdjust()
+{
+    paintFrame(kHoverOff, -1, QRect());
+}
+
+// 返回 false = 守卫拦截（无渲染器/画布无效）。hoverPoint/selectedIndex 为本次
+// 绘制的语义目标；commitDirty 空 = 整帧提交。语句序列与求值顺序与合并前两条
+// 路径逐行一致（S-07 提取，行为等价）
+bool BoxPanel::paintFrame(const QPoint &hoverPoint, int selectedIndex, const QRect &commitDirty)
+{
+    if (!m_renderer || !m_surface || !m_surface->canvas().isValid())
+        return false;
     const BoxDef d = def();
     QImage &canvasImage = m_surface->canvas().image();
+    // 画布尺寸/格式（分辨率或 DPI）变了才重新分配暂存帧，平时复用
     if (m_staging.size() != canvasImage.size() || m_staging.format() != canvasImage.format())
         m_staging = QImage(canvasImage.size(), canvasImage.format());
     // 尺寸纪律（T-060）：行数随条目自动增高（不超屏），超容量翻页；面板宽 =
@@ -136,41 +174,26 @@ void BoxPanel::renderFrame(const QRect &commitDirty)
     const BoxLayout::Sizing sz = BoxLayout::compute(QPoint(d.x, d.y), d.cols, m_items.size(),
                                                     m_surface->screenPhysical());
     const BoxLayout layout(sz.panel, d.cols, m_items.size(), d.page);
-    ensureVisibleIcons(layout.capacity, layout.page);
+    ensureVisibleIcons(layout);
     QPainter g(&m_staging);
-    m_layout = m_renderer->render(&g, d, layout, m_items, m_hover, m_selected, m_iconCache);
+    m_layout = m_renderer->render(&g, d, layout, m_items, hoverPoint, selectedIndex, m_iconCache);
     g.end();
     // 悬停这类只动了格子/头部底色的高频小改动带脏矩形提交，免整屏合成发布
     if (commitDirty.isEmpty())
         m_surface->commitSurface();
     else
         m_surface->commitSurface(commitDirty);
+    return true;
 }
 
-void BoxPanel::renderDuringAdjust()
+// 对当前页可见条目补发图标请求（contains 跳过已请求/负缓存/在飞）；顺带把面板
+// 图标缓存裁剪到活条目（防只增不减）。副作用：请求完成异步回灌 m_iconCache 并
+// 触发整帧重绘
+void BoxPanel::ensureVisibleIcons(const BoxLayout &layout)
 {
-    if (!m_renderer || !m_surface || !m_surface->canvas().isValid())
-        return;
-    const BoxDef d = def();
-    QImage &canvasImage = m_surface->canvas().image();
-    if (m_staging.size() != canvasImage.size() || m_staging.format() != canvasImage.format())
-        m_staging = QImage(canvasImage.size(), canvasImage.format());
-    const BoxLayout::Sizing sz = BoxLayout::compute(QPoint(d.x, d.y), d.cols, m_items.size(),
-                                                    m_surface->screenPhysical());
-    const BoxLayout layout(sz.panel, d.cols, m_items.size(), d.page);
-    ensureVisibleIcons(layout.capacity, layout.page);
-    QPainter g(&m_staging);
-    const QPoint off(-9999, -9999);
-    m_layout = m_renderer->render(&g, d, layout, m_items, off, -1, m_iconCache);
-    g.end();
-    m_surface->commitSurface();
-}
-
-void BoxPanel::ensureVisibleIcons(int capacity, int page)
-{
-    const int first = page * capacity;
-    const int remaining = m_items.size() - first;
-    const int visible = std::min(capacity, remaining > 0 ? remaining : 0);
+    // 可见区间口径与渲染器共用 layout 的 firstVisibleIndex/visibleCount（勿双写公式）
+    const int first = layout.firstVisibleIndex();
+    const int visible = layout.visibleCount(m_items.size());
     for (int i = 0; i < visible; ++i) {
         const QString &target = m_items.at(first + i).target;
         if (m_icons->contains(target))
@@ -203,13 +226,15 @@ void BoxPanel::onMove(const QPoint &p)
     updateHover(p);
 }
 
+// 鼠标离开面板：悬停目标归零（哨兵 kHoverOff）并按旧高亮脏矩形重绘清除；
+// 无任何高亮可清则不动（m_hover 初值即哨兵，首次 leave 不空跑——T-062 修复 BUG-06）
 void BoxPanel::onLeave()
 {
     if (!eventsAccepted())
         return;
-    if (m_hover != QPoint(-9999, -9999) || m_lastHoverCell != -1 || m_lastHoverHeader != -1) {
+    if (m_hover != kHoverOff || m_lastHoverCell != -1 || m_lastHoverHeader != -1) {
         const QRect dirty = hoverVisualRect(m_lastHoverCell, m_lastHoverHeader);
-        m_hover = QPoint(-9999, -9999);
+        m_hover = kHoverOff;
         m_lastHoverCell = -1;
         m_lastHoverHeader = -1;
         renderFrame(dirty);
@@ -232,14 +257,6 @@ void BoxPanel::onDoubleClick(const QPoint &p)
     const int idx = m_layout->entryIndexAt(p);
     if (idx >= 0)
         launchEntry(idx);
-}
-
-QPoint BoxPanel::logicalPos(const QPoint &physical) const
-{
-    const qreal dpr = m_surface ? m_surface->dpr() : 1.0;
-    if (dpr <= 0.0)
-        return physical;
-    return QPoint(qRound(physical.x() / dpr), qRound(physical.y() / dpr));
 }
 
 void BoxPanel::updateHover(const QPoint &p)
@@ -282,6 +299,9 @@ QRect BoxPanel::selectedVisualRect(int globalIndex) const
     return m_layout->cells.at(cell);
 }
 
+// 单击路由：头部按钮（翻页/进调整）→ 页圆点跳页 → 格子单击仅选中（双击才启动）
+// → 空白处清除选中；翻页/跳页走 render() 整帧提交，选中/清选走 renderFrame(脏矩形)
+// 提交，进调整无面板提交（绘制由 overlay 调整模式接管）
 void BoxPanel::handleSingleClick(const QPoint &p)
 {
     if (!m_layout.has_value())
@@ -348,6 +368,10 @@ void BoxPanel::launchEntry(int index)
     QDesktopServices::openUrl(QUrl::fromLocalFile(m_items.at(index).target));
 }
 
+// 盒头 ✛ 进调整模式：四个回调 = 拖动实时落盘+预览 / 确认写当前几何 / 取消恢复
+// 进入前快照 / rectProvider 供 overlay 每帧回取面板矩形；overlay 关闭
+//（WA_DeleteOnClose）时复位 m_adjusting。overlay 同时挂 m_overlay（QPointer）：
+// 面板先亡时由析构掐断（T-062 修复 BUG-03）
 void BoxPanel::enterAdjustMode()
 {
     if (m_adjusting || !m_surface || !m_layout.has_value())
@@ -384,6 +408,7 @@ void BoxPanel::enterAdjustMode()
         m_adjusting = false;
         render();
     });
+    m_overlay = overlay; // T-062 修复: 供析构掐断（BUG-03）
     overlay->show();
     overlay->raise();
     overlay->activateWindow();

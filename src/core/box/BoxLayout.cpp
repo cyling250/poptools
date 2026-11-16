@@ -4,11 +4,19 @@
 
 namespace poptools {
 
+// ceil(entryCount/capacity)；capacity<=0 或 0 条目 → 1（空盒也要能布局出一页）
 int BoxLayout::pageCountFor(int entryCount, int capacity)
 {
     if (capacity <= 0)
         return 1;
     return std::max(1, (entryCount + capacity - 1) / capacity);
+}
+
+// 本页实际可见条目数：min(capacity, 剩余条目) 且不为负（末页可能不满）
+int BoxLayout::visibleCount(int totalEntries) const
+{
+    const int remaining = totalEntries - firstVisibleIndex();
+    return std::min(capacity, remaining > 0 ? remaining : 0);
 }
 
 BoxLayout::Sizing BoxLayout::compute(const QPoint &topLeft, int cols, int entryCount,
@@ -50,17 +58,21 @@ QRect BoxLayout::snappedRect(const QPoint &topLeft, int cols, int rows, bool has
     return QRect(topLeft, QSize(w, h));
 }
 
+// 由面板矩形展开全部命中几何：头部按钮右起往左（Next 最右）、格子网格、页圆点；
+// 入参 page 钳到 [0,pageCount-1]。无副作用，可随意重算
 BoxLayout::BoxLayout(const QRect &panelRect, int cols_, int entryCount_, int page_)
     : panel(panelRect)
     , cols(std::clamp(cols_, 2, 8))
     , entryCount(std::max(0, entryCount_))
 {
     headerBar = QRect(panel.left(), panel.top(), panel.width(), kHeaderHeight);
+    // 14/4 = 标题左/上内边距（物理像素，与头部条 44 配套）
     titleRect = QRect(panel.left() + 14, panel.top() + 4, panel.width() / 2, kHeaderHeight - 8);
 
-    // 头部按钮右起往左填充：index 对齐 BoxHeaderKind——Next(2) 最右、Manage(1)
-    // 居中、Prev(0) 最左（视觉从左到右为 ‹ ⚙ ›；与日历头部同款右起循环）
+    // 头部按钮右起往左填充：index 对齐 BoxHeaderKind——Next(2) 最右、Adjust(1)
+    // 居中、Prev(0) 最左（视觉从左到右为 ‹ ✛ ›；与日历头部同款右起循环）
     headerButtons.resize(3);
+    // 12 = 最右按钮（Next）距面板右缘的边距
     int bx = panel.right() - 12 - kHeaderBtnSize;
     for (int i = 2; i >= 0; --i) {
         headerButtons[i] = QRect(bx, panel.top() + (kHeaderHeight - kHeaderBtnSize) / 2,
@@ -87,6 +99,7 @@ BoxLayout::BoxLayout(const QRect &panelRect, int cols_, int entryCount_, int pag
 
     // 页圆点（≤9 页才生成；更多页时渲染器改画「n/m」文本）
     if (pageCount <= 9) {
+        // 圆点直径 8、间距 6，在 kDotsHeight=18 内垂直居中（dy 公式见下）
         const int dotD = 8, gap = 6;
         const int totalW = pageCount * dotD + (pageCount - 1) * gap;
         int dx = panel.left() + (panel.width() - totalW) / 2;
@@ -96,8 +109,6 @@ BoxLayout::BoxLayout(const QRect &panelRect, int cols_, int entryCount_, int pag
             dots[i] = QRect(dx, dy, dotD, dotD);
             dx += dotD + gap;
         }
-        dotsBar = QRect(panel.left(), panel.bottom() + 1 - kDotsHeight, panel.width(),
-                        kDotsHeight);
     }
 }
 

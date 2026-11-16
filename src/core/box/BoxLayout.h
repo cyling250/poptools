@@ -27,13 +27,12 @@ public:
     int page = 0;        // 当前页（构造时钳制到 [0, pageCount-1]）
     int pageCount = 1;
     int capacity = 0;    // cols×rows
-    int entryCount = 0;
+    int entryCount = 0;  // 构造入参快照；entryIndexAt 用它钳制全局条目下标
     QRect titleRect;     // 标题文字区（左上）
     QRect headerBar;     // 头部条（标题 + 按钮）
-    QVector<QRect> headerButtons; // 3 个，索引 = BoxHeaderKind；左起：Prev/Manage/Next
+    QVector<QRect> headerButtons; // 3 个，索引 = BoxHeaderKind；左起：Prev/Adjust/Next
     QVector<QRect> cells;         // 当前页格子（capacity 个；前 min(剩余,capacity) 个有内容）
-    QRect dotsBar;                // 页圆点条（≤9 页才显示，否则渲染器画「n/m」文本）
-    QVector<QRect> dots;          // 每页一个圆点
+    QVector<QRect> dots;          // 每页一个圆点（≤9 页才生成；页圆点条高度恒 kDotsHeight）
 
     // ---- 尺寸常量（物理像素；大小 = 图标整数倍纪律的基准） ----
     // kCellH 预算（150% DPI）：图标顶偏移 10 + 图标 57 + 标签间距 ~11
@@ -57,10 +56,18 @@ public:
     };
     static Sizing compute(const QPoint &topLeft, int cols, int entryCount, const QRect &screen);
 
-    // 拖拽吸附：任意矩形 → 列/行整数（≤8 列；行数 = 内容区高度 ÷ kCellH 四舍五入）
+    // 拖拽吸附：任意矩形 → 列/行整数（≤8 列；行数 = 内容区高度 ÷ kCellH 四舍五入）。
+    // ⚠ snapRows/snappedRect 当前仅 domain_tests 覆盖，预留给管理器"拖拽调行数"（未实现）
     static int snapCols(int widthPx);
     static int snapRows(int heightPx, bool hasPages);
+    // 吸附后的完整面板矩形：宽=cols×kCellW，高=头部+rows×kCellH（+多页圆点条）；
+    // 供拖拽预览/测试
     static QRect snappedRect(const QPoint &topLeft, int cols, int rows, bool hasPages);
+
+    // ---- 当前页可见区间（面板补图标与渲染器画网格共用口径，勿双写公式） ----
+    // 首个全局条目下标 = page×capacity；本页可见条目数 = min(capacity, 剩余≥0)
+    int firstVisibleIndex() const { return page * capacity; }
+    int visibleCount(int totalEntries) const;
 
     // 命中：返回全局条目下标（page*capacity + cell）；空格/越界/未命中 → -1
     int entryIndexAt(const QPoint &p) const;
@@ -68,6 +75,7 @@ public:
     int hitHeader(const QPoint &p) const; // BoxHeaderKind 或 -1
     int hitDot(const QPoint &p) const;    // 页下标或 -1（≤9 页才有）
 
+    // ceil(entryCount/capacity)；capacity<=0 或 0 条目 → 1（空盒也要能布局出一页）
     static int pageCountFor(int entryCount, int capacity);
 };
 

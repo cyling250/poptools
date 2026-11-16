@@ -29,9 +29,8 @@ public:
     void requestIcon(const QString &target,
                      std::function<void(const QString &, const QImage &)> cb);
 
-    // 渲染前查缓存（未请求返回空图且 contains() 为 false；已请求但失败返回
-    // 空图且 contains() 为 true——调用方据此决定是否再请求）
-    QImage cachedIcon(const QString &target) const;
+    // 渲染前查缓存：contains() 为 false = 从未请求（可 requestIcon）；true = 已请求
+    //（含失败负缓存——requestIcon 不再重复提取，渲染画占位块）
     bool contains(const QString &target) const { return m_cache.contains(target); }
 
     // 提取线程函数（公开供单测直测：同步、阻塞、自带 COM 初始化）

@@ -22,7 +22,7 @@ class BoxManagerDialog : public QDialog
     Q_OBJECT
 public:
     explicit BoxManagerDialog(BoxCatalog &catalog, QWidget *parent = nullptr);
-    void focusBox(const QString &boxId); // 盒头 ⚙ 打开时定位选中项
+    void focusBox(const QString &boxId); // 定位选中指定盒；现入口仅托盘「收纳盒管理」（传空串）
 
 signals:
     void catalogChanged();               // 结构变更（模块重建面板实例）

@@ -10,9 +10,18 @@
 
 namespace poptools {
 
-namespace {
+// 记录画布尺寸与 DPR（字号 px 折算、图标缩放、壁纸 provider 同尺寸基准）
+BoxRenderer::BoxRenderer(int width, int height, qreal dpr)
+    : m_wallpaper(width, height)
+    , m_width(width)
+    , m_height(height)
+    , m_dpr(dpr)
+{
+}
 
-QPainterPath roundedPathImpl(const QRectF &r, qreal radius)
+BoxRenderer::~BoxRenderer() = default;
+
+QPainterPath BoxRenderer::roundedPath(const QRectF &r, qreal radius)
 {
     QPainterPath path;
     const qreal d = std::min(radius * 2, std::min(r.width(), r.height()));
@@ -28,38 +37,24 @@ QPainterPath roundedPathImpl(const QRectF &r, qreal radius)
     return path;
 }
 
-} // namespace
-
-BoxRenderer::BoxRenderer(int width, int height, qreal dpr)
-    : m_wallpaper(width, height)
-    , m_width(width)
-    , m_height(height)
-    , m_dpr(dpr)
-{
-}
-
-BoxRenderer::~BoxRenderer() = default;
-
-QPainterPath BoxRenderer::roundedPath(const QRectF &r, qreal radius)
-{
-    return roundedPathImpl(r, radius);
-}
-
 QFont BoxRenderer::font(qreal pointSize, bool bold) const
 {
-    // 与日历同口径：磅值 × 4/3 × DPR 折算成画布物理像素字号
+    // 与日历同口径：磅值 × 4/3 × DPR 折算成画布物理像素字号。
+    // 键折叠：像素字号 + bold×1e6 折进整数键（px 实际 ≤ 数十，无碰撞）
     const int px = qRound(pointSize * 4.0 / 3.0 * m_dpr);
-    const auto it = m_fontCache.constFind(px + (bold ? 1000000 : 0));
+    const int key = px + (bold ? 1000000 : 0);
+    const auto it = m_fontCache.constFind(key);
     if (it != m_fontCache.constEnd())
         return it.value();
     QFont f;
     f.setFamilies({ QStringLiteral("Microsoft YaHei UI"), QStringLiteral("SimSun") });
     f.setPixelSize(px);
     f.setBold(bold);
-    m_fontCache.insert(px + (bold ? 1000000 : 0), f);
+    m_fontCache.insert(key, f);
     return f;
 }
 
+// 面板外圈多层圆角描边模拟柔和投影（由外向内、alpha 恒 6 叠深；与日历同一配方）
 void BoxRenderer::drawShadow(QPainter *g, const QRect &panel)
 {
     for (int i = 18; i >= 1; i -= 2) {
@@ -71,6 +66,7 @@ void BoxRenderer::drawShadow(QPainter *g, const QRect &panel)
     }
 }
 
+// 文字 + (1,1) 偏移黑影双层绘制：壁纸上的可读性兜底（不用 QPaintEffect，成本最低）
 void BoxRenderer::drawShadowText(QPainter *g, const QString &text, const QFont &f,
                                  const QColor &color, const QPointF &pos)
 {
@@ -82,6 +78,7 @@ void BoxRenderer::drawShadowText(QPainter *g, const QString &text, const QFont &
     g->drawText(QPointF(pos.x(), pos.y()), text);
 }
 
+// 头部按钮矢量图标：‹/› 翻页箭头或 ✛ 十字箭头；enabled=false 降透明度（灰）表示不可翻页
 void BoxRenderer::drawHeaderIcon(QPainter *g, BoxHeaderKind kind, const QRect &r, bool enabled)
 {
     const QColor c = enabled ? QColor(226, 226, 226, 220) : QColor(160, 160, 160, 70);
@@ -127,6 +124,8 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
     g->setRenderHint(QPainter::Antialiasing);
     g->setRenderHint(QPainter::TextAntialiasing);
     g->setRenderHint(QPainter::SmoothPixmapTransform);
+    // 暂存帧私有，可就地整帧清透明（P-062 纪律只约束共享位图：发布仍走
+    // commitSurface 原子拷贝）
     g->setCompositionMode(QPainter::CompositionMode_Source);
     g->fillRect(QRect(0, 0, m_width, m_height), Qt::transparent);
     g->setCompositionMode(QPainter::CompositionMode_SourceOver);
@@ -160,6 +159,8 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
     const float scale = 1.0f; // 字号倍率（无量纲；v1 暂不暴露字号设置）
     const QFont titleFont = font(10.0f * scale, true);
     const QFont labelFont = font(8.4f * scale);
+    // 38 逻辑 px → 150% 下 57 物理像素；与 BoxLayout::kCellH=112 的预算注释
+    //（10+57+标签）一致
     const int iconSize = qRound(38.0 * m_dpr);
 
     // 标题（盒名，单行省略）
@@ -191,17 +192,19 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
         }
     }
 
-    // 图标网格（当前页）
-    const int first = layout.page * layout.capacity;
-    const int remaining = items.size() - first;
-    const int visible = std::min(layout.capacity, remaining > 0 ? remaining : 0);
+    // 图标网格（当前页）；可见区间口径 = layout.firstVisibleIndex/visibleCount（勿双写）
+    const int first = layout.firstVisibleIndex();
+    const int visible = layout.visibleCount(items.size());
+    // hover 循环不变，命中下标提出循环免逐格重算（纯循环不变量外提）
+    const int hoveredCell = layout.hitCell(hover);
     for (int i = 0; i < visible; ++i) {
         const QRect cell = layout.cells.at(i);
         const int idx = first + i;
-        const bool hovered = layout.hitCell(hover) == i;
+        const bool hovered = hoveredCell == i;
         const bool isSelected = idx == selected;
         if (hovered || isSelected) {
             const QRect bg = cell.adjusted(3, 3, -3, -3);
+            // 选中底色比悬停深一档；同格同时选中+悬停时取选中色
             g->fillPath(roundedPath(QRectF(bg), 6),
                         QColor(255, 255, 255, isSelected ? 58 : 34));
         }
@@ -242,7 +245,9 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
                           + (layout.rows * BoxLayout::kCellH) / 2;
         g->drawText(QRectF(layout.panel.left(), hintY - 20, layout.panel.width(), 40),
                     Qt::AlignHCenter | Qt::AlignVCenter,
-                    QStringLiteral("把文件放进绑定的文件夹\n（⚙ 打开所在文件夹）"));
+                    // T-062 修复: 空盒提示原指向 T-059 已移除的"⚙ 打开所在文件夹"
+                    // 入口（现盒头中键是 ✛ 调整），改为指向管理器的真实路径（BUG-05）
+                    QStringLiteral("把文件放进绑定的文件夹\n（托盘右键 → 收纳盒管理 → 打开文件夹）"));
     }
 
     // 页指示：≤9 页画圆点，否则「n/m」文本

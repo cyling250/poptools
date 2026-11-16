@@ -23,7 +23,8 @@ BoxManagerDialog::BoxManagerDialog(BoxCatalog &catalog, QWidget *parent)
 {
     setWindowTitle(QStringLiteral("收纳盒管理"));
     // 关闭即销毁（P-058 纪律）：hide-only 会让 openManager 的"已开着"分支
-    // 抬不起隐藏窗；销毁后 destroyed 回调复位 m_manager，下次点 ⚙ 正常新建
+    // 抬不起隐藏窗；销毁后 destroyed 回调复位 m_manager，下次托盘「收纳盒管理」
+    // 打开正常新建
     setAttribute(Qt::WA_DeleteOnClose);
     setModal(false);
     setFixedSize(440, 440);
@@ -83,11 +84,16 @@ void BoxManagerDialog::focusBox(const QString &boxId)
     }
 }
 
+// 目录 → 列表重建（每盒显示条目数）；无盒时禁用改名/解绑/打开/调整按钮。
+// T-062 修复: 条目数原用 QDir::count()——它等价 entryList() 且计入 "."/".."，
+// 空盒显示"（2 项）"且与面板 refreshEntries 恒差 2（BUG-04）；改用与面板
+// 同一过滤口径
 void BoxManagerDialog::reloadList()
 {
     m_list->clear();
     for (const BoxDef &d : m_catalog.boxes()) {
-        const int count = QDir(d.dir).count();
+        const int count =
+            QDir(d.dir).entryList(QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot).size();
         auto *item = new QListWidgetItem(
             QStringLiteral("%1（%2 项）").arg(d.name).arg(count), m_list);
         item->setToolTip(d.dir);
@@ -123,6 +129,7 @@ void BoxManagerDialog::createManagedBox()
 
 void BoxManagerDialog::bindFolder()
 {
+    // 进程级记忆上次绑定目录，作 QFileDialog 起始位置（有意为之的 static，非笔误）
     static QString lastDir;
     const QString dir = QFileDialog::getExistingDirectory(
         this, QStringLiteral("绑定已有文件夹"), lastDir);

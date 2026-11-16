@@ -45,7 +45,6 @@ private:
     QPointer<QWidget> m_manager;
     QAction *m_toggleAction = nullptr;
     AppServices *m_services = nullptr;
-    bool m_dutyScheduled = false;
 };
 
 } // namespace poptools

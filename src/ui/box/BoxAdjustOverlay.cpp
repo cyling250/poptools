@@ -44,26 +44,9 @@ BoxAdjustOverlay::BoxAdjustOverlay(const QRect &panelPhysical, const QRect &scre
                      QPoint(qRound(screenPhysical.width() / m_dpr),
                             qRound(screenPhysical.height() / m_dpr)));
     setGeometry(m_screen);
-    const QRect startLogical = QRect(qRound(panelPhysical.left() / m_dpr),
-                                     qRound(panelPhysical.top() / m_dpr),
-                                     qRound(panelPhysical.width() / m_dpr),
-                                     qRound(panelPhysical.height() / m_dpr));
-    m_startTopLeft = panelPhysical.topLeft();
-    m_startCols = BoxLayout::snapCols(panelPhysical.width());
-    // ✓/× 画在面板右上角外沿（照日历调整装饰位）
-    m_checkRect = QRect(startLogical.right() - 56, startLogical.top() + 6, 22, 22);
-    m_cancelRect = QRect(startLogical.right() - 30, startLogical.top() + 6, 22, 22);
-}
-
-QRect BoxAdjustOverlay::toPhysical(const QRect &logical) const
-{
-    return QRect(qRound(logical.left() * m_dpr), qRound(logical.top() * m_dpr),
-                 qRound(logical.width() * m_dpr), qRound(logical.height() * m_dpr));
-}
-
-int BoxAdjustOverlay::colsForWidth(int widthPhysical) const
-{
-    return BoxLayout::snapCols(widthPhysical);
+    // 进入时快照不再存成员：Esc 取消用面板自带的 original（BoxPanel 侧），
+    // ✓/Enter 确认一律走 rectProvider 的当前实时几何
+    Q_UNUSED(panelPhysical)
 }
 
 QRect BoxAdjustOverlay::currentLogical() const
@@ -97,6 +80,8 @@ int BoxAdjustOverlay::hitZone(const QPoint &localPt) const
         return 3; // 按钮
     if (logical.contains(localPt))
         return 1;
+    // 宽度取 2×kEdgeGrab：内侧一半先被 zone1（面板内）短路，实际生效热区 =
+    // 框外露出的 14px
     const QRect rightEdge(logical.right() - kEdgeGrab, logical.top(), kEdgeGrab + kEdgeGrab,
                           logical.height());
     if (rightEdge.contains(localPt))
@@ -148,29 +133,33 @@ void BoxAdjustOverlay::paintEvent(QPaintEvent *event)
     }
 }
 
+// Esc=取消（恢复进入前几何，BoxPanel 侧 original 快照）；Enter=确认。
+// T-062 修复: 原 Enter 回写打开时快照 m_startTopLeft/m_startCols——内部拖动已把
+// 新几何实时落盘，Enter 一按成果整体回滚，确认键退化成第二个取消键（Enter≡Esc，
+// BUG-02）。现与 ✓ 分支对齐：确认 rectProvider 的当前实时几何
 void BoxAdjustOverlay::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
-        m_finished = true;
         if (m_canceled)
             m_canceled();
         close(); // WA_DeleteOnClose → destroyed → 面板复位 m_adjusting
     } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-        m_finished = true;
-        if (m_confirmed)
-            m_confirmed(m_startTopLeft, m_startCols);
+        const QRect panel = m_rectProvider ? m_rectProvider() : QRect();
+        if (!panel.isNull() && m_confirmed)
+            m_confirmed(panel.topLeft(), BoxLayout::snapCols(panel.width()));
         close();
     }
     QWidget::keyPressEvent(event);
 }
 
+// ✓/× 热区优先于拖拽热区：✓ 确认 rectProvider 的当前实时几何（拖过的成果），
+// × 取消恢复进入前快照；其余按 zone 记录拖拽起点
 void BoxAdjustOverlay::mousePressEvent(QMouseEvent *event)
 {
     const QPoint local = event->pos();
     if (checkRectNow().contains(local)) {
         const QRect panel = m_rectProvider ? m_rectProvider() : QRect();
         if (!panel.isNull()) {
-            m_finished = true;
             if (m_confirmed)
                 m_confirmed(panel.topLeft(), BoxLayout::snapCols(panel.width()));
         }
@@ -178,7 +167,6 @@ void BoxAdjustOverlay::mousePressEvent(QMouseEvent *event)
         return;
     }
     if (cancelRectNow().contains(local)) {
-        m_finished = true;
         if (m_canceled)
             m_canceled();
         close();
@@ -211,10 +199,17 @@ void BoxAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
             if (!panel.isNull()) {
                 const int dx = local.x() - m_startLocal.x();
                 const int wantWidth = panel.width() + qRound(dx * m_dpr);
-                const int cols = colsForWidth(wantWidth);
-                if (cols != BoxLayout::snapCols(panel.width())) {
+                const int cols = BoxLayout::snapCols(wantWidth);
+                const int curCols = BoxLayout::snapCols(panel.width());
+                if (cols != curCols) {
                     if (m_changed)
                         m_changed(panel.topLeft(), cols);
+                    m_startLocal = local;
+                } else if ((cols == 8 && dx > 0) || (cols == 2 && dx < 0)) {
+                    // T-062 修复: 拖动正被钳制边界吸收（8 列再加宽 / 2 列再收窄）
+                    // 时持续重置拖动基准，防 dx 无限累积——否则反向拖回需先补偿
+                    // 累积位移才再变列，手感"发粘"（BUG-09）。只在朝界外的方向
+                    // 重置：朝界内仍需累积位移过半格阈值才能吸附近邻列
                     m_startLocal = local;
                 }
                 update();
@@ -228,6 +223,7 @@ void BoxAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
     QWidget::mouseMoveEvent(event);
 }
 
+// 拖拽结束清 zone；悬停光标由 mouseMove 的无按键分支恢复
 void BoxAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
 {
     Q_UNUSED(event)

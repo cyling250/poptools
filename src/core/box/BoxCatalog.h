@@ -44,8 +44,10 @@ public:
     // 结构性操作（各自落盘）
     QString addBox(BoxDef def);            // 补 id 后追加，返回 id
     void removeBox(const QString &id);     // 仅解除绑定，绝不删文件夹
+    // 改名仅改显示名（不动绑定目录）；空名拒改。立即落盘
     void renameBox(const QString &id, const QString &name);
     void updateBox(const QString &id, const BoxDef &def); // 整体替换（几何/页/hidden）
+    // 托盘显隐开关用：全置 hidden；调用方先 any_of 判当前态实现全显↔全隐翻转
     void setHiddenAll(bool hidden);
 
     // 新建托管盒的默认目录：%LOCALAPPDATA%\PopTools\box\boxes\<name>[-2]

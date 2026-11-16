@@ -17,6 +17,7 @@ constexpr int kVersion = 2;
 QString s_dirOverride; // 单测注入；空串 = 默认路径
 } // namespace
 
+// 单盒 → JSON 对象（字段口径见 BoxDef 成员注释；x/y 为主屏物理像素）
 QJsonObject BoxDef::toJson() const
 {
     QJsonObject o;
@@ -31,6 +32,8 @@ QJsonObject BoxDef::toJson() const
     return o;
 }
 
+// JSON → 单盒；id 或 dir 为空视为坏条目（ok=false 返回默认值，调用方跳过）；
+// cols/page 就地钳制，容忍越界旧档
 BoxDef BoxDef::fromJson(const QJsonObject &o, bool *ok)
 {
     if (ok)
@@ -83,6 +86,7 @@ QString BoxCatalog::managedDirFor(const QString &name)
     return boxesDir.absoluteFilePath(candidate);
 }
 
+// 仓库 → JSON 文档（v2 格式）
 QJsonObject BoxCatalog::toJson() const
 {
     QJsonObject root;
@@ -94,6 +98,7 @@ QJsonObject BoxCatalog::toJson() const
     return root;
 }
 
+// JSON 文档 → 仓库（v2 格式）；解析失败不改动既有 m_boxes（先解析后清理的次序）
 bool BoxCatalog::fromJson(const QString &json)
 {
     QJsonParseError err {};
@@ -111,6 +116,8 @@ bool BoxCatalog::fromJson(const QString &json)
     return true;
 }
 
+// 读 boxes.json：文件缺失 = 默认空仓；解析失败 = 原档改名 .bad 留证后空载
+//（防坏档反复崩溃，绝不覆盖式修复）
 BoxCatalog BoxCatalog::load()
 {
     BoxCatalog catalog;
@@ -129,6 +136,8 @@ BoxCatalog BoxCatalog::load()
     return catalog;
 }
 
+// 全量落盘：QSaveFile 原子替换；数据目录不存在则先建。写失败静默
+//（无弹窗路径，调用方为高频小数据）
 void BoxCatalog::save() const
 {
     const QDir dir(dataDir());
@@ -141,6 +150,7 @@ void BoxCatalog::save() const
     f.commit();
 }
 
+// 线性查 id 下标；-1 = 不存在（盒数量级小，线性足够）
 int BoxCatalog::indexOf(const QString &id) const
 {
     for (int i = 0; i < m_boxes.size(); ++i) {
