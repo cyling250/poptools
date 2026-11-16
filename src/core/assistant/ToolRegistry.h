@@ -32,6 +32,14 @@ struct ToolDef
         fn;
 };
 
+// 无参数工具的空 JSON Schema（object + 空 properties）：各模块 ToolDef 装配
+// 样板去重用（T-062），生成内容与原先各处内联写法逐字段相同
+inline QJsonObject emptyObjectSchema()
+{
+    return QJsonObject{{"type", QStringLiteral("object")},
+                       {"properties", QJsonObject{}}};
+}
+
 class ToolRegistry : public QObject
 {
     Q_OBJECT

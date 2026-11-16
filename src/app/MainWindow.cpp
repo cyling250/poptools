@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QScreen>
 
 #include "AppServices.h"
 #include "core/assistant/ToolRegistry.h"
@@ -18,6 +19,8 @@
 
 namespace poptools {
 
+// 装配顺序即生命周期契约：共享服务 → 模块 initAll → 外壳自有菜单项；
+// 成员析构逆序保证模块先于服务消亡
 MainWindow::MainWindow(QObject *parent)
     : QObject(parent)
 {
@@ -87,12 +90,14 @@ MainWindow::MainWindow(QObject *parent)
     m_tray->show();
 
     // 热键注册失败的统一告知（模块 init 时记录；气泡须在托盘可见后弹出）。
-    // 失败名已带具体原因（"F1：已被其他程序占用"/Win32 错误码），此处不再复述
+    // 失败名已带具体原因（"F1：已被其他程序占用"/Win32 错误码），此处不再复述。
+    // 聚合为一条气泡：Windows 托盘气泡同一时刻只显示一条，逐条弹后发覆盖
+    // 先发，失败 2 个以上时用户只能看到最后一条（T-062）
     const QStringList failedHotKeys = m_services->takeFailedHotKeyNames();
-    for (const QString &name : failedHotKeys) {
+    if (!failedHotKeys.isEmpty()) {
         m_tray->showMessage(QStringLiteral("热键注册失败"),
-            QStringLiteral("%1，对应快捷键暂不可用，仍可通过托盘菜单使用相应功能。")
-                .arg(name),
+            QStringLiteral("%1\n对应快捷键暂不可用，仍可通过托盘菜单使用相应功能。")
+                .arg(failedHotKeys.join(QLatin1Char('\n'))),
             QSystemTrayIcon::Warning);
     }
 }
@@ -102,15 +107,34 @@ MainWindow::~MainWindow()
     // 退出前反装配：模块在其 shutdown 中撤销发布到 AppServices 的能力槽，
     // 避免槽位/热键回调在成员析构窗口内访问悬垂的模块 this
     m_registry.shutdownAll();
+    // T-062 修复: m_desktopSurface 无 parent、无他人 delete，原先析构体永不
+    // 执行 → 退出路径注入解除（stopDuty→StopDock）断链，explorer 内注入 DLL
+    // 与共享画布跨进程残留。此处确定性析构（quit 流程：托盘「退出」→
+    // app.exec() 返回 → 本析构体，此时 QApplication 仍在，删 QWidget 安全）。
+    // 顺序关键：先 shutdownAll 让模块 unregisterPanel，再停值守——恰为
+    // stopDuty/析构体内部顺序；无双重释放（所有权唯一在本类）
+    delete m_desktopSurface;
+    m_desktopSurface = nullptr;
+    if (m_services)
+        m_services->desktopSurface = nullptr; // 消除悬垂槽位指针
     delete m_menu; // 托盘菜单无 QWidget 父对象，显式释放（action 随之销毁）
     m_menu = nullptr;
 }
 
+// 模态打开设置对话框；openCalendarPage 为 true 时定位桌面日历页
+//（Goody 日历托盘入口复用）。仅 Accepted 时广播 settingsChanged
 void MainWindow::onShowSettings(bool openCalendarPage)
 {
     SettingsDialog dlg(m_services);
     if (openCalendarPage)
         dlg.openCalendarPage();
+    // T-062 修复: 无 parent 模态对话框落屏由系统默认决定，多屏不可控
+    //（P-059 家族：无主 QDialog 曾落副屏）——按主屏可用区居中（对齐
+    // GoodyWindow 几何先例）。adjustSize 先定尺寸（与 show 时未显式 resize
+    // 的 adjustedSize 同源），再按该尺寸居中
+    dlg.adjustSize();
+    const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
+    dlg.move(avail.center() - dlg.rect().center());
     dlg.exec();
     // 设置保存后刷新运行时组件：Translator 每次 translate() 读取最新 Settings，
     // 无需额外操作；有缓存外观的模块经 settingsChanged 信号重应用。

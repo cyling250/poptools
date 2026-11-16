@@ -30,11 +30,14 @@ public:
             m->init(services);
     }
 
-    // 反装配全部模块（应用退出前的系统级资源清理）
+    // 反装配全部模块（应用退出前的系统级资源清理）。逆序：init 的装配顺序是
+    // "提供方在前、消费方在后"，逆序先撤消费方再撤提供方，与构造/析构的
+    // 对称惯例一致（当前各模块 shutdown 互不消费他方槽位，前向/逆序结果
+    // 相同，此处为纯稳健化——未来任一模块 shutdown 依赖他方对象也安全）
     void shutdownAll()
     {
-        for (auto &m : m_modules)
-            m->shutdown();
+        for (auto it = m_modules.rbegin(); it != m_modules.rend(); ++it)
+            (*it)->shutdown();
     }
 
     IFeatureModule *module(const QString &id) const

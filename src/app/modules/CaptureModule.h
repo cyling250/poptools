@@ -25,7 +25,9 @@ public:
 
 private:
     AppServices *m_services = nullptr;
-    CaptureWindow *m_window = nullptr; // 顶层窗口，随 QApplication 退出清理
+    // 顶层窗口无父对象：进程退出由 OS 回收（析构不执行），故窗口内关键
+    // 落盘/清理不得依赖析构（几何在确认截图时即时落盘，无析构依赖）
+    CaptureWindow *m_window = nullptr;
 };
 
 } // namespace poptools

@@ -21,6 +21,7 @@
 
 namespace poptools {
 
+// 仅作 QObject 接线中枢；无常驻运行期对象（贴图窗口按次建、随关随销）
 PinModule::PinModule(QObject *parent)
     : QObject(parent)
 {
@@ -36,7 +37,8 @@ void PinModule::init(AppServices &services)
             &PinModule::onTranslateFinished);
 
     // F3：贴剪贴板最新图片。热键在原生事件过滤器中触发：UI 操作（窗口创建/激活）
-    // 延迟到事件循环，避免时序问题
+    // 延迟到事件循环，避免时序问题。
+    // vk 硬编码 VK_F3 为有意固定（贴图热键未开放设置项；其余功能热键均可配）
     services.registerHotKey(0x72 /* VK_F3 */, 0, [this] {
         QTimer::singleShot(0, QCoreApplication::instance(),
                            [this] { pinFromClipboard(); });
@@ -50,8 +52,7 @@ void PinModule::init(AppServices &services)
         d.description = QStringLiteral(
             "把剪贴板中最新的图片贴为 PopTools 屏幕贴图（置顶悬浮）。"
             "剪贴板没有图片时返回失败。");
-        d.parameters = QJsonObject{{"type", QStringLiteral("object")},
-                                   {"properties", QJsonObject{}}};
+        d.parameters = emptyObjectSchema();
         d.fn = [this](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
             QTimer::singleShot(0, QCoreApplication::instance(), [this, done] {
                 if (QGuiApplication::clipboard()->pixmap().isNull()) {
@@ -109,12 +110,14 @@ void PinModule::pinFromClipboard()
 
 // ---- 贴图 OCR / 翻译（结果走托盘气泡 + 剪贴板，不弹交互窗） ----
 
+// 贴图右键「识别文字」入口：纯 OCR
 void PinModule::onPinOcrRequested(const QPixmap &img)
 {
     m_ocrThenTranslate = false;
     startPinOcr(img);
 }
 
+// 「翻译」入口：OCR 后按记忆目标语言续翻（m_ocrThenTranslate 链路开关）
 void PinModule::onPinTranslateRequested(const QPixmap &img)
 {
     m_ocrThenTranslate = true;

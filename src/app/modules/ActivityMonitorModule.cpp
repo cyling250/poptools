@@ -1,7 +1,6 @@
 #include "ActivityMonitorModule.h"
 
 #include <QAction>
-#include <QCoreApplication>
 #include <QDateTime>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -34,6 +33,7 @@ QJsonObject baseEvent(const QString &app, const QString &title)
 }
 } // namespace
 
+// 无状态：全部运行期对象在 startMonitor 建、stopMonitor 销
 ActivityMonitorModule::ActivityMonitorModule(QObject *parent)
     : QObject(parent)
 {
@@ -49,9 +49,11 @@ void ActivityMonitorModule::init(AppServices &services)
     m_trayAction = services.addTrayAction(QStringLiteral("活动监控"), [this] { toggleFromTray(); });
 
     // 事件循环就绪后再开钩子（init 早于 app.exec）；无条件调用以刷新
-    // 托盘文案（enabled=false 时只改文案不建任何运行期对象）
-    QTimer::singleShot(0, QCoreApplication::instance(),
-                       [this] { applyRunningState(); });
+    // 托盘文案（enabled=false 时只改文案不建任何运行期对象）。
+    // 上下文用 this 而非 app 实例：singleShot 的 QObject 重载即支持成员
+    // 上下文，模块若先于触发亡则回调自动丢弃（原 app 上下文下会悬垂），
+    // 且与本文件其余回调一律以 this 为上下文的口径一致
+    QTimer::singleShot(0, this, [this] { applyRunningState(); });
 }
 
 void ActivityMonitorModule::shutdown()
@@ -84,6 +86,7 @@ void ActivityMonitorModule::applyRunningState()
                                    : QStringLiteral("活动监控：已暂停（点击开启）"));
 }
 
+// 托盘一键启停：翻转设置持久化 → applyRunningState 执行/暂停 → 气泡告知结果
 void ActivityMonitorModule::toggleFromTray()
 {
     Settings &s = Settings::instance();
@@ -97,6 +100,8 @@ void ActivityMonitorModule::toggleFromTray()
     }
 }
 
+// 建全套运行期对象并接线（钩子→状态机→落盘→心跳），最后启动钩子；
+// 可注入参数（保留天数/空闲阈值/OCR 开关）在此快照到 m_applied* 供重启判定
 void ActivityMonitorModule::startMonitor()
 {
     if (m_store)
@@ -219,6 +224,8 @@ void ActivityMonitorModule::startMonitor()
     m_mouseHook->start();
 }
 
+// 逆序拆除：先停心跳与钩子（不再产生事件）→ flush 残余缓冲 → 删对象 →
+// 最后停 store（ClipboardListener 须先于 store 停止冲账，见下方 delete 顺序）
 void ActivityMonitorModule::stopMonitor()
 {
     if (!m_store)

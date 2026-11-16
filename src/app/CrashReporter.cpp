@@ -40,7 +40,12 @@ void logLine(HANDLE file, const wchar_t *fmt, ...)
     va_start(ap, fmt);
     _vsnwprintf_s(buf, 1024, _TRUNCATE, fmt, ap);
     va_end(ap);
-    const size_t len = wcsnlen_s(buf, 1024);
+    size_t len = wcsnlen_s(buf, 1024);
+    // T-062 修复: len 钳制防截断长行的 \r\n 越界写——长行被 _TRUNCATE 截到
+    // 上限时 len==1023，原先 buf[1024] 起越界写 2 字节（WriteFile 还按
+    // (len+2)*sizeof(wchar_t) 越界读），栈上越界可能破坏 SEH 链
+    if (len > 1022)
+        len = 1022;
     buf[len] = L'\r';
     buf[len + 1] = L'\n';
     DWORD written = 0;
@@ -101,6 +106,8 @@ void ensureSymbols(HANDLE process)
 {
     if (g_symReady)
         return;
+    // EXACT_SYMBOLS 是非常规选项（多数崩溃报告器不设）：使近似/导出符号匹配
+    // 更严格——宁可拿不到符号名也不误报（宁缺勿错口径），裸导出模块留空
     SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS
                   | SYMOPT_LOAD_LINES | SYMOPT_EXACT_SYMBOLS);
     g_symReady = SymInitializeW(process, nullptr, TRUE) != FALSE;
@@ -145,15 +152,22 @@ void logStackTrace(HANDLE file, HANDLE process, HANDLE thread, CONTEXT *ctx)
         si->SizeOfStruct = sizeof(SYMBOL_INFOW);
         si->MaxNameLen = 255;
         if (SymFromAddrW(process, pc, &symDisp, si))
-            swprintf_s(sym, L"%s+0x%llx", si->Name,
-                       static_cast<unsigned long long>(symDisp));
+            // T-062 修复: 改 _TRUNCATE 版——符号名可达 255 字符（MaxNameLen），
+            // 加偏移文本可超 260；非截断版 swprintf_s 缓冲不足会触发 CRT 非法
+            // 参数处理器，把崩溃处理器二次击穿（日志戛然而止）。_snwprintf_s
+            // 带 _TRUNCATE 截断时返回 -1（不返回截断长度），返回值此处未用，
+            // 语义变化无影响
+            _snwprintf_s(sym, 260, _TRUNCATE, L"%s+0x%llx", si->Name,
+                         static_cast<unsigned long long>(symDisp));
         wchar_t lineInfo[180] = L"";
         DWORD lineDisp = 0;
         IMAGEHLP_LINEW64 li = {};
         li.SizeOfStruct = sizeof(li);
         if (SymGetLineFromAddrW64(process, pc, &lineDisp, &li))
-            swprintf_s(lineInfo, L"  (%s:%lu)", li.FileName,
-                       static_cast<unsigned long>(li.LineNumber));
+            // T-062 修复: 同上——FileName 可达 MAX_PATH 级（完整构建路径），
+            // 180 字符缓冲必须截断式写入
+            _snwprintf_s(lineInfo, 180, _TRUNCATE, L"  (%s:%lu)", li.FileName,
+                         static_cast<unsigned long>(li.LineNumber));
         logLine(file, L"  #%02d %s!%s%s", i, modName, sym, lineInfo);
     }
 }
@@ -229,6 +243,17 @@ void report(const wchar_t *headline, EXCEPTION_POINTERS *ep)
     HANDLE process = GetCurrentProcess();
     if (ep && ep->ContextRecord)
         logStackTrace(f, process, GetCurrentThread(), ep->ContextRecord);
+    else {
+        // T-062 修复: abort 族入口（terminate/purecall/invalid_parameter/
+        // SIGABRT）以 ep=nullptr 调 report——原先当前线程栈被跳过，qFatal/
+        // 未捕获异常这类最需要出错点栈的场景反而只剩"其余线程"。改用
+        // RtlCaptureContext 纯寄存器捕获当前线程上下文（符合禁堆禁 Qt 纪律，
+        // x64 与 logStackTrace 的 AMD64 口径一致）；栈顶几帧是 report/
+        // abortHook 自身，属可接受噪声
+        CONTEXT ctx = {};
+        RtlCaptureContext(&ctx);
+        logStackTrace(f, process, GetCurrentThread(), &ctx);
+    }
     logOtherThreads(f, process);
     if (f != INVALID_HANDLE_VALUE)
         CloseHandle(f);
@@ -273,11 +298,17 @@ void __cdecl onSigAbrt(int)
 
 // ---------- Qt 日志文件重定向（调试基建：qWarning 不再随控制台丢失） ----------
 
+// 调试基建：qWarning 等落 %TEMP%/poptools_qt.log，不随控制台丢失。
+// 只保正文（上下文丢弃），但加单字符级别前缀区分 qFatal/qInfo；
+// toLocal8Bit 在中文 Windows 写 GBK，纯查证用途可接受
 void qtMessageLog(QtMsgType type, const QMessageLogContext &ctx,
                   const QString &msg)
 {
-    (void)type;
     (void)ctx;
+    // QtMsgType 枚举序：0=Debug 1=Warning 2=Critical 3=Fatal 4=Info。
+    // 前向兼容：Qt 7 若调整 QtMsgType 枚举序（如 Info 移位）此表会静默错位，
+    // 升级 Qt 时须对照 qlogging.h 复核
+    const char tag = "DWCFI"[int(type)];
     char path[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, path))
         return;
@@ -288,6 +319,8 @@ void qtMessageLog(QtMsgType type, const QMessageLogContext &ctx,
         return;
     const QByteArray line = msg.toLocal8Bit();
     DWORD written = 0;
+    WriteFile(f, &tag, 1, &written, nullptr);
+    WriteFile(f, " ", 1, &written, nullptr);
     WriteFile(f, line.constData(), DWORD(line.size()), &written, nullptr);
     WriteFile(f, "\r\n", 2, &written, nullptr);
     CloseHandle(f);

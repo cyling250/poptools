@@ -57,6 +57,7 @@ private:
     void ensureWindow();
     void ensureBall();           // T-050：悬浮球懒建（开关开且未建时）
     void applyBallSettings();    // T-050：球开关/位置重应用（init 与设置变更共用）
+    void applyPermissionSettings(); // 权限三参数从 Settings 重应用（init 装配与设置变更共用）
     void openChat();
     void registerBuiltinTools();
     void setupMcp();              // mcp.json 配置装载 + 工具桥接（P6；不 start，R6-C2）
@@ -84,7 +85,9 @@ private:
     LlmClient *m_client = nullptr;
     ChatSession *m_session = nullptr;
     GoodyWindow *m_window = nullptr;
-    GoodyFloatingBall *m_ball = nullptr; // T-050：桌面悬浮球（无父窗口，随 QApplication 清理）
+    // 桌面悬浮球：无父窗口，进程退出由 OS 回收（析构不执行）——球无关键
+    // 落盘（位置在拖动时即时持久化），无析构依赖
+    GoodyFloatingBall *m_ball = nullptr; // T-050
     bool m_working = false;              // T-050：工作态缓存（去重广播用）
     DailyRecordJob *m_recordJob = nullptr; // 本日工作记录任务（P4）
     Scheduler *m_scheduler = nullptr;      // 每日到点调度（P4）
@@ -94,7 +97,10 @@ private:
     bool m_mcpStarted = false;             // MCP 子进程是否已懒启动（R6-C2）
 
     QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
-    int m_toolRounds = 0;          // 单次用户消息的工具回合计数（防失控循环）
+    // 单次用户消息的工具回合计数（防失控循环）。复位点：sendMessage 发起新
+    // 消息、重新生成路径（GoodyModule.cpp regenerateRequested 内）——新增
+    // 回合入口时须同样复位，否则反复续轮会提前触发上限
+    int m_toolRounds = 0;
     bool m_toolPhase = false;      // 工具执行期（tool_calls 回填中）：sendMessage 守卫
     qint64 m_toolEpoch = 0;        // 会话清空收束代数（清空时 +1）：在途工具/
                                    // 确认回调按代数失配丢弃，防孤儿 tool 入会话

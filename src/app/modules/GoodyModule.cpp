@@ -1,6 +1,7 @@
 #include "GoodyModule.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -35,13 +36,30 @@ namespace poptools {
 
 namespace {
 constexpr int kMaxToolRounds = 8; // 单次用户消息最多 8 轮工具往返（防失控）
+
+// 数据目录拼接去重（T-062）：goody/ 与 monitor/ 子目录多处使用，集中一处
+// 保证路径口径唯一（QStandardPaths::AppLocalDataLocation 进程内恒定）
+QString goodyDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+        + QStringLiteral("/goody");
+}
+
+QString monitorDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+        + QStringLiteral("/monitor");
+}
 } // namespace
 
+// 仅作 QObject 接线中枢；子对象经父子关系随模块析构（m_* 多为 this 子对象）
 GoodyModule::GoodyModule(QObject *parent)
     : QObject(parent)
 {
 }
 
+// 装配顺序敏感：auditStore → perm/client/session/memory → 注册工具/MCP →
+// 日记录任务/调度 → 热键/托盘 → 悬浮球 → 数据流接线
 void GoodyModule::init(AppServices &services)
 {
     m_services = &services;
@@ -49,29 +67,28 @@ void GoodyModule::init(AppServices &services)
     Q_ASSERT(m_registry && "组合根必须先创建共享 ToolRegistry 再装配模块");
 
     // 审计存储（goody 目录；与 monitor 目录的 ActivityStore 各自独立线程）
-    const QString goodyDir = QStandardPaths::writableLocation(
-                                 QStandardPaths::AppLocalDataLocation)
-        + QStringLiteral("/goody");
-    m_auditStore = new ActivityStore(goodyDir, this);
+    m_auditStore = new ActivityStore(goodyDir(), this);
     m_auditStore->start();
 
     m_perm = new PermissionManager(m_auditStore, this);
     m_perm->setToolRegistry(m_registry); // readOnly 判定以注册表为准（app.* 不再一刀切放行）
+    // T-062 修复: init 原先不应用持久化权限设置（PermissionManager 构造不读
+    // Settings，默认 Ask+空白名单）——重启后用户配置的 Smart/自动模式、"总是
+    // 允许"清单、shell 白名单全部失效回到逐条确认。此处与 onSettingsChanged
+    // 共用同一重应用路径（键名/格式不变，只补装配时机）
+    applyPermissionSettings();
     m_client = new LlmClient(this);
-    m_session = new ChatSession(goodyDir + QStringLiteral("/chat/sessions.json"), this);
+    m_session = new ChatSession(goodyDir() + QStringLiteral("/chat/sessions.json"), this);
     m_session->load();
-    m_memory = new MemoryStore(goodyDir, this);
+    m_memory = new MemoryStore(goodyDir(), this);
     m_memory->load();
-    m_work = new WorkingMemory(goodyDir, this);
+    m_work = new WorkingMemory(goodyDir(), this);
 
     registerBuiltinTools();
     setupMcp();
 
     // ---- 本日工作记录：启动补账 + 每日到点 + 工具手动触发 ----
-    const QString monitorDir = QStandardPaths::writableLocation(
-                                   QStandardPaths::AppLocalDataLocation)
-        + QStringLiteral("/monitor");
-    m_recordJob = new DailyRecordJob(monitorDir, goodyDir, this);
+    m_recordJob = new DailyRecordJob(monitorDir(), goodyDir(), this);
     m_scheduler = new Scheduler(this);
     applySummarySchedule();
     // 启动补账（延迟 5s：等事件循环与网络就绪；只补历史日，今天留给定时点）
@@ -86,8 +103,12 @@ void GoodyModule::init(AppServices &services)
     // 托盘文案标注，不再静默）
     const quint32 hkVk = Settings::instance().assistantHotKeyVk();
     const quint32 hkMods = Settings::instance().assistantHotKeyModifiers();
-    const bool hkOk = services.registerHotKey(hkVk, hkMods,
-                                              [this] { openChat(); });
+    const bool hkOk = services.registerHotKey(hkVk, hkMods, [this] {
+        // T-062 修复: 热键回调在 GlobalHotKey 的原生事件过滤器栈中直发，
+        // 直接建窗/激活违反 AppServices 契约（"GUI 操作请自行延迟到事件
+        // 循环"）——对齐 PinModule/划词翻译的 singleShot 先例
+        QTimer::singleShot(0, QCoreApplication::instance(), [this] { openChat(); });
+    });
 
     // R5-D2：托盘文案的快捷键改为按设置动态生成（ini 改 assistantHotKeyVk
     // 后不再与事实不符）；注册失败时追加标注（CaptureModule 的"已被占用"
@@ -123,6 +144,8 @@ void GoodyModule::init(AppServices &services)
     connect(&services, &AppServices::settingsChanged, this, &GoodyModule::onSettingsChanged);
 }
 
+// 退出前落盘：会话全量保存 + 审计流冲刷停止；MCP 子进程随 m_mcpClients
+//（QObject 子对象）析构终止
 void GoodyModule::shutdown()
 {
     if (m_session)
@@ -131,19 +154,27 @@ void GoodyModule::shutdown()
         m_auditStore->stop();
 }
 
+// 设置页保存后的三路重应用：权限参数 / 总结调度 / 悬浮球开关（各自内部幂等）
 void GoodyModule::onSettingsChanged()
 {
     // 权限配置即时重读（模式/白名单在设置页修改后生效）
-    if (m_perm) {
-        const Settings &s = Settings::instance();
-        m_perm->setMode(PermissionManager::modeFromSetting(s.assistantPermMode()));
-        m_perm->setAlwaysAllowTools(s.assistantAlwaysAllowTools());
-        m_perm->setShellAllowPrefixes(s.assistantShellAllowPrefixes());
-    }
+    applyPermissionSettings();
     // 总结调度接线：总结时刻/自动开关改动即时生效（原实现须重启）
     applySummarySchedule();
     // T-050：悬浮球开关/位置改动即时重应用（开=建+显示，关=销毁）
     applyBallSettings();
+}
+
+// 权限三参数重应用（init 装配与设置变更共用）：模式/"总是允许"清单/shell
+// 白名单一次性从 Settings 读入。各 setter 均为幂等赋值，重复调用无副作用
+void GoodyModule::applyPermissionSettings()
+{
+    if (!m_perm)
+        return;
+    const Settings &s = Settings::instance();
+    m_perm->setMode(PermissionManager::modeFromSetting(s.assistantPermMode()));
+    m_perm->setAlwaysAllowTools(s.assistantAlwaysAllowTools());
+    m_perm->setShellAllowPrefixes(s.assistantShellAllowPrefixes());
 }
 
 // 总结调度接线（init 与设置变更共用）：按当前设置注册/启停每日任务
@@ -169,15 +200,18 @@ void GoodyModule::applySummarySchedule()
     m_scheduler->start();
 }
 
+// 内置工具注册：time.now 有 has() 防重（其余 registerTool 覆盖语义天然幂等）；
+// fs/shell/memory/monitor/generate_daily_record 各自锚定异步交付对象
 void GoodyModule::registerBuiltinTools()
 {
+    // time.now 的 has() 是给单测共用注册表兜底；内置工具重复注册走覆盖
+    // 语义，天然幂等
     if (!m_registry->has(QStringLiteral("time.now"))) {
         ToolDef d;
         d.name = QStringLiteral("time.now");
         d.readOnly = true;
         d.description = QStringLiteral("获取当前日期时间（本地时区）。");
-        d.parameters = QJsonObject{{"type", QStringLiteral("object")},
-                                   {"properties", QJsonObject{}}};
+        d.parameters = emptyObjectSchema();
         d.fn = [](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
             const QDateTime now = QDateTime::currentDateTime();
             done(QJsonObject{{"ok", true},
@@ -195,10 +229,7 @@ void GoodyModule::registerBuiltinTools()
             m_registry->registerTool(d);
     }
     if (m_services) {
-        const QString monitorDir = QStandardPaths::writableLocation(
-                                       QStandardPaths::AppLocalDataLocation)
-            + QStringLiteral("/monitor");
-        m_registry->registerTool(makeMonitorQueryTool(monitorDir, this));
+        m_registry->registerTool(makeMonitorQueryTool(monitorDir(), this));
 
         // 手动生成某天的本日工作记录（用户："帮我把昨天的记录生成一下"）
         ToolDef gen;
@@ -234,10 +265,7 @@ void GoodyModule::registerBuiltinTools()
 // MCP 是可选能力：无配置文件即零开销
 void GoodyModule::setupMcp()
 {
-    const QString goodyDir = QStandardPaths::writableLocation(
-                                 QStandardPaths::AppLocalDataLocation)
-        + QStringLiteral("/goody");
-    const QList<McpStdioClient::ServerConfig> servers = McpStdioClient::loadConfig(goodyDir);
+    const QList<McpStdioClient::ServerConfig> servers = McpStdioClient::loadConfig(goodyDir());
     for (const McpStdioClient::ServerConfig &cfg : servers) {
         auto *client = new McpStdioClient(cfg, this);
         m_mcpClients << client;
@@ -264,8 +292,7 @@ void GoodyModule::setupMcp()
                                                  .toString());
                     d.parameters = t.value(QStringLiteral("inputSchema")).toObject();
                     if (d.parameters.isEmpty())
-                        d.parameters = QJsonObject{{"type", QStringLiteral("object")},
-                                                   {"properties", QJsonObject{}}};
+                        d.parameters = emptyObjectSchema();
                     const QPointer<McpStdioClient> anchor(client);
                     d.fn = [this, anchor, toolName](
                                const QJsonObject &args,
@@ -317,11 +344,15 @@ void GoodyModule::ensureMcpStarted()
         client->start();
 }
 
+// 懒建聊天窗并接全部窗口→模块请求（发送/停止/清空/侧栏四件套/重新生成/
+// 权限回包）；所有域操作先过 turnLocked 守卫，会话清空走 epoch 收束
 void GoodyModule::ensureWindow()
 {
     if (m_window)
         return;
-    m_window = new GoodyWindow(); // 无父窗口：随 QApplication 退出清理
+    // 无父窗口：进程退出由 OS 回收（析构不执行）——几何在 hideEvent 即时
+    // 落盘、会话由模块 shutdown 保存，均无析构依赖
+    m_window = new GoodyWindow();
     m_window->setSession(m_session); // T-050-P2：会话域对象注入（侧栏/历史/四件套）
     connect(m_window, &GoodyWindow::sendRequested, this, &GoodyModule::sendMessage);
     connect(m_window, &GoodyWindow::stopRequested, this, [this] { m_client->abort(); });
@@ -346,8 +377,13 @@ void GoodyModule::ensureWindow()
             }
             m_pendingToolCalls = QJsonArray{};
             m_toolPhase = false;
-            if (m_window)
+            if (m_window) {
+                // T-062 修复: 兜底路径原先漏复位窗口侧工具期（模块侧 m_toolPhase
+                // 已复位但按钮禁用残留）——与 onTurnFinished/toolCallDone 各
+                // 收束点成对调用保持一致
+                m_window->setToolPhase(false);
                 m_window->showErrorLine(QStringLiteral("工具执行已随会话清空中止"));
+            }
         }
         // busy 期清空（C-N2）：abort 在途 LLM 请求——其 finished 回包带旧代数
         // 到达，onTurnFinished 丢弃（不 append、不走工具链）。窗口侧 busy 已
@@ -454,7 +490,9 @@ void GoodyModule::ensureBall()
 {
     if (m_ball)
         return;
-    m_ball = new GoodyFloatingBall(); // 无父窗口：随 QApplication 退出清理
+    // 无父窗口：进程退出由 OS 回收（析构不执行）——球无关键落盘（位置在
+    // 拖动时即时持久化），无析构依赖
+    m_ball = new GoodyFloatingBall();
     m_ball->applySavedPosition();
     connect(m_ball, &GoodyFloatingBall::clicked, this, [this] { openChat(); });
     connect(m_ball, &GoodyFloatingBall::positionChanged, this,
@@ -496,6 +534,8 @@ void GoodyModule::updateWorkingState()
     emit workingChanged(working);
 }
 
+// 唯一自动唤起点：懒启动 MCP → 懒建窗口 → 前置/激活；悬浮球按开关隐没，
+// 关窗经 windowHidden 回归
 void GoodyModule::openChat()
 {
     ensureMcpStarted(); // R6-C2: 首次打开聊天窗即拉起 MCP 子进程（幂等）
@@ -568,13 +608,14 @@ void GoodyModule::sendMessage(const QString &text)
             m_window->showErrorLine(QStringLiteral("工具执行中，请等当前操作完成后再发送"));
         return;
     }
+    // 统一懒建窗口（原实现 Key 缺失分支与正常路径各调一次，提前共用；
+    // ensureWindow 幂等，两分支本就都会建窗）
+    ensureWindow();
     if (Settings::instance().assistantApiKey().trimmed().isEmpty()) {
-        ensureWindow();
         m_window->showErrorLine(
             QStringLiteral("还没有配置 API Key：设置 → Goody 管家 → 填入 DeepSeek API Key。"));
         return;
     }
-    ensureWindow();
     m_toolRounds = 0;
     m_window->appendUserBubble(text);
     m_session->append(QJsonObject{{"role", QStringLiteral("user")}, {"content", text}});
@@ -596,6 +637,8 @@ bool GoodyModule::turnLocked() const
     return false;
 }
 
+// 发起一轮 LLM 请求：快照回合代数 → busy 灯/流式气泡 → 注入系统提示词与
+// 工具 schema；chat 返回 false 属不可能路径，防御性复位
 void GoodyModule::runTurn()
 {
     m_activeTurnEpoch = m_toolEpoch; // 回合代数快照：清空后迟到回包按失配丢弃
@@ -611,13 +654,19 @@ void GoodyModule::runTurn()
     updateWorkingState(); // T-050：请求在途 → 呼吸光效起
 }
 
+// 回合收束四分支：代数失配（迟到回包，仅复位窗口）→ 失败/中止（剥
+// tool_calls 入会话）→ 普通回答（收束）→ tool_calls（轮次计数后进工具执行期）
 void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
                                  const QString &error)
 {
     // 迟到回包丢弃（C-N2）：回包所属回合的会话已被清空（代数失配）时，
     // 不入会话、不走工具链——清空后 unconditional append 会让新会话以
     // assistant（含 tool_calls 时更糟）开头，下一轮请求被网关 400 且无自愈。
-    // 只做窗口收尾复位 busy 灯，用户可立即发起新会话
+    // 只做窗口收尾复位 busy 灯，用户可立即发起新会话。
+    // 安全前提：会话清空已触发窗口 reload（sessionCleared → m_session->clear()
+    // 发 changed → GoodyWindow 重建气泡），m_streamBubble 已置空——下方
+    // finishAssistantBubble 在此只复位流式状态，不会把迟到内容画进新会话
+    //（若解除该依赖须改走丢弃路径）
     if (m_activeTurnEpoch != m_toolEpoch) {
         if (m_window) {
             m_window->setBusy(false);
@@ -698,6 +747,8 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
     processNextToolCall();
 }
 
+// 工具执行队列泵：队空则续轮生成；队首取权 → 权限决策 → Allow 直执行 /
+// 否则内联确认卡片（回调带 epoch 防会话清空后回填）
 void GoodyModule::processNextToolCall()
 {
     if (m_pendingToolCalls.isEmpty()) {

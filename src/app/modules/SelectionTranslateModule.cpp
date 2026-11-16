@@ -20,6 +20,7 @@
 
 namespace poptools {
 
+// 仅作 QObject 接线中枢；运行期对象在 init 建、shutdown 撤（钩子/过滤器）
 SelectionTranslateModule::SelectionTranslateModule(QObject *parent)
     : QObject(parent)
 {
@@ -106,6 +107,7 @@ void SelectionTranslateModule::onTextAcquired(const QString &text)
     card->translateNow();      // 立即执行翻译（经 translateRequested 登记在途状态）
 }
 
+// 抓词失败也走卡片展示（复用唯一卡片定位纪律），让用户看见失败原因而非静默
 void SelectionTranslateModule::onAcquireError(const QString &error)
 {
     // 全局唯一卡片：显示获取选中文本失败的错误信息
@@ -120,7 +122,8 @@ void SelectionTranslateModule::onAcquireError(const QString &error)
 TranslateCard *SelectionTranslateModule::ensureCard()
 {
     if (!m_card) {
-        // 全局唯一实例，随 QApplication 退出清理
+        // 全局唯一无父窗口：进程退出由 OS 回收（析构不执行）；卡片无关键
+        // 落盘/清理，hideEvent 即统一清空状态，故无析构依赖
         m_card = new TranslateCard();
         // 翻译/解释/总结/改写请求：用户点击卡片内动作按钮或新划词触发
         connect(m_card, &TranslateCard::translateRequested, this,

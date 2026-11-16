@@ -8,6 +8,7 @@
 
 namespace poptools {
 
+// 仅作 QObject；服务指针由组合根逐项注入（见 MainWindow 构造）
 AppServices::AppServices(QObject *parent)
     : QObject(parent)
 {
@@ -43,7 +44,15 @@ bool AppServices::registerHotKey(quint32 vk, quint32 modifiers,
             // 由组合根气泡透出——原先一律说"被占用"，参数错误时误导排查
             m_failedHotKeyNames.append(hotKeyDisplayName(vk, modifiers)
                                        + QStringLiteral("：") + hotkey->lastError());
+    } else {
+        // T-062 修复: hotkey 未注入时原先静默失败且不留痕，组合根的失败气泡
+        // 无从发——补记失败名。当前装配下不可达（组合根先注入后 initAll），
+        // 纯防御口径补全，行为仅在不可达路径变化
+        m_failedHotKeyNames.append(hotKeyDisplayName(vk, modifiers)
+                                   + QStringLiteral("：内部热键注册器未注入"));
     }
+    // 失败注册同样占位 id：保证 id 分配与回调映射一一对应；失败的 id 永不
+    // 触发，无需清理
     m_hotkeyCallbacks.insert(id, std::move(triggered));
     return ok;
 }
@@ -58,6 +67,8 @@ void AppServices::notifySettingsChanged()
     emit settingsChanged();
 }
 
+// 热键总线分发：按 GlobalHotKey 的 id 路由到注册时存下的回调；
+// 无对应回调（如注册失败占位的 id）则静默忽略
 void AppServices::onHotKeyActivated(int id)
 {
     if (const auto cb = m_hotkeyCallbacks.value(id))

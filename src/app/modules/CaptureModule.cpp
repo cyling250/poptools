@@ -13,6 +13,8 @@
 
 namespace poptools {
 
+// 装配截图链：建 CaptureWindow → 发布 captureActive/Intercept 槽位 →
+// 注册 F1 → 托盘入口（文案随热键注册结果）→ 贡献 app.capture 工具
 void CaptureModule::init(AppServices &services)
 {
     m_services = &services;
@@ -21,7 +23,11 @@ void CaptureModule::init(AppServices &services)
     // 内 Q_ASSERT 拦截——T-036 批次 D 已删除内部自建兜底，防拉起第二个引擎）
     m_window = new CaptureWindow(services.ocr);
 
-    // 捕获完成 → 记录选区位置（F3 贴图定位用）
+    // 捕获完成 → 记录选区位置（F3 贴图定位用）。
+    // 生命周期论证：connect 的接收者上下文是 m_window 而 lambda 捕获模块
+    // this（CaptureModule 非 QObject，无法作上下文）——安全性依赖"模块只在
+    // 应用退出时析构、窗口与模块同寿命且退出后无信号"；若日后模块可动态
+    // 拔插，须改为 shutdown 时 disconnect
     QObject::connect(m_window, &CaptureWindow::captured, m_window,
                      [this](const QPixmap &, const QRect &selection) {
                          if (!selection.isEmpty())
@@ -38,8 +44,14 @@ void CaptureModule::init(AppServices &services)
     // 热键被其他程序占用时（如其他截图工具），让用户在菜单里直接看出来
     const quint32 captureVk = Settings::instance().captureHotKeyVk();
     const bool hotkeyOk = services.registerHotKey(captureVk, 0, [this] {
-        if (!m_window->isVisible())
-            m_window->startCapture();
+        // T-062 修复: 热键回调在 GlobalHotKey 的原生事件过滤器栈中直发，
+        // 直接建窗/激活违反 AppServices 契约（"GUI 操作请自行延迟到事件
+        // 循环"）——对齐 PinModule/划词翻译与本模块 toolRegistry 路径的
+        // singleShot 先例
+        QTimer::singleShot(0, QCoreApplication::instance(), [this] {
+            if (!m_window->isVisible())
+                m_window->startCapture();
+        });
     });
 
     // 托盘入口
@@ -57,8 +69,7 @@ void CaptureModule::init(AppServices &services)
         d.name = QStringLiteral("app.capture");
         d.readOnly = true;
         d.description = QStringLiteral("启动 PopTools 截图（进入全屏选区模式）。");
-        d.parameters = QJsonObject{{"type", QStringLiteral("object")},
-                                   {"properties", QJsonObject{}}};
+        d.parameters = emptyObjectSchema();
         d.fn = [this](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
             QTimer::singleShot(0, QCoreApplication::instance(), [this] {
                 if (!m_window->isVisible())
