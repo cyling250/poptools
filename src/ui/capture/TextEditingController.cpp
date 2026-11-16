@@ -264,7 +264,7 @@ namespace poptools
     //   - 选中文字标注（非输入态）：整条扫描（多字号置空 / 统一显示该值）
     //   - 其余情况：显示默认字号（接下来输入文字的字号）
 
-    qreal TextEditingController::fragmentPt(const QTextCharFormat &fmt, const QFont &def) const
+    qreal TextEditingController::fragmentPt(const QTextCharFormat &fmt, const QFont &def)
     {
         qreal pt = fmt.fontPointSize();
         if (pt > 0)
@@ -279,6 +279,37 @@ namespace poptools
         return 14.0;
     }
 
+    // 统一字号扫描：输入框选区片段（syncToolbar 输入态）与整份 HTML 文档
+    // （syncToolbar 选中标注态）原本各写一遍相同的"遍历片段 + qFuzzyCompare
+    // 判混排"逻辑，T-062（R1 结构 8）合并为单一数据源，遍历与判定规则不变
+    qreal TextEditingController::uniformFontSize(const QTextDocument &doc, const QFont &def,
+                                                 bool *mixed, int selStart, int selEnd)
+    {
+        qreal size = -1;
+        *mixed = false;
+        QTextBlock b = doc.begin();
+        while (b.isValid() && !(*mixed))
+        {
+            for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it)
+            {
+                const QTextFragment frag = it.fragment();
+                const int fEnd = frag.position() + frag.length();
+                if (selStart >= 0 && qMax(frag.position(), selStart) >= qMin(fEnd, selEnd))
+                    continue; // 片段与选区无交集
+                const qreal pt = fragmentPt(frag.charFormat(), def);
+                if (size < 0)
+                    size = pt;
+                else if (!qFuzzyCompare(size, pt))
+                {
+                    *mixed = true;
+                    break;
+                }
+            }
+            b = b.next();
+        }
+        return size;
+    }
+
     void TextEditingController::syncToolbar()
     {
         if (!m_ctx->toolbar)
@@ -290,30 +321,10 @@ namespace poptools
             const QFont def = m_textEdit->document()->defaultFont();
             if (cur.hasSelection())
             {
-                // 有选区：扫描选中范围内片段的字号
-                const int selStart = cur.selectionStart();
-                const int selEnd = cur.selectionEnd();
-                qreal size = -1;
+                // 有选区：扫描选中范围内片段的字号（混排 → 置空，判定见 uniformFontSize）
                 bool mixed = false;
-                QTextBlock b = m_textEdit->document()->begin();
-                while (b.isValid() && !mixed)
-                {
-                    for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it)
-                    {
-                        const int fEnd = it.fragment().position() + it.fragment().length();
-                        if (qMax(it.fragment().position(), selStart) >= qMin(fEnd, selEnd))
-                            continue; // 片段与选区无交集
-                        const qreal pt = fragmentPt(it.fragment().charFormat(), def);
-                        if (size < 0)
-                            size = pt;
-                        else if (!qFuzzyCompare(size, pt))
-                        {
-                            mixed = true;
-                            break;
-                        }
-                    }
-                    b = b.next();
-                }
+                const qreal size = uniformFontSize(*m_textEdit->document(), def, &mixed,
+                                                   cur.selectionStart(), cur.selectionEnd());
                 if (mixed || size < 0)
                     m_ctx->toolbar->clearFontSize(); // 多字号 → 不显示
                 else
@@ -343,26 +354,11 @@ namespace poptools
                 }
                 else
                 {
+                    // 富文本整条扫描（与输入态选区扫描同一套规则，见 uniformFontSize）
                     QTextDocument doc;
                     doc.setDefaultFont(it.font);
                     doc.setHtml(it.html);
-                    const QFont def = doc.defaultFont();
-                    QTextBlock b = doc.begin();
-                    while (b.isValid() && !mixed)
-                    {
-                        for (QTextBlock::iterator frag = b.begin(); !frag.atEnd(); ++frag)
-                        {
-                            const qreal pt = fragmentPt(frag.fragment().charFormat(), def);
-                            if (size < 0)
-                                size = pt;
-                            else if (!qFuzzyCompare(size, pt))
-                            {
-                                mixed = true;
-                                break;
-                            }
-                        }
-                        b = b.next();
-                    }
+                    size = uniformFontSize(doc, doc.defaultFont(), &mixed);
                 }
                 if (mixed || size < 0)
                     m_ctx->toolbar->clearFontSize();

@@ -23,6 +23,9 @@ QPixmap OutputController::render() const
     QPixmap result = m_ctx->cap->screen.copy(crop);
     {
         QPainter p(&result);
+        // 单屏/同 DPR 下 kx==ky；混合 DPR 跨屏选区纵/横比例可能不同，
+        // 此处仅按 X 轴取比例（已知简化，R1 登记；显示端有 R6-B1a 守卫，
+        // 输出端无，罕见配置下标注纵向可能轻微错位）
         const qreal k = qreal(result.width()) / qMax(1, m_ctx->selectionRect().width());
         p.scale(k, k);
         AnnotationPainter::draw(p, m_ctx->canvas->items);

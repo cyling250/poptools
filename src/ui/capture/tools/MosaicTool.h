@@ -38,11 +38,19 @@ public:
     {
         if (m_points.isEmpty())
             return;
+        // 草稿色与 draftColor() 同源（占位半透明黑），原先两处各写一遍易失同步
         const qreal w = strokeWidth();
-        p.setPen(QPen(QColor(0, 0, 0, 70), w, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setPen(QPen(draftColor(), w, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
         p.drawPolyline(m_points);
-        // 单点 / 端点处补圆点，保证笔刷为圆头
+        capEndpoints(p);
+    }
+
+    // 占位笔迹的圆头补笔：单点/端点处补圆点，保证笔刷为圆头
+    // （与 buildMosaicItem 的 mask 绘制同款画法）
+    void capEndpoints(QPainter &p) const override
+    {
+        const qreal w = strokeWidth();
         for (const QPointF &pt : m_points)
             p.drawEllipse(pt, w / 2.0, w / 2.0);
     }

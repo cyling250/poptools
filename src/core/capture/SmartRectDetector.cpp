@@ -565,7 +565,7 @@ QRect SmartRectDetector::Worker::detect(const Query &q)
                                 &res);
             m_poked.push_back(tctx.found);
             if (m_poked.size() > 64)
-                m_poked.erase(m_poked.begin()); // 防无限增长（16 个窗口循环复用即可）
+                m_poked.erase(m_poked.begin()); // 防无限增长（>64 循环复用）
         }
 
         ULONGLONG budget = 800;
@@ -595,10 +595,15 @@ QRect SmartRectDetector::Worker::detect(const Query &q)
         RECT hitRect = invalidRect();
         IUIAutomationElement *hit = nullptr;
         bool noBatch = std::find(m_noBatch.begin(), m_noBatch.end(), tctx.found) != m_noBatch.end();
+        const bool knownNoBatch = noBatch; // 查询前的既有登记（T-062 修复：区分新旧）
         hitRect = uiaRectAt(m_uia, m_walker, m_trueCond, m_cache, startEl, startRect, tctx.found,
                             pt, deadline, &noBatch, &hit);
         startEl = nullptr; // 所有权已由 uiaRectAt 接管
-        if (noBatch)
+        // T-062 修复（R1 疑似BUG 3）：仅当本次 UIA 下行"新发现"批量不可用才登记。
+        // noBatch 的初值来自上面的 membership 查询，uiaRectAt 只在"批量失败但
+        // 兄弟链可用"时置位——若不区分，已在名单的窗口每次查询都重复 push，
+        // 逐出策略会挤掉其他窗口的记录，64 容量退化为最近查询窗口的重复表
+        if (noBatch && !knownNoBatch)
         {
             m_noBatch.push_back(tctx.found);
             if (m_noBatch.size() > 64)

@@ -14,6 +14,7 @@
 #include <QDoubleValidator>
 #include <QGraphicsDropShadowEffect>
 #include <QHash>
+#include <functional>
 
 namespace poptools
 {
@@ -31,15 +32,25 @@ namespace poptools
         return s_instance;
     }
 
-    ToolBar *ToolBar::instance()
-    {
-        return s_instance;
-    }
-
     ToolBar::~ToolBar()
     {
         if (s_instance == this)
             s_instance = nullptr;
+    }
+
+    // 图标超采样框架（三个图标工厂共用）：创建 size×4 的透明位图并交给 draw
+    // 绘制，ss 传入超采样倍数供绘制代码换算几何。QPainter 在本函数内析构后才
+    // 返回位图；不带 DPR 元数据的约定见 svgIcon 注释
+    static QPixmap supersampledIcon(int size, const std::function<void(QPainter &, int)> &draw)
+    {
+        constexpr int kSs = 4; // 超采样倍数
+        QPixmap pm(size * kSs, size * kSs);
+        pm.fill(Qt::transparent);
+        {
+            QPainter p(&pm);
+            draw(p, kSs);
+        }
+        return pm;
     }
 
     // 渲染 SVG 资源为指定颜色的 QIcon（normal=深灰，高亮=白）
@@ -61,16 +72,13 @@ namespace poptools
         QSvgRenderer renderer(QString(":/icons/%1.svg").arg(name));
         if (!renderer.isValid())
             return QIcon(); // 资源缺失时返回空图标（调用方应能处理）
-        constexpr int kSs = 4; // 超采样倍数
-        QPixmap pm(size * kSs, size * kSs);
-        pm.fill(Qt::transparent);
+        const QPixmap pm = supersampledIcon(size, [&renderer, &color, size](QPainter &p, int ss)
         {
-            QPainter p(&pm);
             renderer.render(&p);
             // 重新着色（SourceIn 保留透明度）
             p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-            p.fillRect(0, 0, pm.width(), pm.height(), color);
-        }
+            p.fillRect(0, 0, size * ss, size * ss, color);
+        });
         const QIcon icon(pm);
         cache.insert(key, icon);
         return icon;
@@ -79,35 +87,30 @@ namespace poptools
     // 线宽图标：圆点大小按档位内相对值缩放（半径 2px..7px），档位之间清晰可辨
     static QIcon widthIcon(qreal w, qreal maxW, int size = 20, const QColor &color = Qt::black)
     {
-        constexpr int kSs = 4; // 超采样倍数（同 svgIcon，不带 DPR 元数据）
-        QPixmap pm(size * kSs, size * kSs);
-        pm.fill(Qt::transparent);
+        const QPixmap pm = supersampledIcon(size, [w, maxW, color, size](QPainter &p, int ss)
         {
-            QPainter p(&pm);
             p.setRenderHint(QPainter::Antialiasing);
-            const qreal r = (2.0 + 5.0 * (w / qMax(1e-6, maxW))) * kSs;
+            const qreal r = (2.0 + 5.0 * (w / qMax(1e-6, maxW))) * ss;
             p.setPen(Qt::NoPen);
             p.setBrush(color);
-            p.drawEllipse(QPointF(pm.width() / 2.0, pm.height() / 2.0), r, r);
-        }
+            p.drawEllipse(QPointF(size * ss / 2.0, size * ss / 2.0), r, r);
+        });
         return QIcon(pm);
     }
 
     // 填充/纯线图标
     static QIcon fillIcon(bool filled, int size = 20, const QColor &color = Qt::black)
     {
-        constexpr int kSs = 4; // 超采样倍数（同 svgIcon，不带 DPR 元数据）
-        QPixmap pm(size * kSs, size * kSs);
-        pm.fill(Qt::transparent);
+        const QPixmap pm = supersampledIcon(size, [filled, color, size](QPainter &p, int ss)
         {
-            QPainter p(&pm);
             p.setRenderHint(QPainter::Antialiasing);
-            const int m = 4 * kSs; // 原逻辑边距 4px 的等比放大
-            QRect r(m, m, pm.width() - 2 * m, pm.height() - 2 * m);
-            p.setPen(QPen(color, 2 * kSs));
+            const int m = 4 * ss; // 原逻辑边距 4px 的等比放大
+            const int dim = size * ss;
+            QRect r(m, m, dim - 2 * m, dim - 2 * m);
+            p.setPen(QPen(color, 2 * ss));
             p.setBrush(filled ? QBrush(color) : QBrush(Qt::NoBrush));
             p.drawRect(r);
-        }
+        });
         return QIcon(pm);
     }
 
@@ -237,12 +240,6 @@ namespace poptools
 
         for (const ToolInfo &info : kTools)
         {
-            if (info.tool == Tool::Eraser)
-            {
-                row1->addWidget(ocrBtn);
-                row1->addWidget(translateBtn);
-                row1->addWidget(qrBtn);
-            }
             auto *btn = new QToolButton(this);
             btn->setFixedSize(32, 32);
             btn->setCheckable(true);
@@ -253,6 +250,14 @@ namespace poptools
             row1->addWidget(btn);
             m_toolButtons.append(btn);
         }
+
+        // 【扫描】【译】【码】三个功能按钮插到"文字"与"橡皮"之间。显式 insert
+        // 与工具循环解耦（原先借 Eraser 分支在循环内插入，顺序关系隐晦）；
+        // 布局顺序即视觉顺序，橡皮是循环添加的最后一个按钮
+        const int eraserIdx = row1->count() - 1;
+        row1->insertWidget(eraserIdx, ocrBtn);
+        row1->insertWidget(eraserIdx + 1, translateBtn);
+        row1->insertWidget(eraserIdx + 2, qrBtn);
 
         row1->addWidget(makeSeparator());
 
@@ -421,34 +426,9 @@ namespace poptools
         applyWidthOptions();
     }
 
-    void ToolBar::setColor(const QColor &c)
-    {
-        m_currentColor = c;
-        m_colorBig->setStyleSheet(QString(
-                                      "QToolButton { border: 1px solid rgba(255,255,255,50); border-radius: 8px; background: %1; }")
-                                      .arg(c.name()));
-        for (QToolButton *btn : m_colorButtons)
-            btn->setChecked(btn->property("color").toString() == c.name());
-    }
-
-    void ToolBar::setWidth(qreal w)
-    {
-        m_width = w;
-        // 找到 w 对应的档位
-        const QVector<qreal> options = widthOptionsFor(m_tool);
-        int idx = m_widthIndex;
-        for (int i = 0; i < options.size(); ++i)
-        {
-            if (qFuzzyCompare(options[i], w))
-            {
-                idx = i;
-                break;
-            }
-        }
-        m_widthIndex = idx;
-        applyWidthOptions();
-    }
-
+    // 线宽档位按钮刷新：值 / 图标 / 互斥选中态，并把选中档位同步进 m_width。
+    // 程序性刷新（setTool）与用户点击（onWidthClicked）共用，均不发射
+    // widthSelected——宿主经 currentWidth() 读取，避免误 commit/回环
     void ToolBar::applyWidthOptions()
     {
         const QVector<qreal> options = widthOptionsFor(m_tool);
@@ -456,6 +436,8 @@ namespace poptools
         for (int i = 0; i < m_widthButtons.size(); ++i)
         {
             QToolButton *btn = m_widthButtons[i];
+            // widthOptionsFor 各分支恒返回 3 档（与 m_widthButtons 数量一致），
+            // 此兜底分支纯防御；若未来出现空档位表，options.last() 是 UB，需先判空
             const qreal w = (i < options.size()) ? options[i] : options.last();
             btn->setProperty("width", w);
             const bool checked = (i == m_widthIndex);
@@ -463,19 +445,9 @@ namespace poptools
             btn->setIcon(widthIcon(w, maxW, 20, checked ? Qt::white : iconColor()));
         }
         // 仅同步 m_width（经 currentWidth() 供宿主读取）；
-        // 程序性刷新（setTool/setWidth）不发射 widthSelected，避免宿主误 commit/回环
+        // 程序性刷新（setTool）不发射 widthSelected，避免宿主误 commit/回环
         if (!options.isEmpty() && m_widthIndex < options.size())
             m_width = options[m_widthIndex];
-    }
-
-    void ToolBar::setFilled(bool filled)
-    {
-        m_filled = filled;
-        if (m_fillBtn)
-        {
-            m_fillBtn->setChecked(filled);
-            m_fillBtn->setIcon(fillIcon(filled, 20, iconColor()));
-        }
     }
 
     QColor ToolBar::iconColor() const
@@ -521,7 +493,13 @@ namespace poptools
         {
             m_currentColor = c;
             emit colorSelected(c);
-            setColor(c);
+            // 选中态刷新（原 setColor 程序性入口已删，仅剩此一处使用）：
+            // 大色块换色 + 色板互斥高亮
+            m_colorBig->setStyleSheet(QString(
+                                          "QToolButton { border: 1px solid rgba(255,255,255,50); border-radius: 8px; background: %1; }")
+                                          .arg(c.name()));
+            for (QToolButton *b : m_colorButtons)
+                b->setChecked(b->property("color").toString() == c.name());
         }
     }
 
@@ -542,7 +520,10 @@ namespace poptools
     void ToolBar::onFilledClicked()
     {
         m_filled = m_fillBtn->isChecked();
-        m_fillBtn->setIcon(fillIcon(m_filled));
+        // T-062 修复（R1 疑似BUG 1）：必须显式传 iconColor()。fillIcon 默认色为
+        // 黑色，落入默认参数会让点击"填充/纯线"后的图标变纯黑，在 #1E2024 深色
+        // 工具栏上不可见（构造与 setFilled 路径都显式传了色，仅此处漏传）
+        m_fillBtn->setIcon(fillIcon(m_filled, 20, iconColor()));
         emit filledToggled(m_filled);
     }
 

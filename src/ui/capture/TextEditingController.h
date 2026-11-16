@@ -9,6 +9,7 @@
 #include "CaptureContext.h"
 
 class QTextEdit;
+class QTextDocument;
 class QTextCharFormat;
 
 namespace poptools {
@@ -45,7 +46,12 @@ private:
     void adjustSize();                                  // 输入框尺寸自适应
     void applyFontSizeToInput(qreal pt);                // 输入态改字号（有选区改选中，无选区设后续输入）
     void applyFontSizeToItem(AnnotationItem &it, qreal pt); // 整条标注改统一字号
-    qreal fragmentPt(const QTextCharFormat &fmt, const QFont &def) const; // 片段字号（pt）
+    static qreal fragmentPt(const QTextCharFormat &fmt, const QFont &def); // 片段字号（pt）
+    // 扫描文档片段字号：统一返回该值（pt），混排/无有效片段返回 -1（*mixed 区分）；
+    // selStart/selEnd >= 0 时只统计与选区有交集的片段（输入框选区扫描），
+    // 否则扫描整份文档（选中标注扫描）
+    static qreal uniformFontSize(const QTextDocument &doc, const QFont &def, bool *mixed,
+                                 int selStart = -1, int selEnd = -1);
 
     CaptureContext *m_ctx;
     QTextEdit *m_textEdit = nullptr;

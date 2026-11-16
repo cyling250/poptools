@@ -24,18 +24,25 @@ public:
 
     // 交互
     bool tryPress(const QPointF &local);      // 命中选中项控制点→缩放；点选→选中并拖动。返回是否处理
+    // 拖动中（CaptureWindow::mouseMoveEvent 按此分派 drag）
     bool isMoving() const { return m_itemMoving; }
+    // 缩放中（含选区控制点互斥判定，真值时 CaptureWindow 显示取色卡片）
     bool isResizing() const { return m_itemActiveHandle != Handle::None; }
     void drag(const QPointF &local);          // 按活动状态移动 / 缩放
     void endDrag();                           // 释放
     void stopInteraction();                   // 立即停止移动/缩放（文字编辑等入口调用）
     bool tryDoubleClickText(const QPointF &local); // 双击文字标注 → 启动重编辑（ctx->beginTextEdit）
     void deleteSelected();                    // 删除选中标注（压撤销栈）
-    void clearSelection();                    // 取消选中
+    // 取消标注选中：清 *selectedItem 与拖动/缩放态，并触发 selectionChanged
+    // （工具栏字号栏随之复位）。一切"切换上下文"的入口（切工具/点选区外/
+    // 重进截图/双击重画）都应调用，否则旧选中态会串到新上下文
+    void clearSelection();
     bool hasSelection() const { return m_ctx->selectedIndex() >= 0; }
 
     // 绘制 / 光标
     void paintSelected(QPainter &p) const;    // 选中项虚线框 + 控制点（painter 在选区局部坐标系）
+    // 选中项上的光标形状：命中控制点 → 尺寸光标，命中项边界（±4px 容差）→
+    // 移动光标，否则箭头
     Qt::CursorShape cursorAt(const QPointF &local) const;
 
 private:

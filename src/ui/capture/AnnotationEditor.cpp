@@ -75,6 +75,8 @@ void AnnotationEditor::drag(const QPointF &local)
 
 void AnnotationEditor::endDrag()
 {
+    // 顺序敏感：finalizeMosaicPreview 以 m_itemActiveHandle != None 为定稿前提，
+    // 必须先定稿再清控制点态（两处入口同理）
     finalizeMosaicPreview();
     m_itemActiveHandle = Handle::None;
     // m_itemMoving 保持：选中标注保持选中态，便于连续操作
@@ -82,6 +84,7 @@ void AnnotationEditor::endDrag()
 
 void AnnotationEditor::stopInteraction()
 {
+    // 顺序敏感：同 endDrag——先以现存控制点态定稿马赛克预览，再清交互状态
     finalizeMosaicPreview();
     m_itemMoving = false;
     m_itemActiveHandle = Handle::None;

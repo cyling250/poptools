@@ -49,6 +49,8 @@ struct CaptureContext
     // 它们由 CaptureWindow 以 OcrHostCallbacks 窄接口注入 OcrController，
     // 本结构只承载画布/选区共享态，避免功能回调污染通用上下文。
 
+    // 空指针兜底读取：控制器不得直读裸指针（selection/selectedItem 可能为空），
+    // 读值一律走这两个入口，先判空再取值
     QRect selectionRect() const { return selection ? *selection : QRect(); }
     int selectedIndex() const { return selectedItem ? *selectedItem : -1; }
 };

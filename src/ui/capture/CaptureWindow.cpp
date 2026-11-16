@@ -33,6 +33,11 @@
 namespace poptools
 {
 
+    // 取色放大卡片几何常量：colorPickerCardRect（几何计算）与 paintColorPicker（绘制）
+    // 共用单一数据源（原先两处同名局部常量易失同步）；
+    // 155 = 31×5、105 = 21×5 与 paintColorPicker 的 5× 放大倍数自洽
+    constexpr int kZoomW = 155, kZoomH = 105, kColorH = 50;
+
     CaptureWindow::CaptureWindow(RapidOcrService *ocrService, QWidget *parent)
         : QWidget(parent)
     {
@@ -180,15 +185,13 @@ namespace poptools
                 {
                     m_textEditCtrl->commit();
                     m_canvas.undo();
-                    m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-                    update();
+                    m_ctx.stateChanged(); // 撤销/重做收口：按钮态同步 + 重绘（与键盘分支共用）
                 });
         connect(m_toolbar, &ToolBar::redoRequested, this, [this]
                 {
                     m_textEditCtrl->commit();
                     m_canvas.redo();
-                    m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-                    update();
+                    m_ctx.stateChanged(); // 撤销/重做收口：按钮态同步 + 重绘（与键盘分支共用）
                 });
         connect(m_toolbar, &ToolBar::saveRequested, this, [this]
                 {
@@ -221,11 +224,7 @@ namespace poptools
         m_cap = ScreenCapturer::capture();
 
         m_state = State::Selecting;
-        m_selection = QRect();
-        m_dblReselect = false; // 双击重画待吞 release 状态复位
-        m_smartRect = QRect(); // 智能框选高亮复位
-        m_smartPressPending = false; // 预高亮点选判定复位
-        m_smartPressRect = QRect();
+        resetSelectionSession(); // 选区会话公共复位（含双击重选标志，T-062 修复新增项）
         m_screenImage = QImage(); // 取色缓存失效（screen 画面已更新）
         m_basePixmap = QPixmap(); // R6-B1: 底图缓存失效（screen 画面已更新）
         m_lastColorCardRect = QRect(); // 取色卡片跟随局部重绘状态复位
@@ -256,14 +255,16 @@ namespace poptools
     void CaptureWindow::exitCapture()
     {
         m_state = State::Idle;
-        m_selection = QRect();
-        m_dblReselect = false; // 双击重画待吞 release 状态复位
-        m_smartRect = QRect(); // 智能框选高亮复位
-        m_smartPressPending = false; // 预高亮点选判定复位
-        m_smartPressRect = QRect();
+        resetSelectionSession(); // 选区会话公共复位（含双击重选标志，T-062 修复新增项）
         m_screenImage = QImage(); // 释放取色缓存
         m_basePixmap = QPixmap(); // R6-B1: 释放底图缓存（约 8-33MB，空闲期不留驻）
         m_ocrCtrl->releaseSessionResources(); // 释放 OCR 选区大图缓存（红线 5，与上面两处并列）
+        // T-062（R1 结构 12）：主画面同样空闲期不留驻。m_cap.screen 是全桌面物理
+        // 拼图（8-33MB 量级），与上面各缓存口径统一；隐藏期间所有 m_cap 消费点
+        // （paintEvent/取色/render/OCR 裁剪/马赛克底图）均在会话态内才可达，
+        // 下一轮 startCapture 首行重新赋值。captured() 携带的 QPixmap 与剪贴板
+        // 副本走 COW，源清空不影响已发布的结果图
+        m_cap = CaptureResult{};
         m_smartDetectTimer.stop(); // 停止智能框选检测
         m_ocrScanning = false; // 停止 OCR 扫描动效
         m_ocrScanTimer.stop();
@@ -274,6 +275,19 @@ namespace poptools
         m_textEditCtrl->detach(); // 文字编辑态清理（隐藏输入框）
         disarmExitConfirm();      // ESC 退出确认武装态与轻提示一并清理
         hide();
+    }
+
+    // 选区会话状态复位：startCapture（进入前）与 exitCapture（退出后）逐字段相同的
+    // 公共子集；两处各自特有的复位项（缓存失效/定时器停止等）不在此处
+    void CaptureWindow::resetSelectionSession()
+    {
+        m_selection = QRect();
+        m_dblReselect = false;       // 双击重画待吞 release 状态复位
+        m_reselecting = false;       // 双击重选"过小恢复"标志复位（T-062 修复新增）
+        m_reselectSaved = QRect();   // 重选暂存选区失效（T-062 修复新增）
+        m_smartRect = QRect();       // 智能框选高亮复位
+        m_smartPressPending = false; // 预高亮点选判定复位
+        m_smartPressRect = QRect();
     }
 
     void CaptureWindow::enterEditingState()
@@ -560,7 +574,11 @@ namespace poptools
 
     void CaptureWindow::mousePressEvent(QMouseEvent *event)
     {
-        // 武装态下点击鼠标（任意键）：解除退出确认，本次点击按原语义正常处理
+        // 武装态下点击鼠标（任意键）：解除退出确认，本次点击按原语义正常处理。
+        // 先快照解除前的武装态：下方右键"再按一次才退出"的判定必须用入口值——
+        // T-062 修复（R1 疑似BUG 2）：原先在解除后读 m_exitArmActive（恒 false），
+        // 武装态下无论再右键多少次都只是反复重新武装，永远无法退出
+        const bool wasArmed = m_exitArmActive;
         if (m_exitArmActive)
             disarmExitConfirm();
 
@@ -579,10 +597,7 @@ namespace poptools
             // 再按（含再右键）才退出，防误触一键清掉全部标注
             if (m_state == State::Editing && !m_selection.contains(pos) && hasInk())
             {
-                if (m_exitArmActive)
-                    cancel();
-                else
-                    armExitConfirm();
+                handleExitIntent(wasArmed);
                 return;
             }
             // 与左键一致：仅点击选区外退出（Selecting 态尚无选区，右键任意处退出）
@@ -689,7 +704,12 @@ namespace poptools
             // （新旧卡片矩形并集 + 阴影余量），原先每次移动全窗 update
             m_smartMousePos = pos;
             const QRect newCard = colorPickerCardRect(pos);
-            update(m_lastColorCardRect.united(newCard).adjusted(-4, -4, 6, 8));
+            // 阴影余量（R2 实测：两层阴影均只向左/右/下越出卡片——近层 左1/右1/下4，
+            // 远层 左3/右3/下12，顶部无越界）：左 4 / 上 4 为安全余量（上向纯冗余），
+            // 右 6 容右向 +3。T-062 修复（R2-F2）：下余量 8→13（12px 越界 + 1px 抗锯齿），
+            // 原值挡不住远层阴影下越界，卡片上移时旧阴影尾迹留 4px 淡残影带
+            //（既有重绘缺口，一并收口）
+            update(m_lastColorCardRect.united(newCard).adjusted(-4, -4, 6, 13));
             m_lastColorCardRect = newCard;
             return;
         }
@@ -774,18 +794,39 @@ namespace poptools
                     const QRect r = m_smartPressRect;
                     m_smartPressRect = QRect();
                     m_selection = r;
+                    m_reselecting = false; // 点选成功 = 重选完成（若本次处于重选路径）
+                    m_reselectSaved = QRect(); // R2-F1：成功即作废暂存（与失败分支对称）
                     enterEditingState();
                     return;
                 }
             }
             const QRect sel = m_selectionCtrl->finishSelect(event->globalPosition().toPoint());
-            m_selection = sel;
-            // 过小视为取消
+            // 过小视为取消。T-062 修复（R1 疑似BUG 6，行为变化）：双击重画路径
+            // （m_reselecting）带全部标注进入本出口，原先一次 <8px 的误拖会整场
+            // cancel 丢弃所有标注（首选拖选时无可丢失内容故合理）；现改为恢复
+            // 原选区编辑态（m_reselectSaved 为 beginSelect 覆写前的旧选区）。
+            // 首个框选路径语义不变：过小仍整场取消
             if (sel.width() < kMinSize || sel.height() < kMinSize)
             {
+                if (m_reselecting)
+                {
+                    m_reselecting = false;
+                    m_selection = m_reselectSaved; // 恢复原选区（finishSelect 结果不采纳）
+                    m_reselectSaved = QRect();
+                    m_state = State::Editing;
+                    m_selectionCtrl->cancelActive();
+                    positionToolbar();
+                    m_toolbar->show();
+                    update();
+                    return;
+                }
+                m_selection = sel;
                 cancel();
                 return;
             }
+            m_selection = sel;
+            m_reselecting = false;     // 重选成功完成（若本次处于重选路径）
+            m_reselectSaved = QRect(); // R2-F1：成功即作废暂存（与失败分支对称）
             enterEditingState();
             return;
         }
@@ -865,9 +906,14 @@ namespace poptools
             return;
         }
         // 双击选区外 → 重新开始框选（重画）。第二击的 release 稍后到达，
-        // 由 m_dblReselect 吞掉（否则 1px 退化矩形触发"过小视为取消"秒退）
+        // 由 m_dblReselect 吞掉（否则 1px 退化矩形触发"过小视为取消"秒退）。
+        // 注意 beginSelect 会立即用新框选矩形覆写 m_selection，旧选区须先暂存
+        // 到 m_reselectSaved：重选失败（过小释放，见 mouseReleaseEvent T-062 修复）
+        // 时据此恢复原选区编辑态；旧标注在重选期间仍在画布上，随编辑态一并恢复显示
         m_state = State::Selecting;
         m_dblReselect = true;
+        m_reselecting = true;          // T-062 修复（R1 疑似BUG 6）：标记重选路径
+        m_reselectSaved = m_selection; // 暂存旧选区（beginSelect 覆写前）
         m_toolbar->hide();
         m_ocrPanel->hide(); // 重选过程中旧 OCR 面板不再悬浮（R5-B1 附带：旧面板内容已过时）
         m_annotationEditor->clearSelection();
@@ -900,13 +946,11 @@ namespace poptools
                 return;
             }
             // 画布有墨迹（标注 / OCR 文字框）：首次 ESC 武装防误触，再次 ESC 才退出；
-            // 无墨迹时没有可丢失的内容，直接退出零摩擦
+            // 无墨迹时没有可丢失的内容，直接退出零摩擦。
+            // ESC 分支顶部只解除"非 ESC 键"的武装，此处 m_exitArmActive 即入口值
             if (hasInk())
             {
-                if (m_exitArmActive)
-                    cancel();
-                else
-                    armExitConfirm();
+                handleExitIntent(m_exitArmActive);
                 return;
             }
             cancel();
@@ -931,8 +975,7 @@ namespace poptools
                 && m_canvas.canUndo())
             {
                 m_canvas.undo();
-                m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-                update();
+                m_ctx.stateChanged(); // 与工具栏撤销槽同一收口：按钮态同步 + 重绘
             }
         }
         else if ((event->modifiers() & Qt::ControlModifier)
@@ -944,8 +987,7 @@ namespace poptools
                 && m_canvas.canRedo())
             {
                 m_canvas.redo();
-                m_toolbar->setUndoRedoEnabled(m_canvas.canUndo(), m_canvas.canRedo());
-                update();
+                m_ctx.stateChanged(); // 与工具栏重做槽同一收口：按钮态同步 + 重绘
             }
         }
         else if (event->key() == Qt::Key_C && event->modifiers() == Qt::NoModifier)
@@ -965,6 +1007,8 @@ namespace poptools
         }
     }
 
+    // 窗口尺寸变化 → 工具栏跟随重定位；截图窗几何由 startCapture 一次设定，
+    // 常规截图流程不触发（罕见于系统 DPI/重排事件）
     void CaptureWindow::resizeEvent(QResizeEvent *event)
     {
         QWidget::resizeEvent(event);
@@ -1049,6 +1093,16 @@ namespace poptools
             m_escToast->hide();
     }
 
+    // 武装退出判定：ESC 与右键选区外两条路径的共用出口（原先两处逐字重复）。
+    // wasArmed 语义见头文件声明——必须传事件入口处的武装态快照
+    void CaptureWindow::handleExitIntent(bool wasArmed)
+    {
+        if (wasArmed)
+            cancel();
+        else
+            armExitConfirm();
+    }
+
     void CaptureWindow::positionEscToast()
     {
         if (!m_escToast)
@@ -1088,8 +1142,7 @@ namespace poptools
     // 保证局部重绘算出的矩形与实际绘制完全一致
     QRect CaptureWindow::colorPickerCardRect(const QPoint &pos) const
     {
-        constexpr int kZoomW = 155, kZoomH = 105, kColorH = 50;
-        const QSize cardSize(kZoomW, kZoomH + kColorH);
+        const QSize cardSize(kZoomW, kZoomH + kColorH); // 几何常量见文件顶部（单一数据源）
 
         QPoint cardPos = pos - m_cap.desktop.topLeft() + QPoint(20, 20);
         if (cardPos.x() + cardSize.width() > width())
@@ -1124,7 +1177,6 @@ namespace poptools
 
         // 卡片几何（绘制与悬停局部重绘共用一套定位逻辑）
         const int kZoom = 5;
-        const int kZoomW = 155, kZoomH = 105, kColorH = 50;
         const QRect cardRect = colorPickerCardRect(pos);
 
         // 卡片阴影（双层近似高斯：近层实影 + 远层扩散），先于卡片内容绘制

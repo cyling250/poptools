@@ -47,9 +47,8 @@ public:
     OcrController(CaptureContext *ctx, RapidOcrService *ocr, OcrHostCallbacks host);
     ~OcrController() override;
 
-    bool busy() const { return m_ocr->busy(); }
-    bool available() const { return m_ocr->available(); }
-
+    // T-062 删除了零调用的 busy()/available() 直通接口（其还会在 m_ocr 为空时
+    // 解引用空指针）；忙/可用检查统一在 prepareAndRecognize 内做（含空防与提示）
     void request(QWidget *parent); // 检查状态 + 裁剪选区图像 + 启动识别
     void requestTranslate(QWidget *parent); // 识别并翻译：结果显示到文字栏面板（原始+翻译）
 

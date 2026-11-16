@@ -33,9 +33,10 @@ OcrController::~OcrController() = default;
 
 void OcrController::request(QWidget *parent)
 {
+    // 【文】模式无失败收口动作（失败提示由 prepareAndRecognize 自带），
+    // 返回值无需处理；【译】模式（requestTranslate）才有面板忙态收口
     m_translateMode = false;
-    if (!prepareAndRecognize(parent))
-        return;
+    prepareAndRecognize(parent);
 }
 
 void OcrController::requestTranslate(QWidget *parent)

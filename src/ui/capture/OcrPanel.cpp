@@ -46,7 +46,7 @@ OcrPanel::OcrPanel(QWidget *parent)
     m_closeBtn = new QPushButton(QStringLiteral("✕"), this);
     m_closeBtn->setObjectName("ocrCloseBtn");
     m_closeBtn->setFixedSize(20, 20);
-    m_closeBtn->setToolTip(QStringLiteral("关闭面板，清除翻译缓存"));
+    m_closeBtn->setToolTip(QStringLiteral("关闭面板"));
     headerRow->addWidget(m_closeBtn);
     layout->addLayout(headerRow);
 
@@ -127,14 +127,14 @@ OcrPanel::OcrPanel(QWidget *parent)
         });
     });
 
-    // 关闭按钮：隐藏面板 + 清除内容 + 通知外部清理翻译缓存
+    // 关闭按钮：隐藏面板 + 清除内容（无外部清理动作——原 closed() 信号零接收者，
+    // T-062 已删除）
     connect(m_closeBtn, &QPushButton::clicked, this, [this] {
         m_ocrText.clear();
         m_ocrEdit->clear();
         m_translateEdit->clear();
         m_copyBtn->setEnabled(false);
         hide();
-        emit closed();
     });
 
     // 全部子控件就绪后应用主题（内含对编辑框/下拉的调色板设置）

@@ -50,7 +50,9 @@ class CaptureWindow : public QWidget
 {
     Q_OBJECT
 public:
-    // ocrService：共享 OCR 引擎（应用级唯一，子进程昂贵）；为空时内部自建兜底实例
+    // ocrService：共享 OCR 引擎（应用级唯一，子进程昂贵），必须注入；
+    // 为空时 OCR 不可用并告警（调试期 Q_ASSERT 兜底——原先的"未注入则自建
+    // 兜底实例"已删除，见构造函数内注释）
     explicit CaptureWindow(RapidOcrService *ocrService = nullptr,
                            QWidget *parent = nullptr);
 
@@ -72,6 +74,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    // 窗口尺寸变化 → 工具栏跟随重定位；截图窗几何由 startCapture 一次设定，
+    // 常规截图流程不触发（声明与定义处注释同此义）
     void resizeEvent(QResizeEvent *event) override;
 
 private:
@@ -101,6 +105,12 @@ private:
     bool m_smartPressPending = false;
     QPoint m_smartPressPos;     // 按下点（拖动转框选时作为锚点）
     bool m_dblReselect = false; // 双击选区外重画：待吞掉的双击尾随 release（否则 1px 退化矩形触发秒退）
+    // T-062 修复（R1 疑似BUG 6）：双击重画的重选路径标志。beginSelect 会立即把
+    // m_selection 覆写为新框选矩形，重选失败（拖出过小选区释放）时无法从
+    // m_selection 恢复原选区——双击进入重选时把旧选区暂存 m_reselectSaved，
+    // 释放"过小视为取消"判定改为恢复原选区编辑态，避免已有标注随整场取消被丢弃
+    bool m_reselecting = false;  // 双击重画产生的重选进行中（首个框选路径恒为 false）
+    QRect m_reselectSaved;       // 重选前的原选区（重选失败恢复用；成功/复位后失效）
 
     // 取色放大卡片（Selecting 态）：screen 像素图像懒加载缓存
     mutable QImage m_screenImage;
@@ -140,10 +150,15 @@ private:
     void enterEditingState();  // 框选完成 → 编辑态（显示工具栏）
     void positionToolbar();    // 工具栏贴画布下方靠右
     void exitCapture();        // 离开截图模式（隐藏窗口 + 工具栏）
+    void resetSelectionSession(); // 选区会话状态复位（startCapture / exitCapture 共用的公共子集）
     void confirm();            // 确认截图（Enter / 双击）
     void cancel();             // 取消截图（Esc）
     void armExitConfirm();    // ESC 退出确认：进入武装态（显示轻提示 + 启动超时）
     void disarmExitConfirm(); // 解除武装（隐藏轻提示、停表）；超时/其他操作也走此路
+    // 武装退出判定（ESC / 右键选区外共用）：已武装 → 真正退出；未武装 → 进入武装态。
+    // wasArmed 必须传"本事件入口处"的武装态——mousePressEvent 顶部会先解除武装，
+    // 退出判定若读 m_exitArmActive 当前值则恒 false，"再按一次才退出"永不成立（T-062 修复）
+    void handleExitIntent(bool wasArmed);
     void positionEscToast();  // 轻提示定位：工具栏上缘居中（贴近窗口上缘转下方）
     void resetInteraction();   // 停止选区/标注的拖动缩放（文字编辑等入口）
     void showOcrPanel(const QString &text); // 面板模式：显示文字栏（OCR 文字）

@@ -23,8 +23,8 @@ namespace poptools {
 // 高亮规则：第一类工具互斥，点击高亮（蓝底白图标）进入编辑模式；
 // 再次点击当前高亮工具则取消（进入选择模式可拖动画布）。
 //
-// 信号语义：*Selected/*Requested 仅由用户操作触发；setTool/setWidth 等
-// 程序性同步只刷新显示、不回射信号（宿主同步画布宽度用 currentWidth()）。
+// 信号语义：*Selected/*Requested 仅由用户操作触发；setTool 等程序性同步
+// 只刷新显示、不回射信号（宿主同步画布宽度用 currentWidth()）。
 // ============================================================
 class ToolBar : public QWidget
 {
@@ -33,16 +33,12 @@ public:
     explicit ToolBar(QWidget *parent = nullptr);
     ~ToolBar() override;
 
-    // 单例模式：整个应用仅一个工具栏实例
-    // create() 由宿主窗口（CaptureWindow）首次创建并指定 parent；
-    // instance() 供其它模块获取（未创建时返回 nullptr）
+    // 单例模式：整个应用仅一个工具栏实例，由宿主窗口（CaptureWindow）经
+    // create() 首次创建并指定 parent（T-062 删除了零调用的 instance()/
+    // setColor/setWidth/setFilled 程序性同步入口，宿主只走信号 + 下方同步接口）
     static ToolBar *create(QWidget *parent);
-    static ToolBar *instance();
 
     void setTool(Tool t);                      // 同步外部工具状态（含 None 选择模式）
-    void setColor(const QColor &c);            // 同步外部颜色状态
-    void setWidth(qreal w);                    // 同步线宽
-    void setFilled(bool filled);               // 同步填充状态
     void setUndoRedoEnabled(bool undo, bool redo);
     void setFontSize(qreal pt);                // 字号栏显示统一字号（pt）
     void clearFontSize();                      // 字号栏置空（多字号混排，不显示）
