@@ -29,6 +29,8 @@ public:
     // baseDir = goody 目录（记忆存 baseDir/memory/longterm/）
     explicit MemoryStore(const QString &baseDir, QObject *parent = nullptr);
 
+    // 装载 index.json（正文缓存一并清空，防外部改动后陈旧）；文件缺失=
+    // 首次使用空记忆，条目缺 id 跳过
     void load();
 
     // 新增条目，返回 id；kind: fact（偏好事实）/ project（项目脉络）/ ref（外部引用）

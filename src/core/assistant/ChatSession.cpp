@@ -212,12 +212,21 @@ void ChatSession::save()
     m_saveTimer->stop(); // 显式落盘即清挂起的防抖（退出 flush 用）
     QDir().mkpath(QFileInfo(m_path).absolutePath());
     QSaveFile f(m_path);
-    if (!f.open(QIODevice::WriteOnly))
+    if (!f.open(QIODevice::WriteOnly)) {
+        // T-062 修复: 落盘失败原先完全静默（磁盘满/目录权限变化）——聊天
+        // 历史可能连续多轮未写盘而无任何痕迹，重启即丢。本会话是唯一
+        // "用户不可再生的对话数据"，open/commit 失败各补一条警告（只打
+        // 路径与错误串，不打消息内容）
+        qWarning("会话落盘失败（打开文件）：%s：%s", qUtf8Printable(m_path),
+                 qUtf8Printable(f.errorString()));
         return;
+    }
     QJsonArray sessions;
     for (const SessionData &s : m_sessions) {
         sessions.append(QJsonObject{{"id", s.id},
                                     {"title", s.title},
+                                    // 毫秒时间戳走 double：JSON number 53 位
+                                    // 精度内 1.7e12 无损（v1/v2 迁移口径不变）
                                     {"updatedAt", double(s.updatedAtMs)},
                                     {"messages", s.messages}});
     }
@@ -225,7 +234,8 @@ void ChatSession::save()
                            {"active", activeSessionId()},
                            {"sessions", sessions}};
     f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
-    f.commit();
+    if (!f.commit())
+        qWarning("会话落盘失败（提交）：%s", qUtf8Printable(m_path));
 }
 
 void ChatSession::saveSoon()

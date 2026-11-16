@@ -38,8 +38,8 @@ public:
     explicit McpStdioClient(const ServerConfig &cfg, QObject *parent = nullptr);
     ~McpStdioClient() override;
 
-    void start(); // 拉起子进程 + initialize 握手
-    void stop();
+    void start(); // 拉起子进程 + initialize 握手（幂等：进程在手即返回）
+    void stop();  // 停止：kill 子进程 + 在途请求统一按"MCP 已停止"失败回调
 
     bool ready() const { return m_ready; }
     QString serverName() const { return m_cfg.name; }
@@ -65,6 +65,10 @@ private:
     int m_nextId = 1;
     QHash<int, std::function<void(const QJsonObject &)>> m_pending;
     bool m_ready = false;
+    // 本次连接 initialize 握手是否完成：区分"握手未完成失败"（errorOccurred/
+    // finished 时补 stop 使 start 可重入，T-062 R2-F1）与"ready 后进程死亡"
+    // （维持基线不自动重启）；errorOccurred 分支会先复位 m_ready，故须独立标志
+    bool m_handshakeDone = false;
 };
 
 } // namespace poptools

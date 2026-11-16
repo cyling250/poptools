@@ -51,10 +51,16 @@ bool PermissionManager::shellCommandAllowed(const QJsonObject &args) const
     }
     if (cmd.contains(QLatin1String("$(")))
         return false;
+    // T-062 修复: 纯 startsWith 前缀匹配无词边界——白名单 "go" 会放行
+    // "gotrojan.exe"、"git status" 会放行 "git statusx"，与上方"白名单前缀
+    // 只对单条命令有意义"的防线意图相悖。命中后校验下一字符必须为空白或
+    // 串尾（大小写口径不变：startsWith 默认区分大小写）
     for (const QString &prefix : m_shellPrefixes) {
         const QString p = prefix.trimmed();
-        if (!p.isEmpty() && cmd.startsWith(p))
-            return true;
+        if (p.isEmpty() || !cmd.startsWith(p))
+            continue;
+        if (cmd.size() == p.size() || cmd.at(p.size()).isSpace())
+            return true; // 词边界：白名单前缀后必须是空白或命令结束
     }
     return false;
 }

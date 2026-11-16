@@ -142,6 +142,7 @@ void GoodyFloatingBall::mouseMoveEvent(QMouseEvent *event)
 {
     m_gesture.addMove(event->globalPosition().toPoint());
     if (m_gesture.dragging()) // 超阈值闩锁后才跟手，避免微动即拖
+                              //（未闩锁期间 addMove 只累计位移，松开仍判单击）
         move(event->globalPosition().toPoint() - m_winPressOffset);
     event->accept();
 }

@@ -45,15 +45,23 @@ void Scheduler::tick()
 {
     const QDate today = QDate::currentDate();
     const QTime now = QTime::currentTime();
-    for (auto it = m_jobs.begin(); it != m_jobs.end(); ++it) {
-        DailyJob &job = it.value();
+    // T-062 修复: 原先迭代 m_jobs 期间同步执行 job.fn()——fn 内任何一次
+    // setDailyTask 重注册（注释明示支持"重注册=改时刻/回调"）会 insert 进
+    // QHash，可能触发 rehash 使迭代器失效（UB）。当前内置 fn（processPending）
+    // 全程异步故未触发，但这是未来"用户自定义提醒"接入后的必然踩雷点。
+    // 改为先快照后执行：记账（lastRunDate=today）保留在第一循环内，"先记账
+    // 再执行"防连发语义不变
+    QList<std::function<void()>> due;
+    for (DailyJob &job : m_jobs) {
         if (job.lastRunDate == today)
             continue; // 今天已跑
         if (now < job.at)
             continue;
         job.lastRunDate = today; // 先记账再执行：回调抛异常/重入不会连发
-        job.fn();
+        due << job.fn;
     }
+    for (const std::function<void()> &fn : due)
+        fn();
 }
 
 } // namespace poptools

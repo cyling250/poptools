@@ -217,6 +217,8 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     appendWelcome();
 }
 
+// 构建左侧会话侧栏（新对话钮 + 条目列表；条目点击→sessionSwitchRequested，
+// 由模块守卫执行域切换）
 void GoodyWindow::buildSidebar()
 {
     m_sidebar = new QWidget(this);
@@ -251,6 +253,8 @@ void GoodyWindow::buildSidebar()
             });
 }
 
+// 构建右侧对话区（QScrollArea + 贴顶 stretch 的气泡流；valueChanged→贴底
+// 判定 m_atBottom）
 void GoodyWindow::buildChatPane()
 {
     m_scroll = new QScrollArea(this);
@@ -304,6 +308,60 @@ void GoodyWindow::onSessionDataChanged()
     }
 }
 
+// 单条侧栏行装配（T-062 抽取）：标题/元信息/删除钮 + P-023 双通道配色 +
+// 删除接线，原 refreshSessionList 内联块原样搬移
+QWidget *GoodyWindow::makeSessionRow(const ChatSession::SessionSummary &s,
+                                     const ThemeColors &c)
+{
+    auto *row = new QWidget;
+    row->setObjectName("goodySessionRow");
+    auto *rowLay = new QHBoxLayout(row);
+    rowLay->setContentsMargins(8, 4, 4, 4);
+    rowLay->setSpacing(4);
+    auto *col = new QVBoxLayout;
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(1);
+    auto *title = new QLabel(s.title.isEmpty() ? QStringLiteral("新对话") : s.title,
+                             row);
+    title->setObjectName("goodySessionTitle");
+    auto *meta = new QLabel(QStringLiteral("%1 · %2 条")
+                                .arg(formatSessionTime(s.updatedAtMs))
+                                .arg(s.messageCount),
+                            row);
+    meta->setObjectName("goodySessionMeta");
+    col->addWidget(title);
+    col->addWidget(meta);
+    rowLay->addLayout(col, 1);
+    auto *del = new QToolButton(row);
+    del->setObjectName("goodySessionDelBtn");
+    del->setText(QStringLiteral("✕"));
+    del->setToolTip(QStringLiteral("删除该会话"));
+    del->setProperty("sessionId", s.id);
+    rowLay->addWidget(del);
+    // P-023：行内关键颜色双通道——ID 选择器内联样式 + 调色板钉扎
+    row->setStyleSheet(QStringLiteral(
+        "QWidget#goodySessionRow { background: transparent; }"
+        "QLabel#goodySessionTitle { color: %1; font-size: 12px; }"
+        "QLabel#goodySessionMeta { color: %2; font-size: 10px; }"
+        "QToolButton#goodySessionDelBtn { color: %1; background: transparent;"
+        "  border: none; font-size: 11px; }").arg(c.body, c.sectionTitle));
+    const auto pinLabelPalette = [&](QLabel *l, const QColor &color) {
+        QPalette pal = l->palette();
+        const QBrush b{color};
+        for (const QPalette::ColorGroup group :
+             {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
+            pal.setBrush(group, QPalette::WindowText, b);
+        l->setPalette(pal);
+    };
+    pinLabelPalette(title, QColor(c.body));
+    pinLabelPalette(meta, QColor(c.sectionTitle));
+    const QString sid = s.id; // 结构化循环变量不可直接捕获，落为局部
+    connect(del, &QToolButton::clicked, this, [this, sid] {
+        emit sessionDeleteRequested(sid);
+    });
+    return row;
+}
+
 void GoodyWindow::refreshSessionList()
 {
     if (!m_session)
@@ -320,53 +378,7 @@ void GoodyWindow::refreshSessionList()
         auto *item = new QListWidgetItem(m_sessionList);
         item->setData(Qt::UserRole, s.id);
         item->setSizeHint(QSize(0, 44));
-        auto *row = new QWidget;
-        row->setObjectName("goodySessionRow");
-        auto *rowLay = new QHBoxLayout(row);
-        rowLay->setContentsMargins(8, 4, 4, 4);
-        rowLay->setSpacing(4);
-        auto *col = new QVBoxLayout;
-        col->setContentsMargins(0, 0, 0, 0);
-        col->setSpacing(1);
-        auto *title = new QLabel(s.title.isEmpty() ? QStringLiteral("新对话")
-                                                   : s.title,
-                                 row);
-        title->setObjectName("goodySessionTitle");
-        auto *meta = new QLabel(
-            QStringLiteral("%1 · %2 条")
-                .arg(formatSessionTime(s.updatedAtMs))
-                .arg(s.messageCount),
-            row);
-        meta->setObjectName("goodySessionMeta");
-        col->addWidget(title);
-        col->addWidget(meta);
-        rowLay->addLayout(col, 1);
-        auto *del = new QToolButton(row);
-        del->setObjectName("goodySessionDelBtn");
-        del->setText(QStringLiteral("✕"));
-        del->setToolTip(QStringLiteral("删除该会话"));
-        del->setProperty("sessionId", s.id);
-        rowLay->addWidget(del);
-        m_sessionList->setItemWidget(item, row);
-        // P-023：行内关键颜色双通道——ID 选择器内联样式 + 调色板钉扎
-        row->setStyleSheet(QStringLiteral(
-            "QWidget#goodySessionRow { background: transparent; }"
-            "QLabel#goodySessionTitle { color: %1; font-size: 12px; }"
-            "QLabel#goodySessionMeta { color: %2; font-size: 10px; }"
-            "QToolButton#goodySessionDelBtn { color: %1; background: transparent;"
-            "  border: none; font-size: 11px; }").arg(c.body, c.sectionTitle));
-        for (QLabel *l : {title, meta}) {
-            QPalette pal = l->palette();
-            const QBrush b{QColor(l == title ? c.body : c.sectionTitle)};
-            for (const QPalette::ColorGroup group :
-                 {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
-                pal.setBrush(group, QPalette::WindowText, b);
-            l->setPalette(pal);
-        }
-        const QString sid = s.id; // 结构化循环变量不可直接捕获，落为局部
-        connect(del, &QToolButton::clicked, this, [this, sid] {
-            emit sessionDeleteRequested(sid);
-        });
+        m_sessionList->setItemWidget(item, makeSessionRow(s, c));
         if (s.id == m_session->activeSessionId())
             m_sessionList->setCurrentItem(item);
     }
@@ -565,7 +577,7 @@ void GoodyWindow::appendAssistantDelta(const QString &delta)
     if (!m_streaming || !m_streamBubble || delta.isEmpty())
         return;
     const MarkdownRenderStep step = m_renderer.feed(delta, m_streamClock.elapsed());
-    if (step.finalize) { // 理论不会从 feed 产生，防御性兜底
+    if (step.finalize) { // 理论不会从 feed 产生，防御性兜底（feed 的 finalize 恒 false，唯一来源是 finish()）
         m_streamBubble->finalizeMarkdown(m_renderer.streamText(), step.endedInFence);
         return;
     }
@@ -636,6 +648,14 @@ void GoodyWindow::showErrorLine(const QString &text)
 void GoodyWindow::promptPermission(const QString &tool, const QString &argsSummary,
                                    const std::function<void(bool, bool)> &onDecide)
 {
+    // T-062 修复: 第二次 promptPermission 原先无条件覆盖 m_permCallback，
+    // 未决的第一份回调被静默丢弃——那个工具调用的回合链永久悬置（toolPhase
+    // 不再收束）。当前 GoodyModule::processNextToolCall 严格单飞（一次只
+    // 确认一个工具），本分支现网不可达，纯防御兜底：按拒绝语义收口旧回调
+    if (m_permCallback) {
+        m_permCallback(false, false);
+        m_permCallback = nullptr;
+    }
     m_permCallback = onDecide;
     m_permText->setText(QStringLiteral("Goody 请求执行 <b>%1</b><br>%2")
                             .arg(tool.toHtmlEscaped(), argsSummary.toHtmlEscaped()));
@@ -699,21 +719,16 @@ void GoodyWindow::setDraftInput(const QString &text)
 
 // ---- 滚动 ----
 
+// 仅在本就贴底时跟随。T-062: 与 scrollToBottomNow(false) 逐行为一致（不改
+// m_atBottom、同样排队贴底），原逐行实现合并为一行委托
 void GoodyWindow::scrollIfAtBottom()
 {
-    if (!m_atBottom)
-        return;
-    // 布局在事件循环里才刷新滚动范围：排队执行贴底（非常驻定时器）
-    QMetaObject::invokeMethod(
-        this,
-        [this] {
-            QScrollBar *sb = m_scroll->verticalScrollBar();
-            if (m_atBottom)
-                sb->setValue(sb->maximum());
-        },
-        Qt::QueuedConnection);
+    scrollToBottomNow(false);
 }
 
+// force=true 先置贴底标记再排队贴底（用户主动发送/错误行等"必须看见"场景）；
+// force=false 与 scrollIfAtBottom 同义。布局在事件循环里才刷新滚动范围：
+// 排队执行贴底（非常驻定时器）
 void GoodyWindow::scrollToBottomNow(bool force)
 {
     if (force)
@@ -809,9 +824,13 @@ bool GoodyWindow::eventFilter(QObject *watched, QEvent *event)
 
 // ---- 主题（P-022 ID 选择器 + P-023 双通道） ----
 
-void GoodyWindow::applyTheme()
+// T-062 拆分说明：applyTheme 原为约 130 行巨型函数（窗口 QSS/控件内联样式/
+// 调色板钉扎/气泡重抛/侧栏重建七段），拆为 applyWindowQss + applyControlPalettes
+// 两个纯搬移 helper，主干只留编排顺序（纯函数分解，调用顺序不变）
+
+// 窗口级 QSS：只保留布局类声明（P-022 一律 ID 选择器；颜色取 ThemeColors）
+void GoodyWindow::applyWindowQss(const ThemeColors &c)
 {
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
     // R6-B3/P-023：关键颜色双通道——① 控件内联样式（颜色取 ThemeColors）
     // ② Active/Inactive/Disabled 三组调色板钉扎；窗口级样式表只保留布局
     // 类声明。P-022：QSS 一律 ID 选择器
@@ -850,8 +869,11 @@ void GoodyWindow::applyTheme()
         "QWidget#goodyGrip { background: transparent; }")
         .arg(c.cardBg, c.editBorder, c.title, c.ctrlHover, c.accent,
              c.accentHover, c.ctrlBg, c.cardBg));
+}
 
-    // 通道一（内联样式）+ 通道二（调色板钉扎）
+// 通道一（控件内联样式）+ 通道二（Active/Inactive/Disabled 三组调色板钉扎）
+void GoodyWindow::applyControlPalettes(const ThemeColors &c)
+{
     m_input->setStyleSheet(QStringLiteral(
         "QPlainTextEdit#goodyInput { color: %1; background: %2;"
         "  border: 1px solid %3; border-radius: 8px; padding: 6px; font-size: 13px; }"
@@ -934,6 +956,13 @@ void GoodyWindow::applyTheme()
         }
         m_sessionList->setPalette(pal);
     }
+}
+
+void GoodyWindow::applyTheme()
+{
+    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    applyWindowQss(c);
+    applyControlPalettes(c);
 
     for (MessageBubble *b : m_bubbles)
         b->applyTheme(c); // 气泡自带双通道（含代码高亮配色跟随）

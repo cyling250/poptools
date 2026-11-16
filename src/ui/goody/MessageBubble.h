@@ -3,6 +3,9 @@
 #include <QFrame>
 #include <QTextBrowser>
 
+#include <initializer_list>
+#include <utility>
+
 #include "ui/ThemeColors.h"
 
 class QLabel;
@@ -84,7 +87,6 @@ public:
 
     // 元数据与状态
     Role role() const { return m_role; }
-    void setStreaming(bool on);
     void setRegenerateVisible(bool on); // 仅最后一条 assistant 气泡为 true
     void setMaxContentWidth(int paneWidth); // 窗口缩放时重设宽度约束
     void applyTheme(const ThemeColors &c);
@@ -103,6 +105,10 @@ private:
     void buildUser();
     void buildAssistant();
     void buildSystem();
+    // 悬浮工具条构建样板（T-062 抽取，user/assistant 共用）：QFrame overlay +
+    // 文本按钮 + clicked→actionRequested 接线；buttons 为 {成员指针落点, 动作
+    // 枚举} 表，文案由调用方在返回后补齐
+    QFrame *makeToolbar(std::initializer_list<std::pair<QToolButton **, int>> buttons);
     void updateToolbar();
     void positionToolbar();
     void updateReasoningHeader();

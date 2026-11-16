@@ -136,7 +136,10 @@ bool LlmClient::chat(const QString &baseUrl, const QString &apiKey, const QStrin
     // 流式响应持续吐 token，90s 无数据视为断流（含首 token 冷启动余量）
     req.setTransferTimeout(90 * 1000);
 
+    // 整体重置解析器：上一轮残留的半行缓冲/tool 聚合/reasoning pending
+    // 不得泄入本轮（单飞正确性的关键前置）
     m_parser = LlmStreamParser{};
+    m_userAborted = false; // T-062 修复: 新回合复位中止标志（上轮 abort 不得污染本轮归因）
     m_reply = m_nam.post(req, buildChatRequestBody(model, messages, tools, true));
 
     connect(m_reply, &QNetworkReply::readyRead, this, [this] {
@@ -160,10 +163,16 @@ bool LlmClient::chat(const QString &baseUrl, const QString &apiKey, const QStrin
 
 void LlmClient::abort()
 {
+    // T-062 修复: 置位用户中止标志再 abort——90s 传输超时同样产生
+    // OperationCanceledError，无标志则断流会被误归因为"已中止"
+    m_userAborted = true;
     if (m_reply)
         m_reply->abort(); // finished 随之触发统一收尾
 }
 
+// 单飞收尾：reply 脱钩 + deleteLater，三分支归一——流内业务错(error:*)/
+// 网络错(带响应体摘要 1KB)/用户中止(交回部分内容保持上下文)，正常结束
+// 交完整助手消息。finished 恒发一次
 void LlmClient::cleanupReply()
 {
     QNetworkReply *reply = m_reply;
@@ -174,7 +183,11 @@ void LlmClient::cleanupReply()
 
     const int httpStatus =
         reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const bool aborted = reply->error() == QNetworkReply::OperationCanceledError;
+    // T-062 修复: 归因改为"用户中止标志 + 取消错误码"双条件——纯错误码
+    // 分不清用户 abort() 与 90s 传输超时（两者同为 OperationCanceledError），
+    // 断流曾因此被误报"已中止"。超时现落入下方网络错分支，报出真实错误
+    const bool aborted =
+        m_userAborted && reply->error() == QNetworkReply::OperationCanceledError;
     const bool streamDone = m_parser.done();
     const QString streamErr = m_parser.finishReason();
     if (streamErr.startsWith(QLatin1String("error:"))) {

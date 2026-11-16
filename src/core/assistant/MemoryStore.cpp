@@ -13,12 +13,44 @@
 
 namespace poptools {
 
+namespace {
+
+// index.json 原子重写（QSaveFile）；供 addEntry/removeEntry/search(touch)
+// 共用。T-062: 挪进匿名 namespace——原先 namespace poptools 内的自由函数
+// 具有外部链接，与其他翻译单元同名函数存在潜在撞名面（调用点全在本文件）
+void saveIndex(const QString &dir, const QList<MemoryStore::EntryMeta> &entries)
+{
+    QDir().mkpath(dir);
+    QJsonArray arr;
+    for (const MemoryStore::EntryMeta &m : entries) {
+        QJsonArray tags;
+        for (const QString &t : m.tags)
+            tags.append(t);
+        arr.append(QJsonObject{{"id", m.id},
+                               {"kind", m.kind},
+                               {"tags", tags},
+                               {"created", double(m.created)},
+                               {"lastHit", double(m.lastHit)},
+                               {"hits", m.hits}});
+    }
+    QSaveFile f(dir + QStringLiteral("/index.json"));
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(QJsonObject{{"version", 1}, {"entries", arr}})
+                    .toJson(QJsonDocument::Compact));
+        f.commit();
+    }
+}
+
+} // namespace
+
 MemoryStore::MemoryStore(const QString &baseDir, QObject *parent)
     : QObject(parent)
     , m_dir(baseDir + QStringLiteral("/memory/longterm"))
 {
 }
 
+// 装载 index.json（正文缓存一并清空，防外部改动后陈旧）；文件缺失=首次
+// 使用空记忆，条目缺 id 跳过
 void MemoryStore::load()
 {
     m_entries.clear();
@@ -43,32 +75,17 @@ void MemoryStore::load()
     }
 }
 
-void saveIndex(const QString &dir, const QList<MemoryStore::EntryMeta> &entries)
-{
-    QDir().mkpath(dir);
-    QJsonArray arr;
-    for (const MemoryStore::EntryMeta &m : entries) {
-        QJsonArray tags;
-        for (const QString &t : m.tags)
-            tags.append(t);
-        arr.append(QJsonObject{{"id", m.id},
-                               {"kind", m.kind},
-                               {"tags", tags},
-                               {"created", double(m.created)},
-                               {"lastHit", double(m.lastHit)},
-                               {"hits", m.hits}});
-    }
-    QSaveFile f(dir + QStringLiteral("/index.json"));
-    if (f.open(QIODevice::WriteOnly)) {
-        f.write(QJsonDocument(QJsonObject{{"version", 1}, {"entries", arr}})
-                    .toJson(QJsonDocument::Compact));
-        f.commit();
-    }
-}
-
 QString MemoryStore::makeId()
 {
-    return QStringLiteral("mem_%1").arg(QDateTime::currentMSecsSinceEpoch() % 100000000, 8, 16, QLatin1Char('0'));
+    // T-062 修复: 纯毫秒低 8 位十六进制在同毫秒两次创建（模型一条消息携带
+    // 多个并行 tool_calls 时逐个同步执行）会撞号——第二条 Markdown 正文
+    // 覆盖第一条、索引双条目共用 id（removeEntry 只删一个、search 串台）。
+    // 追加进程内自增序号后缀保证唯一；新 id 仍只含十六进制字符，entryPath
+    // 白名单（字母数字下划线）与旧条目可读性均不变
+    static quint32 s_seq = 0;
+    return QStringLiteral("mem_%1%2")
+        .arg(QDateTime::currentMSecsSinceEpoch() % 100000000, 8, 16, QLatin1Char('0'))
+        .arg(++s_seq, 2, 16, QLatin1Char('0'));
 }
 
 QString MemoryStore::addEntry(const QString &kind, const QStringList &tags,
@@ -163,7 +180,9 @@ QList<MemoryStore::SearchHit> MemoryStore::search(const QString &query)
             continue;
         if (content.isEmpty())
             content = entryContent(m.id);
-        // touch：命中统计（引用层叠的"热度"）
+        // touch：命中统计（引用层叠的"热度"）。O(n²) 直改命中项的 hits/
+        // lastHit——n=条目总数（十级），不改写算法，只注明代价上限
+        //（后续维护者勿误判为热路径）
         for (EntryMeta &e : m_entries) {
             if (e.id == m.id) {
                 ++e.hits;
@@ -181,6 +200,7 @@ QList<MemoryStore::SearchHit> MemoryStore::search(const QString &query)
     return hits;
 }
 
+// 删条目：正文文件 + 索引项 + 正文缓存三处同步；id 不存在返回 false
 bool MemoryStore::removeEntry(const QString &id)
 {
     for (int i = 0; i < m_entries.size(); ++i) {

@@ -46,6 +46,9 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
                                        const std::function<void(bool, QString)> &done)
 {
     const QPointer<QObject> anchor(ctx);
+    // 注：池线程里读 QPointer（下方 if (anchor)）与 GUI 线程析构存在极窄
+    // 竞争窗口——前提是锚点为模块级长命对象（GoodyModule 与进程同寿）；
+    // 保持现状，注释到位防误改（对齐 FsTool/MonitorQueryTool 口径）
     QThreadPool::globalInstance()->start([dayDir, maxChars, anchor, done] {
         // ---- timeline.jsonl：合并相邻同窗段 ----
         struct Row
@@ -119,7 +122,9 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
         {
             QString app;
             QStringList previews;
-            qint64 totalChars = 0;
+            // T-062: 删死字段 totalChars——输出格式只用 previews.size() 与
+            // join 后文本，无任何读点（与 TextGroup::totalChars 区分，后者
+            // groupExcerpt 真正使用）
         };
         QVector<ClipGroup> clipGroups;
         {
@@ -141,13 +146,10 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
                     if (!clipGroups.isEmpty() && clipGroups.last().app == app)
                         clipGroups.last().previews << preview;
                     else
-                        clipGroups.append(ClipGroup{app, QStringList{preview}, 0});
+                        clipGroups.append(ClipGroup{app, QStringList{preview}});
                     if (clipGroups.size() > 200)
                         break;
                 }
-                for (ClipGroup &g : clipGroups)
-                    for (const QString &p : g.previews)
-                        g.totalChars += p.size();
             }
         }
 

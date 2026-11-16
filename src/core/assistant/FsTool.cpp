@@ -91,6 +91,10 @@ QList<ToolDef> makeFsTools(QObject *ctx)
             // QFileInfo 取属性，之后只迭代文件名计数不 stat；entries/total/
             // note 响应字段形状不变（代价：条目顺序由名称排序变为目录序）
             const QPointer<QObject> anchor(ctx);
+            // 注：池线程里读 QPointer（if (anchor)）与 GUI 线程析构存在极窄
+            // 竞争窗口——前提是锚点为模块级长命对象（GoodyModule 与进程同寿，
+            // 析构只在退出瞬间）；invokeMethod 排队后对象若亡，事件投递被 Qt
+            // 安全丢弃。保持现状，注释到位防误改
             QThreadPool::globalInstance()->start([path, anchor, done] {
                 QDir dir(path);
                 if (!dir.exists()) {
@@ -202,6 +206,7 @@ QList<ToolDef> makeFsTools(QObject *ctx)
                                   QStringLiteral("目标是目录，无法作为文件写入：%1").arg(path)}});
                 return;
             }
+            // 写前确保父目录存在（LLM 常直接给深层新路径）；append 分支同样受益
             QDir().mkpath(QFileInfo(path).absolutePath());
             if (append) {
                 QFile f(path);
@@ -214,16 +219,18 @@ QList<ToolDef> makeFsTools(QObject *ctx)
                 done(QJsonObject{{"ok", n >= 0}, {"bytes", double(n)}});
                 return;
             }
+            // T-062: 一次编码复用——原先 write 与 bytes 计数各调一次 toUtf8
+            const QByteArray payload = content.toUtf8();
             QSaveFile f(path); // 原子写：不会出现半截文件
             if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
                 done(QJsonObject{{"ok", false},
                                  {"error", QStringLiteral("无法写入：%1").arg(path)}});
                 return;
             }
-            f.write(content.toUtf8());
+            f.write(payload);
             const bool ok = f.commit();
             done(QJsonObject{{"ok", ok},
-                             {"bytes", double(content.toUtf8().size())},
+                             {"bytes", double(payload.size())},
                              {"error", ok ? QString() : QStringLiteral("提交失败（目录不可写？）")}});
         };
         tools << d;

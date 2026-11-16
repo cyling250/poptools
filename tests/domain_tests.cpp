@@ -1371,6 +1371,23 @@ private slots:
                                    QJsonObject{{"command", cmd}})),
                      int(PermissionManager::Decision::Confirm));
         }
+
+        // T-062 修复回归：词边界——短白名单（"go"）不得命中不同可执行文件
+        //（旧实现纯 startsWith 时 "go" 会放行 "gotrojan.exe"）；大小写口径
+        // 不变（startsWith 默认区分大小写，"GO x" 不命中）
+        pm.setShellAllowPrefixes(QStringList{QStringLiteral("go")});
+        QCOMPARE(int(pm.decide(QStringLiteral("shell.run"),
+                               QJsonObject{{"command", QStringLiteral("gotrojan.exe --silent")}})),
+                 int(PermissionManager::Decision::Confirm));
+        QCOMPARE(int(pm.decide(QStringLiteral("shell.run"),
+                               QJsonObject{{"command", QStringLiteral("gox --evil")}})),
+                 int(PermissionManager::Decision::Confirm));
+        QCOMPARE(int(pm.decide(QStringLiteral("shell.run"),
+                               QJsonObject{{"command", QStringLiteral("go build ./...")}})),
+                 int(PermissionManager::Decision::Allow));
+        QCOMPARE(int(pm.decide(QStringLiteral("shell.run"),
+                               QJsonObject{{"command", QStringLiteral("go")}})),
+                 int(PermissionManager::Decision::Allow)); // 前缀即整条命令（串尾边界）
     }
 
     // ---- Scheduler 回归：重注册（设置页改总结时刻）保留当天已跑记账，

@@ -337,9 +337,10 @@ void GoodyModule::setupMcp()
 // 为空，本函数零开销（维持现状）
 void GoodyModule::ensureMcpStarted()
 {
-    if (m_mcpStarted)
-        return;
-    m_mcpStarted = true;
+    // T-062 修复: 原先 m_mcpStarted 一次性置位——McpStdioClient 握手超时
+    // stop 后永无重试机会（MCP 永久哑火）。start() 自身幂等（进程在手即
+    // 返回），此处每次 openChat 都过一遍：运行中/已就绪的 client 零开销，
+    // 仅握手失败被 stop 的 client 获得重试
     for (McpStdioClient *client : m_mcpClients)
         client->start();
 }
@@ -649,8 +650,13 @@ void GoodyModule::runTurn()
     const bool ok = m_client->chat(s.assistantApiBaseUrl(), s.assistantApiKey(),
                                    s.assistantApiModel(), m_session->messages(),
                                    m_registry->toolSchemasForApi());
-    if (!ok)
-        m_window->setBusy(false); // busy 状态下不会发生，防御性复位
+    if (!ok) {
+        // busy 状态下不会发生，防御性复位。T-062 修复: 原先只复位 busy 灯，
+        // 漏收口 beginAssistantBubble 开出的流式气泡——m_streaming 悬挂 true
+        //（finishAssistantBubble 幂等，空文本即收口不画空壳）
+        m_window->setBusy(false);
+        m_window->finishAssistantBubble(QString(), QString());
+    }
     updateWorkingState(); // T-050：请求在途 → 呼吸光效起
 }
 

@@ -61,6 +61,10 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
         const int maxLines = qBound(1, args.value(QStringLiteral("max_lines")).toInt(200), 500);
 
         const QPointer<QObject> anchor(ctx);
+        // 注：池线程里读 QPointer（if (anchor)）与 GUI 线程析构存在极窄竞争
+        // 窗口——前提是锚点为模块级长命对象（GoodyModule 与进程同寿），
+        // 析构只在退出瞬间；取裸指针前移交由 invokeMethod 排队，保持现状
+        // 防误改（对齐 FsTool 口径）
         QThreadPool::globalInstance()->start(
             [monitorBaseDir, dateArg, streams, maxLines, anchor, done] {
                 QJsonObject result{{"ok", true}, {"date", dateArg}};
@@ -83,9 +87,13 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
                                                     {"truncated", truncated}});
                 }
                 result.insert(QStringLiteral("streams"), perStream);
-                // 回主线程交付（done 背后是模块的会话续跑逻辑）
-                QMetaObject::invokeMethod(
-                    anchor, [done, result] { done(result); }, Qt::QueuedConnection);
+                // 回主线程交付（done 背后是模块的会话续跑逻辑）。
+                // T-062 修复: 补锚点守卫对齐 FsTool——ctx 为空（单测直调）或
+                // 锚点已亡时，对空对象 invokeMethod 走告警路径且 done 永不执行
+                if (anchor)
+                    QMetaObject::invokeMethod(
+                        anchor.data(), [done, result] { done(result); },
+                        Qt::QueuedConnection);
             });
     };
     return d;

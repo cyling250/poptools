@@ -33,16 +33,7 @@ void ToolRegistry::invoke(const QString &name, const QJsonObject &args,
 
 QJsonArray ToolRegistry::toolSchemas() const
 {
-    QJsonArray arr;
-    for (auto it = m_tools.cbegin(); it != m_tools.cend(); ++it) {
-        arr.append(QJsonObject{
-            {"type", QStringLiteral("function")},
-            {"function", QJsonObject{{"name", it->name},
-                                     {"description", it->description},
-                                     {"parameters", it->parameters}}},
-        });
-    }
-    return arr;
+    return schemas(false);
 }
 
 QString ToolRegistry::toApiName(const QString &internalName)
@@ -67,11 +58,19 @@ QString ToolRegistry::fromApiName(const QString &apiName) const
 
 QJsonArray ToolRegistry::toolSchemasForApi() const
 {
+    return schemas(true);
+}
+
+// schema 装配主体（T-062: toolSchemas/toolSchemasForApi 双胞胎去重）——同一
+// 循环体仅 name 取值分支（apiName=true 走点分名→API 名转写），其余字段一致；
+// 公开方法各自一行委托，返回内容逐字段不变
+QJsonArray ToolRegistry::schemas(bool apiName) const
+{
     QJsonArray arr;
     for (auto it = m_tools.cbegin(); it != m_tools.cend(); ++it) {
         arr.append(QJsonObject{
             {"type", QStringLiteral("function")},
-            {"function", QJsonObject{{"name", toApiName(it->name)},
+            {"function", QJsonObject{{"name", apiName ? toApiName(it->name) : it->name},
                                      {"description", it->description},
                                      {"parameters", it->parameters}}},
         });

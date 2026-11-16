@@ -61,7 +61,7 @@ private:
     void openChat();
     void registerBuiltinTools();
     void setupMcp();              // mcp.json 配置装载 + 工具桥接（P6；不 start，R6-C2）
-    void ensureMcpStarted();      // MCP 子进程懒启动（首次打开聊天窗，幂等；R6-C2）
+    void ensureMcpStarted();      // MCP 子进程懒启动（每次 openChat 重入，start 幂等；R6-C2）
     void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
     void updateWorkingState();   // T-050：busy||toolPhase → workingChanged 去重广播
     void sendMessage(const QString &text);
@@ -93,8 +93,9 @@ private:
     Scheduler *m_scheduler = nullptr;      // 每日到点调度（P4）
     MemoryStore *m_memory = nullptr;       // 长期记忆（P5）
     WorkingMemory *m_work = nullptr;       // 瞬时工作记忆（P5）
-    QList<McpStdioClient *> m_mcpClients;  // MCP 服务器连接（P6）
-    bool m_mcpStarted = false;             // MCP 子进程是否已懒启动（R6-C2）
+    QList<McpStdioClient *> m_mcpClients;  // MCP 服务器连接（P6；start 幂等，
+                                           // ensureMcpStarted 每次 openChat 重入，
+                                           // 握手超时的 client 借此获得重试）
 
     QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
     // 单次用户消息的工具回合计数（防失控循环）。复位点：sendMessage 发起新

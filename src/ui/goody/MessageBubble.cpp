@@ -27,7 +27,9 @@
 namespace poptools {
 
 namespace {
-constexpr int kStreamTickIntervalMs = 1200; // 代码复制按钮"已复制"反馈复位
+constexpr int kCopiedResetMs = 1200; // 代码复制按钮"已复制"反馈复位时长
+                                     //（T-062 改名：原名 kStreamTickIntervalMs
+                                     // 是旧流式实现的历史遗留，名不副实）
 
 // 打字光标（流式期间缀在正文末尾，定稿时随 setMarkdown 一并消失）
 const QString kCaret = QStringLiteral("▍");
@@ -93,6 +95,7 @@ MessageBubble::MessageBubble(Role role, QWidget *parent)
     }
 }
 
+// user：右对齐贴纸 QLabel + hover 工具条（复制/编辑重发/删除）
 void MessageBubble::buildUser()
 {
     setObjectName("goodyBubbleUser");
@@ -107,34 +110,13 @@ void MessageBubble::buildUser()
     m_userText->setContentsMargins(10, 7, 10, 7);
     m_lay->addWidget(m_userText);
 
-    // 悬浮工具条（overlay）
-    m_toolbar = new QFrame(this);
-    m_toolbar->setObjectName("goodyBubbleToolbar");
-    auto *tbLay = new QHBoxLayout(m_toolbar);
-    tbLay->setContentsMargins(3, 2, 3, 2);
-    tbLay->setSpacing(2);
-    m_btnCopy = new QToolButton(m_toolbar);
-    m_btnEdit = new QToolButton(m_toolbar);
-    m_btnDelete = new QToolButton(m_toolbar);
-    for (QToolButton *b : {m_btnCopy, m_btnEdit, m_btnDelete}) {
-        b->setObjectName("goodyBubbleActBtn");
-        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        tbLay->addWidget(b);
-    }
+    // 悬浮工具条（overlay，构建样板与 assistant 共用，见 makeToolbar）
+    makeToolbar({{&m_btnCopy, int(BubbleCopy)},
+                 {&m_btnEdit, int(BubbleEditResend)},
+                 {&m_btnDelete, int(BubbleDelete)}});
     m_btnCopy->setText(QStringLiteral("复制"));
     m_btnEdit->setText(QStringLiteral("编辑重发"));
     m_btnDelete->setText(QStringLiteral("删除"));
-    m_toolbar->hide();
-
-    connect(m_btnCopy, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleCopy));
-    });
-    connect(m_btnEdit, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleEditResend));
-    });
-    connect(m_btnDelete, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleDelete));
-    });
 
     // hover 追踪：给自身与全部后代装 Enter/Leave 计数（离开到子控件不误判）
     installEventFilter(this);
@@ -142,6 +124,8 @@ void MessageBubble::buildUser()
         w->installEventFilter(this);
 }
 
+// assistant：思考折叠区 + AutoHeightBrowser 正文 + 代码复制钮 + hover 工具条
+//（复制/重新生成/删除）+ 围栏块语法高亮器
 void MessageBubble::buildAssistant()
 {
     setObjectName("goodyBubbleAssistant");
@@ -198,40 +182,20 @@ void MessageBubble::buildAssistant()
     m_body->viewport()->setMouseTracking(true); // 无按键也要 MouseMove
     m_body->viewport()->installEventFilter(this);
 
-    // ---- 悬浮工具条（overlay） ----
-    m_toolbar = new QFrame(this);
-    m_toolbar->setObjectName("goodyBubbleToolbar");
-    auto *tbLay = new QHBoxLayout(m_toolbar);
-    tbLay->setContentsMargins(3, 2, 3, 2);
-    tbLay->setSpacing(2);
-    m_btnCopy = new QToolButton(m_toolbar);
-    m_btnRegen = new QToolButton(m_toolbar);
-    m_btnDelete = new QToolButton(m_toolbar);
-    for (QToolButton *b : {m_btnCopy, m_btnRegen, m_btnDelete}) {
-        b->setObjectName("goodyBubbleActBtn");
-        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        tbLay->addWidget(b);
-    }
+    // ---- 悬浮工具条（overlay，构建样板与 user 共用，见 makeToolbar） ----
+    makeToolbar({{&m_btnCopy, int(BubbleCopy)},
+                 {&m_btnRegen, int(BubbleRegenerate)},
+                 {&m_btnDelete, int(BubbleDelete)}});
     m_btnCopy->setText(QStringLiteral("复制"));
     m_btnRegen->setText(QStringLiteral("重新生成"));
     m_btnDelete->setText(QStringLiteral("删除"));
-    m_toolbar->hide();
-
-    connect(m_btnCopy, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleCopy));
-    });
-    connect(m_btnRegen, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleRegenerate));
-    });
-    connect(m_btnDelete, &QToolButton::clicked, this, [this] {
-        emit actionRequested(int(BubbleDelete));
-    });
 
     installEventFilter(this);
     for (QWidget *w : findChildren<QWidget *>())
         w->installEventFilter(this);
 }
 
+// system：单行 QLabel 提示行（welcome/工具行/错误行）
 void MessageBubble::buildSystem()
 {
     setObjectName("goodyBubbleSystem");
@@ -242,6 +206,31 @@ void MessageBubble::buildSystem()
     m_systemText->setWordWrap(true);
     m_systemText->setContentsMargins(6, 1, 6, 1);
     m_lay->addWidget(m_systemText);
+}
+
+// 悬浮工具条构建样板（T-062 抽取）：QFrame overlay + 文本按钮 + clicked→
+// actionRequested 接线。原 buildUser/buildAssistant 两段约 30 行的逐行重复
+// 构建合并于此；构建顺序、父子关系、objectName、connect 目标均与原实现一致
+QFrame *MessageBubble::makeToolbar(std::initializer_list<std::pair<QToolButton **, int>> buttons)
+{
+    m_toolbar = new QFrame(this);
+    m_toolbar->setObjectName("goodyBubbleToolbar");
+    auto *tbLay = new QHBoxLayout(m_toolbar);
+    tbLay->setContentsMargins(3, 2, 3, 2);
+    tbLay->setSpacing(2);
+    for (const auto &spec : buttons) {
+        auto *b = new QToolButton(m_toolbar);
+        b->setObjectName("goodyBubbleActBtn");
+        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        tbLay->addWidget(b);
+        *spec.first = b;
+        const int action = spec.second;
+        connect(b, &QToolButton::clicked, this, [this, action] {
+            emit actionRequested(action);
+        });
+    }
+    m_toolbar->hide();
+    return m_toolbar;
 }
 
 // ---- 内容 ----
@@ -346,12 +335,6 @@ void MessageBubble::updateReasoningHeader()
 }
 
 // ---- 状态 ----
-
-void MessageBubble::setStreaming(bool on)
-{
-    m_streaming = on;
-    updateToolbar();
-}
 
 void MessageBubble::setRegenerateVisible(bool on)
 {
@@ -499,11 +482,17 @@ bool MessageBubble::errorLine() const
 
 void MessageBubble::updateToolbar()
 {
+    // System 角色无工具条（m_toolbar 仅 buildUser/buildAssistant 创建）：
+    // 流式/定稿路径只在 assistant 气泡上调本函数，此处守卫兜底空指针
+    //（T-062 修复: 原 setStreaming 公开入口已删，防御对齐 positionToolbar）
+    if (!m_toolbar)
+        return;
     // 流式气泡不露工具条（重新生成/删除在回合中途不可用）
     m_toolbar->setVisible(m_hoverCount > 0 && !m_streaming);
     positionToolbar();
 }
 
+// 工具条 overlay 定位：气泡右上角内缩 6px，置顶防被正文盖住
 void MessageBubble::positionToolbar()
 {
     if (!m_toolbar)
@@ -597,7 +586,7 @@ void MessageBubble::copyCodeBlockUnder(const QTextBlock &block)
     QGuiApplication::clipboard()->setText(lines.join(QLatin1Char('\n')));
     if (m_codeCopyBtn) {
         m_codeCopyBtn->setText(QStringLiteral("✓ 已复制"));
-        QTimer::singleShot(kStreamTickIntervalMs, this, [this] {
+        QTimer::singleShot(kCopiedResetMs, this, [this] {
             if (m_codeCopyBtn)
                 m_codeCopyBtn->setText(QStringLiteral("复制"));
         });

@@ -6,6 +6,8 @@
 #include <functional>
 
 #include "MarkdownRenderer.h"
+#include "ui/ThemeColors.h"
+#include "core/assistant/ChatSession.h" // SessionSummary（makeSessionRow 参数）
 
 class QLabel;
 class QListWidget;
@@ -111,16 +113,25 @@ private:
     void appendWelcome();              // 空会话欢迎提示行
     int bubbleMessageIndex(MessageBubble *target) const; // 气泡→会话消息下标
     void refreshSessionList();         // 侧栏重建（流式期间推迟）
+    QWidget *makeSessionRow(const ChatSession::SessionSummary &s,
+                            const ThemeColors &c); // 单条侧栏行装配（T-062 抽取）
     void markRegenerateOnLast();       // 仅最后一条 assistant 气泡显示"重新生成"
     void updateMaxWidths();            // 窗口缩放 → 气泡宽度上限
-    void scrollIfAtBottom();           // 仅在本就贴底时跟随
-    void scrollToBottomNow(bool force);
+    void scrollIfAtBottom();           // 仅在本就贴底时跟随（force=false 委托）
+    void scrollToBottomNow(bool force); // force=true 强制贴底（"必须看见"场景）
     void onBubbleAction(MessageBubble *bubble, int action);
     void updateClearBtnState();        // busy/工具期联合刷新「清空」等（B-2/C-N2）
     void updateSessionUiLocked();      // busy/工具期联合禁侧栏操作
+    // applyTheme 拆分（T-062）：窗口级 QSS 与控件调色板钉扎两段各归其位，
+    // 气泡重抛/侧栏刷新留主干——纯函数分解，调用顺序不变
+    void applyWindowQss(const ThemeColors &c);
+    void applyControlPalettes(const ThemeColors &c);
 
     ChatSession *m_session = nullptr;
     MarkdownRenderer m_renderer;       // 流式渲染状态机（纯逻辑，150ms 节流）
+    // 两条节流线刻意分置（T-062 注）：正文节流在 MarkdownRenderer（状态机 +
+    // ``` 围栏跨 chunk 扫描），思考节流在窗口（纯时限）——结构对称但抽公共
+    // 基类属过度设计，保持分置
     QElapsedTimer m_streamClock;       // 渲染节流时钟（chunk 驱动，无常驻定时器）
     QElapsedTimer m_reasonClock;       // T-050-FIX2：reasoning 第二道节流线时钟（同款模式）
     QString m_reasonPending;           // T-050-FIX2：节流线内累积、到线一次性 flush 的思考增量

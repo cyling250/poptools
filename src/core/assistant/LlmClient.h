@@ -108,7 +108,7 @@ public:
     bool chat(const QString &baseUrl, const QString &apiKey, const QString &model,
               const QJsonArray &messages, const QJsonArray &tools = QJsonArray());
 
-    void abort(); // 用户中止
+    void abort(); // 用户中止（与 90s 传输超时的区分见 m_userAborted）
     bool busy() const { return m_reply != nullptr; }
 
 signals:
@@ -121,11 +121,18 @@ signals:
     void finished(bool ok, const QJsonObject &assistantMessage, const QString &error);
 
 private:
+    // 单飞收尾：reply 脱钩 + deleteLater，三分支归一——流内业务错(error:*)/
+    // 网络错(带响应体摘要 1KB)/用户中止(交回部分内容保持上下文)，正常结束
+    // 交完整助手消息。finished 恒发一次
     void cleanupReply();
 
     QNetworkAccessManager m_nam;
     QNetworkReply *m_reply = nullptr;
     LlmStreamParser m_parser;
+    // T-062 修复: 90s 传输超时与用户 abort() 都以 OperationCanceledError
+    // 收尾，单靠 reply->error() 无法区分——断流曾被误报为"已中止"。此标志
+    // 只在 abort() 置位、chat() 发起时复位，归因以"标志+错误码"双条件判定
+    bool m_userAborted = false;
 };
 
 } // namespace poptools

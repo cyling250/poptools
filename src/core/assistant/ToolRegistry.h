@@ -67,6 +67,10 @@ public:
     bool isReadOnly(const QString &name) const;
 
 private:
+    // schema 装配主体（apiName=true 时工具名走 toApiName 转写）；
+    // toolSchemas / toolSchemasForApi 的共用实现
+    QJsonArray schemas(bool apiName) const;
+
     QHash<QString, ToolDef> m_tools;
 };
 

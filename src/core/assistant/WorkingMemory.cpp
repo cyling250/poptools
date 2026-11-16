@@ -19,6 +19,8 @@ WorkingMemory::WorkingMemory(const QString &baseDir, QObject *parent)
     loadAll();
 }
 
+// 启动装载全部 working/*.json，只收 status=="open"（完成/异常态不装载）；
+// 文件坏/缺 id 跳过
 void WorkingMemory::loadAll()
 {
     m_tasks.clear();
@@ -46,17 +48,23 @@ void WorkingMemory::loadAll()
     }
 }
 
+// task_ + 毫秒低 8 位十六进制。T-062 修复: 同 MemoryStore::makeId 的同毫秒
+// 撞号隐患（并行 tool_calls 逐个同步执行）——追加进程内自增序号后缀保证
+// 唯一；新 id 仍只含十六进制字符，任务文件名白名单口径不变
 QString WorkingMemory::makeId()
 {
-    return QStringLiteral("task_%1").arg(QDateTime::currentMSecsSinceEpoch() % 100000000, 8, 16, QLatin1Char('0'));
+    static quint32 s_seq = 0;
+    return QStringLiteral("task_%1%2")
+        .arg(QDateTime::currentMSecsSinceEpoch() % 100000000, 8, 16, QLatin1Char('0'))
+        .arg(++s_seq, 2, 16, QLatin1Char('0'));
 }
 
+// 单任务原子写（QSaveFile，status 恒 open——归档即删文件）；写失败返回
+// false 由调用方决定是否提示
 bool WorkingMemory::saveTask(const Task &t) const
 {
     QDir().mkpath(m_workDir);
-    QJsonArray notes;
-    for (const QString &n : t.notes)
-        notes.append(n);
+    const QJsonArray notes = QJsonArray::fromStringList(t.notes); // T-062: 装配样板去重
     QSaveFile f(m_workDir + QLatin1Char('/') + t.id + QStringLiteral(".json"));
     if (!f.open(QIODevice::WriteOnly))
         return false;
@@ -73,6 +81,7 @@ bool WorkingMemory::saveTask(const Task &t) const
     return f.commit();
 }
 
+// 线性查 id，无则 nullptr
 WorkingMemory::Task *WorkingMemory::find(const QString &id)
 {
     for (Task &t : m_tasks)
@@ -94,9 +103,7 @@ QJsonObject WorkingMemory::startTask(const QString &title, const QString &goal)
                 task.notes << QStringLiteral("[目标更新] ") + goal.trimmed();
             task.updated = QDateTime::currentMSecsSinceEpoch();
             saveTask(task);
-            QJsonArray notes;
-            for (const QString &n : task.notes)
-                notes.append(n);
+            const QJsonArray notes = QJsonArray::fromStringList(task.notes); // T-062: 装配样板去重
             return QJsonObject{{"ok", true},
                                {"continued", true},
                                {"id", task.id},
@@ -122,9 +129,7 @@ QJsonObject WorkingMemory::listTasks() const
 {
     QJsonArray arr;
     for (const Task &t : m_tasks) {
-        QJsonArray notes;
-        for (const QString &n : t.notes)
-            notes.append(n);
+        const QJsonArray notes = QJsonArray::fromStringList(t.notes); // T-062: 装配样板去重
         arr.append(QJsonObject{{"id", t.id},
                                {"title", t.title},
                                {"goal", t.goal},
@@ -141,6 +146,9 @@ QJsonObject WorkingMemory::updateTask(const QString &id, const QString &note)
         return QJsonObject{{"ok", false}, {"error", QStringLiteral("任务不存在或已归档")}};
     t->notes << note.trimmed();
     t->updated = QDateTime::currentMSecsSinceEpoch();
+    // 注意：此处 "notes" 是条数（number），startTask/listTasks 里同名键是
+    // 数组——历史形状，模型侧靠上下文区分；改名属模型可见行为变更，只
+    // 注释不改（T-062 登记：LLM 解析歧义，无崩溃路径）
     return QJsonObject{{"ok", saveTask(*t)}, {"notes", double(t->notes.size())}};
 }
 
