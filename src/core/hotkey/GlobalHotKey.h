@@ -30,7 +30,8 @@ public:
     void unregisterKey(int id);
     // 指定 id 是否已注册
     bool isRegistered(int id) const;
-    // 最近一次注册失败的原因（"已被其他程序占用" / Win32 错误码），注册成功后清空
+    // 最近一次注册失败的原因（"与 PopTools 内其他快捷键冲突" / "已被其他程序占用" /
+    // "该热键已在本类注册" / Win32 错误码），注册成功后清空
     QString lastError() const { return m_lastError; }
 
 signals:

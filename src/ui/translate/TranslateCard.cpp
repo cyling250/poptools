@@ -66,6 +66,16 @@ Qt::CursorShape cursorForEdges(Qt::Edges e)
     return Qt::ArrowCursor;
 }
 
+// 文本区内联样式模板（QTextEdit 颜色不走父级样式表，见 applyTheme 内说明）：
+// applyTheme 以主题色生成并存 m_editSheet 供恢复主题；showError 参数化错误配色
+QString editSheet(const QString &textColor, const QString &bg, const QString &border)
+{
+    return QStringLiteral(
+        "QTextEdit { color: %1; font-size: 13px;"
+        "  background: %2; border: 1px solid %3; border-radius: 4px;"
+        "  padding: 8px; }").arg(textColor, bg, border);
+}
+
 } // namespace
 
 TranslateCard::TranslateCard(QWidget *parent)
@@ -97,7 +107,7 @@ TranslateCard::TranslateCard(QWidget *parent)
     titleLabel->setProperty("class", "card-title");
     headerRow->addWidget(titleLabel);
     headerRow->addStretch(1);
-    m_closeBtn = new QPushButton(QStringLiteral("\303\227"), this);
+    m_closeBtn = new QPushButton(QStringLiteral("\303\227"), this); // ×（关闭）
     m_closeBtn->setFixedSize(22, 22);
     m_closeBtn->setToolTip(QStringLiteral("关闭"));
     m_closeBtn->setProperty("class", "close-btn");
@@ -212,6 +222,10 @@ TranslateCard::TranslateCard(QWidget *parent)
 
     // 全部控件就绪后应用主题（内含对编辑框/下拉的调色板设置）
     applyTheme();
+    // T-062 修复(R2-2): 恢复的动作下拉先于 connect 执行 setCurrentIndex，构造期
+    // syncActionUi 不会被信号触发——补一次对齐，存量恢复"解释/总结/改写"时
+    // 按钮/标题即时与动作一致，不等首次回包
+    syncActionUi();
 }
 
 void TranslateCard::applyTheme()
@@ -248,10 +262,7 @@ void TranslateCard::applyTheme()
 
     // 文本框颜色直接写在控件自身（内联样式在故障机上被验证有效）；
     // 恢复默认时须重新应用本样式而非清空
-    m_editSheet = QStringLiteral(
-        "QTextEdit { color: %1; font-size: 13px;"
-        "  background: %2; border: 1px solid %3; border-radius: 4px;"
-        "  padding: 8px; }").arg(c.body, c.editBg, c.editBorder);
+    m_editSheet = editSheet(c.body, c.editBg, c.editBorder);
     m_sourceText->setStyleSheet(m_editSheet);
     m_translateText->setStyleSheet(m_editSheet);
 
@@ -272,7 +283,9 @@ void TranslateCard::applyTheme()
         edit->setPalette(pal);
         edit->setAutoFillBackground(true);
     }
-    for (QComboBox *combo : {m_fromCombo, m_toCombo}) {
+    // T-062 修复: 动作下拉补进兜底循环——三个 QComboBox 只差它没覆盖，
+    // 深色主题下故障机会回落系统配色，与另两个下拉不一致
+    for (QComboBox *combo : {m_fromCombo, m_toCombo, m_actionCombo}) {
         QPalette pal = combo->palette();
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                                  QPalette::Disabled}) {
@@ -316,7 +329,9 @@ void TranslateCard::setTranslateResult(const QString &text)
     m_translateText->setPlainText(text);
     m_translateText->setStyleSheet(m_editSheet); // 清除错误态配色，恢复主题默认
     m_translateBtn->setEnabled(true);
-    m_translateBtn->setText(QStringLiteral("翻译"));
+    // T-062 修复: 按钮文案随当前动作（解释/总结/改写）——原硬编码"翻译"会让
+    // 按钮与结果区标题互相矛盾（点击实际执行当前动作，文案须与之一致）
+    syncActionUi();
     m_copyBtn->setEnabled(!text.isEmpty());
     refit();
 }
@@ -325,13 +340,9 @@ void TranslateCard::showError(const QString &errorMsg)
 {
     m_translateText->setPlainText(errorMsg);
     const ThemeColors c = uiThemeColors(systemSchemeDark());
-    m_translateText->setStyleSheet(QString(
-        "QTextEdit { color: %1; font-size: 13px;"
-        "  background: %2; border: 1px solid %3; border-radius: 4px;"
-        "  padding: 8px; }")
-        .arg(c.errText, c.errBg, c.errBorder));
+    m_translateText->setStyleSheet(editSheet(c.errText, c.errBg, c.errBorder));
     m_translateBtn->setEnabled(true);
-    m_translateBtn->setText(QStringLiteral("翻译"));
+    syncActionUi(); // T-062 修复: 同 setTranslateResult，文案随当前动作
     m_copyBtn->setEnabled(false);
     refit();
 }
@@ -342,7 +353,7 @@ void TranslateCard::refit()
         return;
 
     // 先按目标宽度激活布局，文本区拿到实际宽度后按内容测高才准确
-    resize(qMax(kDefaultWidth, layout()->totalMinimumSize().width()), 200);
+    resize(qMax(kDefaultWidth, layout()->totalMinimumSize().width()), 200); // 高度占位，下方按内容重设
     layout()->activate();
 
     fitTextEdit(m_sourceText, kSourceMaxHeight);
@@ -386,9 +397,11 @@ void TranslateCard::onSwapLanguages()
     const QString toText = m_toCombo->currentText();
     // 源语言不能是"自动"以外的，目标语言不能是"自动"
     if (fromIdx == 0) {
-        // 源语言是"自动"，把目标语言切到源语言位，目标语言设为"自动"
+        // 源语言是"自动"：把目标语言切到源语言位；目标下拉无"自动"项，
+        // 回退首项中文——源=自动、目标=中文时交换结果会同为中文（语义退化，
+        // 属已知退化情形，行为变更需另议，T-062 仅订正注释如实描述）
         m_fromCombo->setCurrentText(toText);
-        m_toCombo->setCurrentIndex(0); // "自动"在目标语言 combo 中不显示，设第一项
+        m_toCombo->setCurrentIndex(0); // 第一项"中文"
     } else {
         const QString fromText = m_fromCombo->currentText();
         m_fromCombo->setCurrentText(toText);
@@ -501,7 +514,7 @@ void TranslateCard::hideEvent(QHideEvent *event)
     m_translateText->clear();
     m_translateText->setStyleSheet(m_editSheet); // 清除错误态配色
     m_translateBtn->setEnabled(true);
-    m_translateBtn->setText(QStringLiteral("翻译"));
+    syncActionUi(); // T-062 修复: 复位为当前动作名（原硬编码"翻译"，记忆动作≠翻译时按钮文案撒谎）
     m_copyBtn->setEnabled(false);
     m_copyBtn->setText(QStringLiteral("复制译文"));
     QWidget::hideEvent(event);

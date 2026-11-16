@@ -101,6 +101,7 @@ void RapidOcrService::fail(const QString &msg)
     emit ocrBoxesFinished(false, QVector<OcrBox>(), msg);
 }
 
+// 析构：kill 后最多等 3 秒收尸（进程退出路径，阻塞可接受）；临时图在 cleanupTemp 清理
 RapidOcrService::~RapidOcrService()
 {
     cleanupTemp();
@@ -116,10 +117,15 @@ QString RapidOcrService::engineDir()
     return QCoreApplication::applicationDirPath() + QStringLiteral("/rapidocr");
 }
 
+// 引擎可执行文件完整路径（available / startEngine 共用，拼接只此一处）
+QString RapidOcrService::engineExe()
+{
+    return engineDir() + QStringLiteral("/RapidOCR-json.exe");
+}
+
 bool RapidOcrService::available() const
 {
-    const QString exe = engineDir() + QStringLiteral("/RapidOCR-json.exe");
-    return QFileInfo::exists(exe);
+    return QFileInfo::exists(engineExe());
 }
 
 void RapidOcrService::startEngine()
@@ -161,7 +167,7 @@ void RapidOcrService::startEngine()
         });
     }
 
-    const QString exePath = engineDir() + QStringLiteral("/RapidOCR-json.exe");
+    const QString exePath = engineExe();
 
     m_process->setWorkingDirectory(engineDir());
     // 固定简中配置（det/cls/rec/字典）——与原 PaddleOCR-json 空参数默认行为对齐；
@@ -223,7 +229,7 @@ void RapidOcrService::onTempImageReady(bool ok)
         return;
     }
     // 暖引擎补发命令（C-N1）：started 每个进程实例只发一次，进程已 Running
-    // 时 startEngine 只会早退（:127），writeCommand 的 started 唯一触发点
+    // 时 startEngine 只会早退（已有实例在途早退分支），writeCommand 的 started 唯一触发点
     // 不会再发 → 请求永久无响应（m_busy 卡真到进程被杀）。Running 直接补发
     //（writeCommand 重开看门狗/停空闲回收）；Starting 复用 started 处理器
     //（m_busy 在位，就绪即发）；NotRunning 走完整冷启动
@@ -240,6 +246,7 @@ void RapidOcrService::writeCommand()
                                QJsonObject{{QStringLiteral("image_path"), m_tempFile}})
                                .toJson(QJsonDocument::Compact)
                            + '\n';
+    // 丢弃上一请求可能残留的半行/杂音，防与新响应拼接后被误解析
     m_buffer.clear();
     m_process->write(cmd);
     m_timeoutTimer->start(); // 识别超时看门狗开表（重开：启动阶段已计一部分）
@@ -258,7 +265,16 @@ void RapidOcrService::onReadyRead()
             break; // 没有完整行，等更多数据
 
         const QByteArray line = m_buffer.left(nlPos).trimmed();
-        m_buffer.remove(0, nlPos + 1);
+        m_buffer.remove(0, nlPos + 1); // 行短，逐次 remove 的搬移代价可忽略（勿"优化"成游标偏移）
+
+        // T-062 修复: 忙态已结束（finishRequest 已收尾）后才到达的残留/杂音行
+        // 就地排空、不解析——与 fail() 的 m_busy 门卫对齐，防引擎重复响应或异常
+        // banner JSON 触发二次 ocrBoxesFinished（消费方虽有归属防护，契约不应依赖）。
+        // 单请求单响应的正常路径无变化
+        if (!m_busy) {
+            m_buffer.clear();
+            break;
+        }
 
         if (line.isEmpty())
             continue;
@@ -319,8 +335,8 @@ void RapidOcrService::onReadyRead()
             emit ocrBoxesFinished(false, QVector<OcrBox>(),
                                   msg.isEmpty() ? QStringLiteral("OCR 识别失败") : msg);
         }
-        continue; // 单请求单响应下正常只有一行；残留行就地排空，不留到下次
-                  // readyRead 被误认成下一个请求的响应（#7）
+        continue; // 单请求单响应下正常只有一行；多余残留行由上方非忙态守卫排空，
+                  // 不留到下次 readyRead 被误认成下一个请求的响应（#7）
     }
 }
 

@@ -79,7 +79,8 @@ AnnotationItem AnnotationPainter::scaledItem(const AnnotationItem &src, const QR
                 pt = QPointF(nx, ny);
             }
         } else {
-            // 退化（水平/垂直直线）：宽度或高度为 0 的轴保持原偏移（翻转轴镜像）
+            // 退化（水平/垂直直线）：与常规分支的差异——零宽/高的轴不能除以 0，
+            // 改为按原偏移平移（翻转轴仍沿新边界反向镜像），非零轴照常等比映射
             for (QPointF &pt : it.points) {
                 qreal nx = pt.x(), ny = pt.y();
                 if (oldBounds.width() > 0) {
@@ -306,7 +307,7 @@ void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
         const QLineF line(it.points[0], it.points[1]);
         p.drawLine(line);
         // 箭头头部
-        const qreal ang = std::atan2(-line.dy(), line.dx());
+        const qreal ang = std::atan2(-line.dy(), line.dx()); // y 轴向下：取 -dy 换算数学角
         const qreal headLen = qMax(8.0, it.width * 3.0);
         const QPointF p1 = line.p2() - QPointF(headLen * std::cos(ang - M_PI / 6),
                                                -headLen * std::sin(ang - M_PI / 6));
@@ -319,11 +320,11 @@ void AnnotationPainter::drawOne(QPainter &p, const AnnotationItem &it)
         break;
     }
     case AnnotationType::Polyline:
-    case AnnotationType::Doodle:
-        p.setBrush(Qt::NoBrush);
-        p.drawPolyline(it.points);
-        break;
     case AnnotationType::Freehand:
+    case AnnotationType::Doodle:
+        // drawPolyline 只用 pen 描边；brush 显式清空，不依赖上方按 filled
+        // 设置的残留画刷状态（T-062 合并三分支，输出逐像素等价）
+        p.setBrush(Qt::NoBrush);
         p.drawPolyline(it.points);
         break;
     case AnnotationType::Mosaic:

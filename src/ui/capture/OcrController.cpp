@@ -210,20 +210,9 @@ void OcrController::onBoxesTranslate(bool ok, const QVector<OcrBox> &boxes, cons
                 // 避免旧识别内容经 showPanel 置位面板后跨会话复活（R5-B1，
                 // 对照 onBoxes 的空图防护；翻译路径无 m_ocrImg 依赖故需单独门卫）
 
-    // 按阅读顺序（先从上到下，再从左到右）合并行文本（半行高容差同行判定
-    // 与贴图 OCR 共用一实现，见 sortOcrBoxesReadingOrder）
-    QVector<OcrBox> sorted = boxes;
-    sortOcrBoxesReadingOrder(sorted);
-    QString text;
-    for (const OcrBox &box : sorted)
-    {
-        const QString t = box.text.trimmed();
-        if (t.isEmpty())
-            continue;
-        if (!text.isEmpty())
-            text += '\n';
-        text += t;
-    }
+    // 按阅读顺序（先从上到下，再从左到右）合并行文本（与贴图 OCR 共用一实现，
+    // T-062 去重，见 joinOcrBoxesText）
+    const QString text = joinOcrBoxesText(boxes);
     // 显示原文 + 自动翻译（目标语言取面板当前选择）
     if (m_host.showPanel)
         m_host.showPanel(text);

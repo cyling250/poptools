@@ -35,7 +35,7 @@ public:
     bool canUndo() const { return !m_undoStack.isEmpty(); }
     bool canRedo() const { return !m_redoStack.isEmpty(); }
 
-    // 橡皮擦：删除与 pos 距离最近的标注，返回是否删除了
+    // 橡皮擦：删除最上层（后绘制优先）且在 pos 容差内的标注，返回是否删除了
     bool eraseAt(const QPointF &pos, qreal tol = 6.0);
 
     // 判断某点是否落在任一标注上（用于拖动画布时避开标注）

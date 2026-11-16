@@ -222,7 +222,6 @@ private:
                         bool isOcr, bool disableThinking, LlmAction action);
 
     QNetworkAccessManager m_nam;
-    QNetworkReply *m_reply = nullptr;
     bool m_busy = false;
 
     // 待翻译参数（降级重发时复用）

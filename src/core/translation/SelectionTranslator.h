@@ -13,7 +13,8 @@ namespace poptools {
 //   * 模拟 Ctrl+C 复制选中文本到剪贴板（选中内容保留在剪贴板中）
 //   * 轮询 Windows 剪贴板序列号（GetClipboardSequenceNumber），
 //     检测复制生效后直接用 Win32 API 读取文本
-//   * 约 600ms 未生效时重发一次 Ctrl+C；总超时（复制未生效/无选中文本）发出 errorOccurred
+//   * 约 600ms 未生效时重发一次 Ctrl+C；总超时约 2.5s（复制未生效/无选中文本）
+//     发出 errorOccurred
 //
 // 线程安全：主线程调用（热键处理链）；读取不依赖 Qt 剪贴板缓存，
 // 避免信号/缓存时序导致读到旧内容。

@@ -19,9 +19,10 @@ namespace poptools {
 //   connect(&hook, &GlobalMouseHook::mousePressed, this, [](const QPoint &pos){ ... });
 //   hook.stop();
 //
-// 多个浮窗可能并存（划词卡片 + Dock 弹层）：内部用引用计数共用
-// 一个系统钩子，事件广播给全部已 start 的实例；任一实例 stop 后
-// 计数归零才卸载钩子。
+// 多个消费方可能并存（当前三处：划词卡片 SelectionTranslateModule、
+// 活动监控点击喂状态机 ActivityMonitorModule、日程编辑器外点关闭
+// CalendarPanel）：内部用引用计数共用一个系统钩子，事件广播给全部
+// 已 start 的实例；任一实例 stop 后计数归零才卸载钩子。
 //
 // 基于 SetWindowsHookEx(WH_MOUSE_LL)（user32.lib）；钩子回调在安装
 // 线程（Qt 主线程）中执行，信号经队列转发到事件循环处理（回调内

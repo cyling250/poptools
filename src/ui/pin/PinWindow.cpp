@@ -158,8 +158,11 @@ QImage PinWindow::makeShadow(const QSize &content) const
     for (int y = 0; y < h; ++y) {
         uchar *line = img.scanLine(y);
         const int ky = py[y];
-        for (int x = 0; x < w; ++x)
+        for (int x = 0; x < w; ++x) {
+            // px/ky ∈ [0,256]（256=1.0），256*256=2^16，右移 16 位即把
+            // (alpha*px*ky)/65536 归一化到 [0,alpha]
             line[x] = uchar((kShadowAlpha * px[x] * ky) >> 16);
+        }
     }
     return img;
 }
@@ -209,6 +212,8 @@ void PinWindow::wheelEvent(QWheelEvent *event)
 {
     // 滚轮缩放：每格 ±0.1（避免跨度太大），0.2x ~ 5x；
     // 锚点 = 鼠标位置：光标下的内容点缩放前后保持不动（符合"对准哪里放大哪里"直觉）
+    // cursor = 光标在内容区内的偏移（旧比例）；下方新左上角按 (m_scale/oldScale)
+    // 缩放该偏移，即"内容点随比例缩放后仍落在光标下"
     const QPointF cursor = event->globalPosition().toPoint()
                            - (frameGeometry().topLeft() + QPoint(kMargin, kMargin));
     const qreal oldScale = m_scale;
@@ -230,7 +235,10 @@ void PinWindow::wheelEvent(QWheelEvent *event)
 
 void PinWindow::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    Q_UNUSED(event)
+    // T-062 修复: 此前未检查按键，右键的第二击也会关窗；右键语义是菜单。
+    // 与 mousePressEvent 只认左键的口径对齐
+    if (event->button() != Qt::LeftButton)
+        return;
     // 双击 = 清除（仅清除屏幕贴图，不删除文件）
     close();
 }

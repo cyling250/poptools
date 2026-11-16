@@ -28,7 +28,8 @@ void AnnotationCanvas::redo()
 
 bool AnnotationCanvas::eraseAt(const QPointF &pos, qreal tol)
 {
-    // 从后往前找最近且距离在容差内的标注
+    // 从后往前（后绘制优先 = 最上层）找第一个容差内的标注，命中即删——
+    // 不是"距离最近"的那条
     for (int i = items.size() - 1; i >= 0; --i) {
         const AnnotationItem &it = items[i];
         qreal d = AnnotationPainter::distanceToItem(pos, it, tol);

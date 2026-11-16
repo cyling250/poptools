@@ -11,8 +11,8 @@ namespace poptools {
 #ifdef Q_OS_WIN
 namespace {
 
-// 共享钩子状态：多个浮窗（划词卡片 / Dock 弹层）并存时共用一个
-// 系统钩子，事件广播给全部已 start 的实例；计数归零才卸载。
+// 共享钩子状态：多个消费方（划词卡片 / 活动监控 / 日程编辑器外点关闭）
+// 并存时共用一个系统钩子，事件广播给全部已 start 的实例；计数归零才卸载。
 QSet<GlobalMouseHook *> g_hookConsumers;
 HHOOK g_hook = nullptr;
 

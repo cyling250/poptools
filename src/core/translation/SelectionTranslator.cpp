@@ -94,27 +94,57 @@ QString SelectionTranslator::readClipboardText() const
 void SelectionTranslator::simulateCtrlC()
 {
 #ifdef Q_OS_WIN
-    INPUT inputs[4] = {};
+    // T-062 修复: 热键（如 Ctrl+Alt+Shift+X）触发瞬间用户仍物理按住 Alt/Shift/Win，
+    // 直接注入 Ctrl+C 会被合成 Ctrl+Alt+Shift+C——多数应用未绑定该组合，剪贴板
+    // 序列号不变，600ms 重发同样污染，最终 2.5s 超时报"未获取到选中文本"，
+    // 表现为划词翻译时灵时不灵（P-046 修饰键残留教训在功能侧的落点）。
+    // 处置：先对物理按住的修饰键注入 KEYEVENTF_KEYUP 再发 Ctrl+C。
+    // 不回按（不恢复 keydown）：① 用户松手在即，回按与物理节奏不符；② 回按会
+    // 在 Ctrl+C 之后向目标应用二次注入 Alt/Shift 按下——部分应用对 Alt 单独
+    // 松开做菜单激活、Shift 按下改变后续输入语义，反而制造二次响应。
+    // 物理按住期间 injected keyup 会被后续真实事件覆盖，且用户再松开时的
+    // 真实 keyup 对已处于抬起状态的键无副作用
+    INPUT inputs[9] = {}; // 至多 4 个修饰键 keyup + Ctrl/C 各按下抬起 4 个
+    int n = 0;
+    auto pushKeyup = [&inputs, &n](WORD vk) {
+        inputs[n].type = INPUT_KEYBOARD;
+        inputs[n].ki.wVk = vk;
+        inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+        ++n;
+    };
+    if (GetAsyncKeyState(VK_MENU) & 0x8000)
+        pushKeyup(VK_MENU);
+    if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+        pushKeyup(VK_SHIFT);
+    // Win 键分左右两码，各自检测各自 keyup（未按下的那侧注入 keyup 无害）
+    if (GetAsyncKeyState(VK_LWIN) & 0x8000)
+        pushKeyup(VK_LWIN);
+    if (GetAsyncKeyState(VK_RWIN) & 0x8000)
+        pushKeyup(VK_RWIN);
 
-    // Ctrl key down
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_CONTROL;
+    // Ctrl key down（Ctrl 本身是期望组合的一部分，无需先抬起）
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = VK_CONTROL;
+    ++n;
 
     // C key down
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = 'C';
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = 'C';
+    ++n;
 
     // C key up
-    inputs[2].type = INPUT_KEYBOARD;
-    inputs[2].ki.wVk = 'C';
-    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = 'C';
+    inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+    ++n;
 
     // Ctrl key up
-    inputs[3].type = INPUT_KEYBOARD;
-    inputs[3].ki.wVk = VK_CONTROL;
-    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[n].type = INPUT_KEYBOARD;
+    inputs[n].ki.wVk = VK_CONTROL;
+    inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+    ++n;
 
-    SendInput(4, inputs, sizeof(INPUT));
+    SendInput(n, inputs, sizeof(INPUT));
 #else
     // 非 Windows 平台暂不支持
 #endif

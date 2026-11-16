@@ -59,6 +59,24 @@ inline void sortOcrBoxesReadingOrder(QVector<OcrBox> &boxes)
     }
 }
 
+// 行序重排 + 逐框 trim 拼接 OCR 文本（空行跳过、'\n' 分隔）。sortOcrBoxesReadingOrder
+// 与拼接循环此前在 OcrController（截图翻译）与 PinModule（贴图 OCR）各写一份
+// 同构代码，T-062 收敛为此单入口；含拷贝排序，调用方入参不受影响
+inline QString joinOcrBoxesText(QVector<OcrBox> boxes)
+{
+    sortOcrBoxesReadingOrder(boxes);
+    QString text;
+    for (const OcrBox &box : boxes) {
+        const QString t = box.text.trimmed();
+        if (t.isEmpty())
+            continue;
+        if (!text.isEmpty())
+            text += QLatin1Char('\n');
+        text += t;
+    }
+    return text;
+}
+
 // 基于 RapidOCR-json（onnxruntime，hiroi-sora）的 OCR 服务（QProcess 子进程调用）。
 //
 // 启动 RapidOCR-json.exe 在管道模式运行（常驻进程），启动参数固定简中配置
@@ -114,6 +132,9 @@ private:
 
     // 引擎目录（exe 同目录下的 rapidocr/）
     static QString engineDir();
+
+    // 引擎可执行文件完整路径（available / startEngine 共用，拼接只此一处）
+    static QString engineExe();
 
     QProcess *m_process = nullptr;
     QTimer *m_timeoutTimer = nullptr; // 识别超时看门狗（引擎无响应 → kill + 报错）

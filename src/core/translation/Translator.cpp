@@ -102,10 +102,15 @@ void Translator::translateByApi(const QString &text, const QString &fromLang, co
         buildTranslateRequestBody(format, model, systemPrompt, text, disableThinking);
 
     m_busy = true;
-    m_reply = m_nam.post(req, payload);
-    connect(m_reply, &QNetworkReply::finished, this, &Translator::onReplyFinished);
+    // reply 归 m_nam 父子所有，收尾经 sender() 取回并 deleteLater；
+    // 无需成员保存（原 m_reply 只写不读，T-062 删除）
+    QNetworkReply *reply = m_nam.post(req, payload);
+    connect(reply, &QNetworkReply::finished, this, &Translator::onReplyFinished);
 }
 
+// 请求收尾：端点拒绝 thinking 禁用字段（400/422 且报文为空或疑似"字段不识别"）时
+// 去字段降级重发一次；其余错误把 Qt 错误串/HTTP 状态翻成人话；成功按协议
+// 格式提取译文并兜底清洗 <think> 思维链。reply 生命周期归 deleteLater。
 void Translator::onReplyFinished()
 {
     auto *reply = qobject_cast<QNetworkReply *>(sender());
@@ -113,18 +118,24 @@ void Translator::onReplyFinished()
         return;
 
     reply->deleteLater();
-    m_reply = nullptr;
 
     const QByteArray raw = reply->readAll();
     const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    // 服务端错误文案：下方降级判定与错误文案两处共用一次解析（JSON 解析幂等，
+    // 提前提取无副作用；成功路径不解析）
+    QString serverMsg;
+    if (reply->error() != QNetworkReply::NoError) {
+        const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
+        if (errDoc.isObject())
+            serverMsg = errDoc.object().value("error").toObject().value("message").toString();
+    }
 
     // 端点不认识 thinking 禁用字段（严格校验的服务返回 400/422，两种格式均可能）：
     // 去掉该字段降级重发一次，仅损失"关思考"优化，不影响翻译可用性。
     // 只对"字段不被识别"类拒绝重发——模型名错误等真 400 重发也不会成功，白发
     if (reply->error() != QNetworkReply::NoError && m_tryDisableThinking
         && (httpStatus == 400 || httpStatus == 422)) {
-        const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
-        const QString serverMsg = errDoc.object().value("error").toObject().value("message").toString();
         static const QRegularExpression fieldRejection(
             QStringLiteral("thinking|unknown (field|parameter)|unrecognized|unexpected|unsupported"),
             QRegularExpression::CaseInsensitiveOption);
@@ -142,11 +153,6 @@ void Translator::onReplyFinished()
         // 把晦涩的 Qt 错误串翻译成可读原因：优先透出服务端 JSON 的 error.message
         //（如"Key 无效""模型不存在"）。注意 Qt 将 HTTP 401 一律映射为
         // "Host requires authentication"，必须转成人话
-        QString serverMsg;
-        const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
-        if (errDoc.isObject())
-            serverMsg = errDoc.object().value("error").toObject().value("message").toString();
-
         QString msg;
         if (reply->error() == QNetworkReply::OperationCanceledError) {
             msg = QStringLiteral("连接超时（15 秒无响应），请检查网络或代理设置");
@@ -178,6 +184,8 @@ void Translator::onReplyFinished()
     //   Anthropic → content[] 块数组，仅拼接 type=="text" 的块
     //   （thinking 等其他块类型忽略）
     QString result;
+    // 按当前设置判定协议：请求在途期间用户改格式理论上会错位（边缘，接受；
+    // 缓存请求时格式属行为增强，T-062 登记不改）
     if (apiFormatFromSetting(Settings::instance().apiFormat()) == ApiFormat::Anthropic) {
         const QJsonArray blocks = doc.object().value("content").toArray();
         for (const QJsonValue &block : blocks) {
@@ -197,7 +205,7 @@ void Translator::onReplyFinished()
     // 混在 content 里输出，取闭合标签之后的正文；只有未闭合思维链则视为空结果
     const int thinkEnd = result.lastIndexOf(QStringLiteral("</think>"));
     if (thinkEnd != -1)
-        result = result.mid(thinkEnd + 8);
+        result = result.mid(thinkEnd + 8); // +8 = "</think>".length()
     else if (result.contains(QStringLiteral("<think>")))
         result.clear();
 

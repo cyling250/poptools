@@ -155,19 +155,9 @@ void PinModule::onPinOcrFinished(bool ok, const QVector<OcrBox> &boxes, const QS
                                error.isEmpty() ? QStringLiteral("未识别到文字") : error);
         return;
     }
-    // 行序重排（阅读顺序：先上后下、同行先左后右）后拼接——半行高容差
-    // 同行判定抽到 core/ocr 共享（截图翻译同款），见 sortOcrBoxesReadingOrder
-    QVector<OcrBox> sorted = boxes;
-    sortOcrBoxesReadingOrder(sorted);
-    QString text;
-    for (const OcrBox &box : sorted) {
-        const QString t = box.text.trimmed();
-        if (t.isEmpty())
-            continue;
-        if (!text.isEmpty())
-            text += QLatin1Char('\n');
-        text += t;
-    }
+    // 行序重排（阅读顺序：先上后下、同行先左后右）后拼接，与截图翻译
+    // 共用一实现（T-062 去重），见 joinOcrBoxesText
+    const QString text = joinOcrBoxesText(boxes);
     if (text.isEmpty()) {
         if (m_services->notify)
             m_services->notify(QStringLiteral("贴图 OCR"), QStringLiteral("未识别到文字"));
