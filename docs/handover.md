@@ -51,7 +51,7 @@
   5. 重资源用完即释放：会话级大缓冲退出即清空（先例：m_baseScaled）；子进程类资源空闲自动回收（先例：PaddleOcrService 3 分钟回收）
   6. 模块 init 只装配：重资源懒加载，启动路径禁网络/磁盘重 IO
 - **常用命令**：
-  - 安装依赖（新机器必做，需代理 127.0.0.1:7897）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`
+  - 安装依赖（新机器必做，需代理）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`（**代理端口实测已变：现监听 127.0.0.1:17890**（2026-11-16 实测，GitHub API 200；AGENTS.md 记的 7897 已失效，开机后先测端口再走代理））
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 RapidOCR-json.exe 两个进程**，见坑 P-008）
   - 测试：`ctest -C Release --test-dir build --output-on-failure`（96 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控键入与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
