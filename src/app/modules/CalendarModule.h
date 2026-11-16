@@ -6,6 +6,7 @@ class QAction;
 
 namespace poptools {
 
+class AppServices;
 class CalendarHostWidget;
 
 // ============================================================
@@ -23,6 +24,7 @@ public:
 private:
     CalendarHostWidget *m_host = nullptr;
     QAction *m_toggleAction = nullptr;
+    AppServices *m_services = nullptr; // shutdown 撤销能力槽用
 };
 
 } // namespace poptools

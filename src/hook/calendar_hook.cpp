@@ -332,9 +332,25 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 {
     switch (msg) {
         case WM_CLONE_UPDATE:
-            if (g_defview && IsWindow(g_defview)) InvalidateRect(g_defview, NULL, TRUE);
-            if (g_listview && IsWindow(g_listview)) InvalidateRect(g_listview, NULL, TRUE);
+        {
+            // 脏矩形失效（红线 4）：此前整桌面失效，hover 高亮这类高频重绘会连
+            // 壁纸一起重刷，肉眼可见闪烁。失效范围收窄到日历面板 + 24px 边距
+            //（覆盖投影 ±18px 与今日发光环外扩 ±11px 的溢出）；头部缺失时兜底全失效
+            RECT rc;
+            BOOL haveRect = FALSE;
+            if (g_hdr && g_hdr->ready) {
+                rc.left = g_hdr->rectLeft - 24;
+                rc.top = g_hdr->rectTop - 24;
+                rc.right = g_hdr->rectRight + 24;
+                rc.bottom = g_hdr->rectBottom + 24;
+                haveRect = TRUE;
+            }
+            if (g_defview && IsWindow(g_defview))
+                InvalidateRect(g_defview, haveRect ? &rc : NULL, TRUE);
+            if (g_listview && IsWindow(g_listview))
+                InvalidateRect(g_listview, haveRect ? &rc : NULL, TRUE);
             return 0;
+        }
         case WM_CLONE_STOP:
         {
             HWND self = g_msgWnd;

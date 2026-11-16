@@ -47,6 +47,15 @@ public:
     // 最近一次确认截图的选区（全局逻辑坐标；CaptureModule 写，PinModule 读）
     QRect lastCaptureRect;
 
+    // ---- 贡献点：桌面日历（CalendarModule 发布；设置页与托盘消费） ----
+    std::function<void()> calendarApplySettings; // 设置页保存后：宿主重读设置并重绘
+    std::function<void()> calendarOpenSearch;    // 内容搜索
+    std::function<void()> calendarPickDate;      // 选择日期
+    std::function<void()> calendarExportTasks;   // 导出日程
+    std::function<void()> calendarImportTasks;   // 导入日程
+    // 打开应用设置对话框并定位「桌面日历」页（MainWindow 组合根发布）
+    std::function<void()> openCalendarSettings;
+
     // ---- 贡献点 ----
     // 向托盘菜单追加动作（模块在 init 中调用；组合根的系统项在其后追加，
     // 故菜单顺序 = 模块注册顺序）

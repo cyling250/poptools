@@ -41,6 +41,8 @@ MainWindow::MainWindow(QObject *parent)
     m_services->notify = [this](const QString &title, const QString &body) {
         m_tray->showMessage(title, body, QSystemTrayIcon::Information);
     };
+    // 日历模块托盘「日历设置」入口：打开应用设置对话框并定位桌面日历页
+    m_services->openCalendarSettings = [this] { onShowSettings(true); };
 
     // ---- 注册功能模块（注册顺序 = 托盘菜单中功能项顺序；拔插功能改此处） ----
     m_registry.add(std::make_unique<CaptureModule>());
@@ -97,9 +99,11 @@ MainWindow::~MainWindow()
     m_menu = nullptr;
 }
 
-void MainWindow::onShowSettings()
+void MainWindow::onShowSettings(bool openCalendarPage)
 {
-    SettingsDialog dlg(nullptr);
+    SettingsDialog dlg(m_services);
+    if (openCalendarPage)
+        dlg.openCalendarPage();
     dlg.exec();
     // 设置保存后刷新运行时组件：Translator 每次 translate() 读取最新 Settings，
     // 无需额外操作；有缓存外观的模块经 settingsChanged 信号重应用。

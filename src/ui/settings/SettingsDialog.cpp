@@ -1,4 +1,6 @@
 #include "SettingsDialog.h"
+#include "app/AppServices.h"
+#include "core/calendar/CalendarSettings.h"
 #include "core/settings/Settings.h"
 #include "core/translation/ApiTester.h"
 #include "ui/ThemeColors.h"
@@ -12,6 +14,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <algorithm>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -28,8 +31,9 @@
 
 namespace poptools {
 
-SettingsDialog::SettingsDialog(QWidget *parent)
+SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
     : QDialog(parent)
+    , m_services(services)
 {
     setWindowTitle("PopTools 设置");
     setMinimumSize(720, 520);
@@ -59,6 +63,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_nav->addItem(QStringLiteral("翻译"));
     m_nav->addItem(QStringLiteral("活动监控"));
     m_nav->addItem(QStringLiteral("Goody 管家"));
+    m_nav->addItem(QStringLiteral("桌面日历"));
 
     m_pages = new QStackedWidget(this);
     m_pages->setObjectName("settingsPages");
@@ -67,6 +72,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_pages->addWidget(buildTranslatePage());
     m_pages->addWidget(buildMonitorPage());
     m_pages->addWidget(buildGoodyPage());
+    m_pages->addWidget(buildCalendarPage());
 
     connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     m_nav->setCurrentRow(0);
@@ -117,9 +123,27 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         s.setAssistantAutoSummarize(m_gdyAutoCheck->isChecked());
         s.setAssistantBallEnabled(m_gdyBallCheck->isChecked()); // T-050
         s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
+
+        // 桌面日历：写入 CalendarSettings JSON 并经能力槽通知宿主重载重绘
+        CalendarSettings cal = CalendarSettings::load();
+        cal.showLunar = m_calLunarCheck->isChecked();
+        cal.showWeekNumbers = m_calWeekNumCheck->isChecked();
+        cal.showEvents = m_calEventsCheck->isChecked();
+        cal.glassEffect = m_calGlassCheck->isChecked();
+        cal.showGuide = m_calGuideCheck->isChecked();
+        cal.hidden = !m_calListCheck->isChecked();
+        cal.fontScale = m_calFontSpin->value();
+        cal.save();
+        if (m_services && m_services->calendarApplySettings)
+            m_services->calendarApplySettings();
     });
 
     applyTheme();
+}
+
+void SettingsDialog::openCalendarPage()
+{
+    m_nav->setCurrentRow(m_nav->count() - 1); // 桌面日历页固定在导航末位
 }
 
 // ---- 各页构建 ----
@@ -510,6 +534,113 @@ QWidget *SettingsDialog::buildGoodyPage()
     // T-030 约定：文字不允许灰色）；此处只约束字号
     hint->setStyleSheet("font-size: 12px;");
     lay->addWidget(hint);
+
+    lay->addStretch();
+    return page;
+}
+
+QWidget *SettingsDialog::buildCalendarPage()
+{
+    auto *page = newPage();
+    auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
+    Q_ASSERT(lay);
+
+    auto addSection = [lay](const QString &title) {
+        auto *label = new QLabel(title);
+        label->setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 4px 0;");
+        lay->addWidget(label);
+    };
+    auto addSeparator = [lay, page]() {
+        auto *sep = new QFrame(page);
+        sep->setObjectName("dialogSeparator");
+        sep->setFrameShape(QFrame::HLine);
+        lay->addWidget(sep);
+    };
+
+    // 桌面日历本体（注入式贴壁纸日历）上只有翻页与「调整位置和大小」按钮
+    //（需要即时可视反馈），其余开关与功能入口全部收编到本页
+    const CalendarSettings cal = CalendarSettings::load();
+
+    // ---- 显示内容 ----
+    addSection(QStringLiteral("显示内容"));
+    m_calLunarCheck = new QCheckBox(QStringLiteral("显示农历 / 节气 / 节日"), page);
+    m_calLunarCheck->setChecked(cal.showLunar);
+    m_calWeekNumCheck = new QCheckBox(QStringLiteral("显示周数"), page);
+    m_calWeekNumCheck->setChecked(cal.showWeekNumbers);
+    m_calEventsCheck = new QCheckBox(QStringLiteral("显示日程内容"), page);
+    m_calEventsCheck->setChecked(cal.showEvents);
+    m_calGlassCheck = new QCheckBox(QStringLiteral("毛玻璃特效（模糊壁纸背景）"), page);
+    m_calGlassCheck->setChecked(cal.glassEffect);
+    m_calListCheck = new QCheckBox(QStringLiteral("显示日历清单（取消勾选即从桌面隐藏日历）"), page);
+    m_calListCheck->setChecked(!cal.hidden);
+    lay->addWidget(m_calLunarCheck);
+    lay->addWidget(m_calWeekNumCheck);
+    lay->addWidget(m_calEventsCheck);
+    lay->addWidget(m_calGlassCheck);
+    lay->addWidget(m_calListCheck);
+
+    auto *fontRow = new QHBoxLayout;
+    auto *fontLabel = new QLabel(QStringLiteral("字体大小："), page);
+    m_calFontSpin = new QSpinBox(page);
+    m_calFontSpin->setRange(70, 160);
+    m_calFontSpin->setSingleStep(5);
+    m_calFontSpin->setValue(std::clamp(cal.fontScale, 70, 160));
+    m_calFontSpin->setFixedWidth(80);
+    m_calFontSpin->setSuffix(QStringLiteral("%"));
+    fontRow->addWidget(fontLabel);
+    fontRow->addWidget(m_calFontSpin);
+    fontRow->addStretch();
+    lay->addLayout(fontRow);
+
+    addSeparator();
+
+    // ---- 功能入口（即时生效） ----
+    addSection(QStringLiteral("功能入口（点击即生效，无需保存）"));
+    auto *btnRow1 = new QHBoxLayout;
+    auto *searchBtn = new QPushButton(QStringLiteral("内容搜索…"), page);
+    auto *pickBtn = new QPushButton(QStringLiteral("选择日期…"), page);
+    btnRow1->addWidget(searchBtn);
+    btnRow1->addWidget(pickBtn);
+    btnRow1->addStretch();
+    lay->addLayout(btnRow1);
+    auto *btnRow2 = new QHBoxLayout;
+    auto *exportBtn = new QPushButton(QStringLiteral("导出日程…"), page);
+    auto *importBtn = new QPushButton(QStringLiteral("导入日程…"), page);
+    btnRow2->addWidget(exportBtn);
+    btnRow2->addWidget(importBtn);
+    btnRow2->addStretch();
+    lay->addLayout(btnRow2);
+    connect(searchBtn, &QPushButton::clicked, this, [this] {
+        if (m_services && m_services->calendarOpenSearch)
+            m_services->calendarOpenSearch();
+    });
+    connect(pickBtn, &QPushButton::clicked, this, [this] {
+        if (m_services && m_services->calendarPickDate)
+            m_services->calendarPickDate();
+    });
+    connect(exportBtn, &QPushButton::clicked, this, [this] {
+        if (m_services && m_services->calendarExportTasks)
+            m_services->calendarExportTasks();
+    });
+    connect(importBtn, &QPushButton::clicked, this, [this] {
+        if (m_services && m_services->calendarImportTasks)
+            m_services->calendarImportTasks();
+    });
+
+    addSeparator();
+
+    // ---- 其他 ----
+    addSection(QStringLiteral("其他"));
+    m_calGuideCheck = new QCheckBox(QStringLiteral("显示首次使用提示（调整位置入口气泡）"), page);
+    m_calGuideCheck->setChecked(cal.showGuide);
+    lay->addWidget(m_calGuideCheck);
+    auto *dirHint = new QLabel(QStringLiteral("数据目录：%1\n数据仅保存在本机。"
+                                              "日历上的翻页与「调整位置和大小」按钮即时生效，"
+                                              "本页修改点击下方「确定」后应用。")
+                                   .arg(CalendarSettings::dataDir()));
+    dirHint->setWordWrap(true);
+    dirHint->setStyleSheet("font-size: 12px;");
+    lay->addWidget(dirHint);
 
     lay->addStretch();
     return page;

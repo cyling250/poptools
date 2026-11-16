@@ -8,11 +8,9 @@ namespace poptools {
 
 enum class HeaderButtonKind
 {
-    Settings,
-    Plugin,
     Previous,
     Next,
-    Menu
+    Adjust
 };
 
 // ============================================================
@@ -31,10 +29,9 @@ public:
     QRect weekNumberArea;
     QRect nextMonthPill;
     QRect guidePill;
-    QVector<QRect> headerButtons;             // 5 个，右起往左
-    static constexpr HeaderButtonKind headerKinds[5] = {
-        HeaderButtonKind::Settings, HeaderButtonKind::Plugin, HeaderButtonKind::Previous,
-        HeaderButtonKind::Next, HeaderButtonKind::Menu
+    QVector<QRect> headerButtons;             // 3 个，右起往左（翻页 + 调整，其余入口在应用设置页）
+    static constexpr HeaderButtonKind headerKinds[3] = {
+        HeaderButtonKind::Previous, HeaderButtonKind::Next, HeaderButtonKind::Adjust
     };
 
     int year = 0;

@@ -2,9 +2,7 @@
 
 #include "CalendarAdjustOverlay.h"
 #include "CalendarEventEditor.h"
-#include "CalendarMenuForm.h"
 #include "CalendarSearchForm.h"
-#include "CalendarSettingsForm.h"
 
 #include "core/hotkey/GlobalMouseHook.h"
 
@@ -271,17 +269,11 @@ void CalendarHostWidget::updateHover(const QPoint &p)
             return;
     }
     m_hover = p;
+    // 头部按钮只做悬停底色，不弹文字气泡（气泡压住星期表头，被用户否掉）；
+    // 仅首次使用引导气泡保留
     QString hint;
     const int hh = m_layout->hitHeader(p);
-    if (hh >= 0) {
-        switch (CalendarLayout::headerKinds[hh]) {
-            case HeaderButtonKind::Settings: hint = QStringLiteral("日历设置"); break;
-            case HeaderButtonKind::Plugin: hint = QStringLiteral("插件"); break;
-            case HeaderButtonKind::Previous: hint = QStringLiteral("上一页"); break;
-            case HeaderButtonKind::Next: hint = QStringLiteral("下一页"); break;
-            case HeaderButtonKind::Menu: hint = QStringLiteral("更多"); break;
-        }
-    } else if (m_settings.showGuide && m_layout->guidePill.contains(p)) {
+    if (hh < 0 && m_settings.showGuide && m_layout->guidePill.contains(p)) {
         hint = QStringLiteral("调整日历清单的位置和大小");
     }
     if (hh != m_lastHeaderHover || hint != m_hoverHint) {
@@ -316,14 +308,8 @@ void CalendarHostWidget::handleSingleClick(const QPoint &p)
                 m_year = std::clamp(m_year, 1901, 2100);
                 render();
                 break;
-            case HeaderButtonKind::Menu:
-                openMainMenu();
-                break;
-            case HeaderButtonKind::Settings:
-                openSettings();
-                break;
-            case HeaderButtonKind::Plugin:
-                openPluginMenu();
+            case HeaderButtonKind::Adjust:
+                enterAdjustMode();
                 break;
         }
         return;
@@ -395,107 +381,6 @@ void CalendarHostWidget::openEditor(const QDate &date, const QRect &cell)
     editor->activateWindow();
 }
 
-void CalendarHostWidget::openMainMenu()
-{
-    if (!m_layout.has_value())
-        return;
-    const QRect b = m_layout->headerButtons.at(4);
-    int x = std::clamp(b.left() + b.width() - 200, m_screen.left() + 6,
-                       m_screen.right() + 1 - 206);
-    int y = std::clamp(b.bottom() + 1 + 4, m_screen.top() + 6, m_screen.bottom() + 1 - 500);
-    std::vector<CalendarMenuItemDef> items = {
-        { QStringLiteral("内容搜索"), [this] { searchTasks(); }, false, false, false },
-        { QStringLiteral("选择日期"), [this] { pickDate(); }, false, false, false },
-        { QStringLiteral("主题皮肤"),
-          [this] {
-              showInfo(QStringLiteral("主题皮肤"),
-                       QStringLiteral("默认深色毛玻璃皮肤。\n可在日历设置中调整毛玻璃与字体大小。"));
-          },
-          true, false, false },
-        { QStringLiteral("调整位置和大小"), [this] { enterAdjustMode(); }, false, false, false },
-        { QStringLiteral("隐藏日历清单"), [this] {
-             m_settings.hidden = true;
-             m_settings.save();
-             render();
-         },
-         false, false, false },
-        { QStringLiteral("隐藏日历内容"),
-          [this] {
-              m_settings.showEvents = !m_settings.showEvents;
-              m_settings.save();
-              render();
-          },
-          true, true, !m_settings.showEvents },
-        { QStringLiteral("导出"), [this] { exportTasks(); }, false, false, false },
-        { QStringLiteral("导入"), [this] { importTasks(); }, false, false, false },
-        { QStringLiteral("打印"), [this] { showInfo(QStringLiteral("打印"), QStringLiteral("暂未实现打印。")); },
-          true, false, false },
-        { QStringLiteral("日历设置"), [this] { openSettings(); }, false, false, false },
-        { QStringLiteral("功能介绍"),
-          [this] {
-              showInfo(QStringLiteral("功能介绍"),
-                       QStringLiteral("桌面日历：\n· 日历贴在壁纸上、图标下方\n· 不影响右键、框选和图标拖动\n"
-                                      "· 双击日期编辑当日日程\n· 支持农历、节气、节日和周数"));
-          },
-          false, false, false },
-        { QStringLiteral("关于"), [this] { showInfo(QStringLiteral("关于"), QStringLiteral("桌面日历 v1.0（PopTools 模块）")); },
-          true, false, false },
-        { QStringLiteral("退出软件"), [this] {
-             stopDuty();
-             qApp->quit();
-         },
-         false, false, false }
-    };
-    auto *menu = new CalendarMenuForm(std::move(items), logicalPos(QPoint(x, y)), nullptr);
-    trackModal(menu);
-    menu->show();
-    menu->raise();
-}
-
-void CalendarHostWidget::openPluginMenu()
-{
-    if (!m_layout.has_value())
-        return;
-    m_modal = true;
-    const QRect b = m_layout->headerButtons.at(1);
-    int x = std::clamp(b.left() + b.width() - 200, m_screen.left() + 6,
-                       m_screen.right() + 1 - 206);
-    int y = std::clamp(b.bottom() + 1 + 4, m_screen.top() + 6, m_screen.bottom() + 1 - 330);
-    auto tip = [this](const QString &title, const QString &body) {
-        showInfo(title, body);
-    };
-    std::vector<CalendarMenuItemDef> items = {
-        { QStringLiteral("桌面管理"),
-          [tip] { tip(QStringLiteral("桌面管理"), QStringLiteral("未实现桌面管理插件。")); },
-          false, false, false },
-        { QStringLiteral("新建便签"),
-          [tip] { tip(QStringLiteral("新建便签"), QStringLiteral("暂未实现便签。")); },
-          false, false, false },
-        { QStringLiteral("便签设置"),
-          [tip] { tip(QStringLiteral("便签设置"), QStringLiteral("暂未实现便签。")); },
-          false, false, false },
-        { QStringLiteral("便签管理"),
-          [tip] { tip(QStringLiteral("便签管理"), QStringLiteral("暂未实现便签。")); },
-          false, false, false },
-        { QStringLiteral("新建课程表"),
-          [tip] { tip(QStringLiteral("课程表"), QStringLiteral("暂未实现课程表。")); },
-          false, false, false },
-        { QStringLiteral("AI工作平台"),
-          [tip] { tip(QStringLiteral("AI工作平台"), QStringLiteral("暂未实现。")); },
-          false, false, false },
-        { QStringLiteral("三方日历设置"),
-          [tip] { tip(QStringLiteral("三方日历"), QStringLiteral("暂未实现三方日历。")); },
-          false, false, false },
-        { QStringLiteral("自动生成图标"),
-          [tip] { tip(QStringLiteral("自动生成图标"), QStringLiteral("暂未实现。")); },
-          false, false, false }
-    };
-    auto *menu = new CalendarMenuForm(std::move(items), logicalPos(QPoint(x, y)), nullptr);
-    trackModal(menu);
-    menu->show();
-    menu->raise();
-}
-
 void CalendarHostWidget::centerOnPanel(QWidget *w)
 {
     // 弹窗锚定日历面板中心（无 parent 的 QDialog 默认落在"活动屏"，多屏机器上
@@ -505,27 +390,6 @@ void CalendarHostWidget::centerOnPanel(QWidget *w)
     const QPoint br = logicalPos(QPoint(panel.right(), panel.bottom()));
     w->move(tl.x() + (br.x() - tl.x() - w->width()) / 2,
             tl.y() + (br.y() - tl.y() - w->height()) / 2);
-}
-
-void CalendarHostWidget::openSettings()
-{
-    auto *form = new CalendarSettingsForm(m_settings, nullptr);
-    // QDialog::done()（确定/取消/关窗/ESC）只 hide 不析构——QObject::destroyed
-    // 永不触发，m_modal 会永久卡死（日历冻结 bug 的根因）。改监听 finished
-    //（done() 必发），收尾后 deleteLater，复位交给 trackModal 的 destroyed 守卫
-    connect(form, &QDialog::finished, this, [this, form](int result) {
-        if (result == QDialog::Accepted) {
-            m_settings.save();
-            if (m_renderer)
-                m_renderer->refreshWallpaper();
-        }
-        form->deleteLater();
-    });
-    trackModal(form);
-    centerOnPanel(form);
-    form->show();
-    form->raise();
-    form->activateWindow();
 }
 
 void CalendarHostWidget::enterAdjustMode()
@@ -579,6 +443,16 @@ void CalendarHostWidget::showCalendar()
         startDuty();
     else
         render();
+}
+
+void CalendarHostWidget::reloadSettings()
+{
+    // 应用设置页保存日历设置后的入口：重读 JSON、应用几何钳制、重绘
+    m_settings = CalendarSettings::load();
+    clampSettings();
+    if (m_renderer)
+        m_renderer->refreshWallpaper();
+    render();
 }
 
 void CalendarHostWidget::searchTasks()

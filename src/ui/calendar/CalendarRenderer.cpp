@@ -382,10 +382,14 @@ void CalendarRenderer::drawShadowText(QPainter *g, const QString &text, const QF
         g->drawText(QRectF(pos.x(), pos.y(), maxWidth, fm.height() + 8),
                     Qt::AlignLeft | Qt::AlignTop, elided);
     } else {
+        // GDI+ DrawString 锚点为左上角，Qt drawText(QPointF) 锚点为基线——
+        // 直接移植会整体抬高一个 ascent，日期/农历文字骑在横向网格线上；
+        // 补偿 ascent 后 pos 语义与 C# 版一致（y = 文字顶）
+        const qreal asc = fm.ascent();
         g->setPen(QColor(0, 0, 0, 120));
-        g->drawText(pos + QPointF(1, 1), text);
+        g->drawText(pos + QPointF(1, asc + 1), text);
         g->setPen(color);
-        g->drawText(pos, text);
+        g->drawText(pos + QPointF(0, asc), text);
     }
 }
 
@@ -449,20 +453,6 @@ void CalendarRenderer::drawHeaderIcon(QPainter *g, HeaderButtonKind kind, const 
     g->setBrush(Qt::NoBrush);
     const qreal cx = r.left() + r.width() / 2.0, cy = r.top() + r.height() / 2.0;
     switch (kind) {
-        case HeaderButtonKind::Settings: {
-            g->drawEllipse(QPointF(cx, cy), 4, 4);
-            for (int i = 0; i < 8; ++i) {
-                const double a = i * M_PI / 4;
-                g->drawLine(QPointF(cx + std::cos(a) * 6, cy + std::sin(a) * 6),
-                            QPointF(cx + std::cos(a) * 8.5, cy + std::sin(a) * 8.5));
-            }
-            break;
-        }
-        case HeaderButtonKind::Plugin:
-            g->drawRect(QRectF(cx - 6.5, cy - 5, 13, 9));
-            g->drawLine(QPointF(cx, cy + 4), QPointF(cx, cy + 7));
-            g->drawLine(QPointF(cx - 3, cy + 7), QPointF(cx + 3, cy + 7));
-            break;
         case HeaderButtonKind::Previous:
             g->drawPolyline(QVector<QPointF>{ QPointF(cx + 3, cy - 6), QPointF(cx - 3, cy),
                                               QPointF(cx + 3, cy + 6) });
@@ -471,10 +461,17 @@ void CalendarRenderer::drawHeaderIcon(QPainter *g, HeaderButtonKind kind, const 
             g->drawPolyline(QVector<QPointF>{ QPointF(cx - 3, cy - 6), QPointF(cx + 3, cy),
                                               QPointF(cx - 3, cy + 6) });
             break;
-        case HeaderButtonKind::Menu:
-            g->drawLine(QPointF(cx - 7, cy - 5), QPointF(cx + 7, cy - 5));
+        case HeaderButtonKind::Adjust: // 移动十字箭头
             g->drawLine(QPointF(cx - 7, cy), QPointF(cx + 7, cy));
-            g->drawLine(QPointF(cx - 7, cy + 5), QPointF(cx + 7, cy + 5));
+            g->drawLine(QPointF(cx, cy - 7), QPointF(cx, cy + 7));
+            g->drawPolyline(QVector<QPointF>{ QPointF(cx - 4, cy - 3), QPointF(cx - 7, cy),
+                                              QPointF(cx - 4, cy + 3) });
+            g->drawPolyline(QVector<QPointF>{ QPointF(cx + 4, cy - 3), QPointF(cx + 7, cy),
+                                              QPointF(cx + 4, cy + 3) });
+            g->drawPolyline(QVector<QPointF>{ QPointF(cx - 3, cy - 4), QPointF(cx, cy - 7),
+                                              QPointF(cx + 3, cy - 4) });
+            g->drawPolyline(QVector<QPointF>{ QPointF(cx - 3, cy + 4), QPointF(cx, cy + 7),
+                                              QPointF(cx + 3, cy + 4) });
             break;
     }
 }

@@ -31,7 +31,7 @@ public:
     ~MainWindow() override; // shutdownAll：模块撤销能力槽，先于成员逆序析构
 
 private slots:
-    void onShowSettings();
+    void onShowSettings(bool openCalendarPage = false);
 
 private:
     QSystemTrayIcon *m_tray;

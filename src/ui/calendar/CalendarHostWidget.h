@@ -47,7 +47,13 @@ public:
     // 托盘入口
     void showCalendar();        // 取消隐藏 + 渲染
     void enterAdjustMode();
-    void openSettings();
+    // 设置页保存日历设置后调用：重读 settings.json 并重绘
+    void reloadSettings();
+    // 应用设置页「桌面日历」页的功能入口（经 AppServices 槽位供外部调用）
+    void searchTasks();
+    void pickDate();
+    void exportTasks();
+    void importTasks();
 
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qint64 *result) override;
@@ -60,12 +66,6 @@ private:
     void clampSettings();
     QPoint logicalPos(const QPoint &physical) const; // 物理 → Qt 逻辑
     void openEditor(const QDate &date, const QRect &cell);
-    void openMainMenu();
-    void openPluginMenu();
-    void searchTasks();
-    void pickDate();
-    void exportTasks();
-    void importTasks();
     void showInfo(const QString &title, const QString &text);
     void onDllEvent(int ev, int extra, const QPoint &p);
     void updateHover(const QPoint &p);

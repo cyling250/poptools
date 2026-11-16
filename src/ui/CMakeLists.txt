@@ -131,12 +131,8 @@ add_library(poptools_ui_calendar STATIC
     calendar/CalendarRenderer.h
     calendar/CalendarHostWidget.cpp
     calendar/CalendarHostWidget.h
-    calendar/CalendarMenuForm.cpp
-    calendar/CalendarMenuForm.h
     calendar/CalendarEventEditor.cpp
     calendar/CalendarEventEditor.h
-    calendar/CalendarSettingsForm.cpp
-    calendar/CalendarSettingsForm.h
     calendar/CalendarSearchForm.cpp
     calendar/CalendarSearchForm.h
     calendar/CalendarAdjustOverlay.cpp
@@ -158,6 +154,7 @@ add_library(poptools_ui_settings STATIC
     settings/SettingsDialog.h
 )
 target_link_libraries(poptools_ui_settings PUBLIC
+    poptools_app_infra
     poptools_core
     Qt6::Core
     Qt6::Gui
