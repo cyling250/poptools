@@ -9,7 +9,7 @@
 cht/japan/korean/cyrillic 四套 rec 模型（约 40MB）解压后即删除，解包约 55MB。
 
 流程：
-  1. 经 7897 代理下载 RapidOCR-json_v0.2.0.7z（GitHub Release，70MB）
+  1. 经 17890 代理下载 RapidOCR-json_v0.2.0.7z（GitHub Release，70MB）
   2. 7-Zip 便携版解压（与 install_paddleocr.py 共用 temp_scripts/tool/7zip）
   3. RapidOCR-json_v0.2.0/ 内容平铺到 tools/rapidocr
   4. 裁剪未随服务使用的 rec 模型（对已有安装同样生效，幂等）
@@ -18,6 +18,7 @@ cht/japan/korean/cyrillic 四套 rec 模型（约 40MB）解压后即删除，�
   tools/rapidocr/RapidOCR-json.exe
   tools/rapidocr/models/  （det/cls/rec onnx + 字典 + configs.txt；中/英 rec）
 """
+import glob
 import io
 import os
 import shutil
@@ -27,7 +28,7 @@ import urllib.request
 
 VERSION = "v0.2.0"
 URL = f"https://github.com/hiroi-sora/RapidOCR-json/releases/download/{VERSION}/RapidOCR-json_{VERSION}.7z"
-PROXY = "http://127.0.0.1:7897"
+PROXY = "http://127.0.0.1:17890"
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(BASE)
@@ -72,17 +73,20 @@ def download(url, dest):
 
 
 def ensure_7zip():
-    exe = os.path.join(TOOLS_7ZIP, "Files", "7-Zip", "7z.exe")
-    if os.path.exists(exe):
-        return exe
+    # MSI 目录表自带 Files 前缀（24.09 实测），TARGETDIR 再拼一层会落到
+    # Files/Files/7-Zip/——故解压后在 TOOLS_7ZIP 下递归定位 7z.exe，兼容新旧布局
+    found = glob.glob(os.path.join(TOOLS_7ZIP, "**", "7z.exe"), recursive=True)
+    if found:
+        return found[0]
     msi = os.path.join(OUT, ZIP7_MSI)
     download(ZIP7_URL, msi)
     os.makedirs(TOOLS_7ZIP, exist_ok=True)
     subprocess.check_call(["msiexec", "/a", msi, "/qn",
                            f"TARGETDIR={os.path.join(TOOLS_7ZIP, 'Files')}"])
-    if not os.path.exists(exe):
-        sys.exit(f"7-Zip 便携版解压失败：{exe} 不存在")
-    return exe
+    found = glob.glob(os.path.join(TOOLS_7ZIP, "**", "7z.exe"), recursive=True)
+    if not found:
+        sys.exit(f"7-Zip 便携版解压失败：{TOOLS_7ZIP} 下未找到 7z.exe")
+    return found[0]
 
 
 def trim_unused_rec_models():

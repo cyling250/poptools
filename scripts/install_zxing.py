@@ -2,7 +2,7 @@
 """下载 zxing-cpp 源码到 tools/zxing（二维码识别库，Apache-2.0）。
 
 流程：
-  1. 经 7897 代理从 GitHub 下载 zxing-cpp v2.2.1 源码 tar.gz（约 1.3MB）
+  1. 经 17890 代理从 GitHub 下载 zxing-cpp v2.2.1 源码 tar.gz（约 1.3MB）
   2. Python 标准库 tarfile 解压，把 zxing-cpp-2.2.1/ 内容移到 tools/zxing
   3. CMake 检测 tools/zxing/CMakeLists.txt 存在时以静态库编入
      （EXCLUDE_FROM_ALL，仅 poptools_core 链接），缺失时二维码功能
@@ -21,7 +21,7 @@ import urllib.request
 
 VERSION = "2.2.1"
 URL = f"https://github.com/zxing-cpp/zxing-cpp/archive/refs/tags/v{VERSION}.tar.gz"
-PROXY = "http://127.0.0.1:7897"
+PROXY = "http://127.0.0.1:17890"
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(BASE)

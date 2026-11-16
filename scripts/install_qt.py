@@ -3,10 +3,10 @@
 
 流程：
   1. 若 .venv 不存在则用 uv 创建（uv 创建后自带管理解释器，无 pip，用 uv pip 安装依赖）
-  2. 若 aqtinstall 未安装则 `uv pip install --python .venv` 安装（经 7897 代理）
+  2. 若 aqtinstall 未安装则 `uv pip install --python .venv` 安装（经 17890 代理）
   3. 以子进程调用 `python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64`
      - 仅下载本工程所需模块：qtbase(Core/Gui/Widgets/Network) qtsvg(Svg) qttools(windeployqt)
-     - 经 127.0.0.1:7897 代理访问境外官方仓库
+     - 经 127.0.0.1:17890 代理访问境外官方仓库
      - 注意：aqtinstall 需 3.x，官方仓库 6.8+ 已改为 qt6_683/qt6_683 双层目录，
        旧版 aqt(2.x) 会报 "Failed to locate XML data"
   4. 完成后 tools/qt/6.8.3/msvc2022_64 作为 CMake 的 CMAKE_PREFIX_PATH，
@@ -23,7 +23,7 @@ QT_KIT = "win64_msvc2022_64"
 INSTALL_DIR_NAME = "msvc2022_64"
 # 仅下载构建/运行所需模块，避免整套 Qt（约 2GB）
 ARCHIVES = ["qtbase", "qtsvg", "qttools"]
-PROXY = "http://127.0.0.1:7897"
+PROXY = "http://127.0.0.1:17890"
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(BASE)
