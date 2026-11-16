@@ -4,30 +4,23 @@
 
 namespace poptools {
 
-namespace {
-constexpr wchar_t kShmName[] = L"Local\\PopToolsDesktopShared_v3";
-// 头部字段偏移（与注入 DLL 的 SharedHeader 逐字段对齐）
-constexpr int kOffMagic = 0;
-constexpr int kOffWidth = 4;
-constexpr int kOffHeight = 8;
-constexpr int kOffReady = 12;
-constexpr int kOffHostWnd = 16;
-constexpr int kOffSlotRect0 = 20; // slotRect[6][4]，每槽 16 字节 → 20..115
-constexpr int kOffSeq = 20 + DesktopSharedCanvas::kMaxSlots * 16;
-} // namespace
-
 DesktopSharedCanvas::~DesktopSharedCanvas()
 {
     dispose();
 }
 
+// 创建命名共享段并绑定 DIB：总大小 = 4096 头 + width×height×4；失败路径逐级回滚
+//（view→map）。段名固定（见 desktop_protocol.h）：与现存同名段尺寸不兼容时
+// 创建失败——explorer 侧 DLL 长期持有旧段，见 DesktopSurfaceHost::startDuty 的
+// 重试路径（T-062 BUG-02）
 bool DesktopSharedCanvas::create(int width, int height)
 {
     dispose();
     if (width <= 0 || height <= 0)
         return false;
     const DWORD total = static_cast<DWORD>(kShmOffset) + static_cast<DWORD>(width) * height * 4;
-    m_map = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, total, kShmName);
+    m_map = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, total,
+                                 POPTOOLS_DESKTOP_SHM_NAME);
     if (!m_map)
         return false;
     m_view = ::MapViewOfFile(m_map, FILE_MAP_ALL_ACCESS, 0, 0, 0);
@@ -57,14 +50,15 @@ bool DesktopSharedCanvas::create(int width, int height)
                      QImage::Format_ARGB32_Premultiplied);
     m_width = width;
     m_height = height;
-    writeHeaderInt(kOffMagic, kMagic);
-    writeHeaderInt(kOffWidth, width);
-    writeHeaderInt(kOffHeight, height);
-    writeHeaderInt(kOffReady, 0);
-    writeHeaderInt(kOffHostWnd, 0);
+    writeHeaderInt(POPTOOLS_HDR_MAGIC, kMagic);
+    writeHeaderInt(POPTOOLS_HDR_WIDTH, width);
+    writeHeaderInt(POPTOOLS_HDR_HEIGHT, height);
+    writeHeaderInt(POPTOOLS_HDR_READY, 0);
+    writeHeaderInt(POPTOOLS_HDR_HOSTWND, 0);
     return true;
 }
 
+// 逆序释放：先让 QImage 脱离 m_bits（防止悬垂引用），再删 DIB、解除映射、关句柄
 void DesktopSharedCanvas::dispose()
 {
     m_image = QImage();
@@ -82,6 +76,7 @@ void DesktopSharedCanvas::dispose()
     m_height = 0;
 }
 
+// 向共享头指定偏移写一个 LONG（volatile 直写；应用侧仅 UI 单写者，无需 Interlocked）
 void DesktopSharedCanvas::writeHeaderInt(int offset, LONG value)
 {
     if (!m_view)
@@ -89,16 +84,18 @@ void DesktopSharedCanvas::writeHeaderInt(int offset, LONG value)
     *reinterpret_cast<volatile LONG *>(static_cast<BYTE *>(m_view) + offset) = value;
 }
 
+// 宿主 HWND 写入头部，供 DLL ForwardEvent 投递鼠标事件；HWND 按 USER 句柄惯例
+// 截断 32 位（DLL 侧 (HWND)(INT_PTR) 符号扩展还原，微软官方惯例）
 void DesktopSharedCanvas::setHostWindow(HWND hwnd)
 {
-    writeHeaderInt(kOffHostWnd, static_cast<LONG>(reinterpret_cast<LONG_PTR>(hwnd)));
+    writeHeaderInt(POPTOOLS_HDR_HOSTWND, static_cast<LONG>(reinterpret_cast<LONG_PTR>(hwnd)));
 }
 
 void DesktopSharedCanvas::setSlotRect(int slot, const QRect &r)
 {
     if (slot < 0 || slot >= kMaxSlots)
         return;
-    const int base = kOffSlotRect0 + slot * 16;
+    const int base = POPTOOLS_HDR_SLOTRECT0 + slot * 16;
     writeHeaderInt(base + 0, r.left());
     writeHeaderInt(base + 4, r.top());
     writeHeaderInt(base + 8, r.left() + r.width()); // C# Rectangle.Right = X+Width
@@ -110,9 +107,11 @@ void DesktopSharedCanvas::markReady()
     if (!m_view)
         return;
     const LONG seq =
-        *reinterpret_cast<volatile LONG *>(static_cast<BYTE *>(m_view) + kOffSeq);
-    writeHeaderInt(kOffSeq, seq + 1);
-    writeHeaderInt(kOffReady, 1);
+        *reinterpret_cast<volatile LONG *>(static_cast<BYTE *>(m_view) + POPTOOLS_HDR_SEQ);
+    // 先 seq++ 后 ready=1 的写序：读端可凭「ready 置位时 seq 必为新值」判定帧完整；
+    // 当前 DLL 读端只看 ready，seq 备将来版本/诊断用
+    writeHeaderInt(POPTOOLS_HDR_SEQ, seq + 1);
+    writeHeaderInt(POPTOOLS_HDR_READY, 1);
 }
 
 void DesktopSharedCanvas::publishFrame(const QImage &frame, const QRect &dirty)
@@ -125,6 +124,7 @@ void DesktopSharedCanvas::publishFrame(const QImage &frame, const QRect &dirty)
     const QRect r = dirty.isEmpty() ? m_image.rect() : dirty.intersected(m_image.rect());
     if (r.isEmpty())
         return;
+    // 全幅且源步距一致 → 单次 memcpy（最快路径）；否则逐行拷，容忍源帧 bytesPerLine 不同
     if (r == m_image.rect() && frame.bytesPerLine() == stride) {
         memcpy(m_bits, frame.constBits(), static_cast<size_t>(stride) * m_image.height());
         return;

@@ -17,24 +17,14 @@
 #include <commctrl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stddef.h>
+
+#include "desktop_protocol.h" // 跨进程协议常量唯一事实源（应用侧 ui/shared 同源，S-01）
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "msimg32.lib")
-
-#define SHM_NAME L"Local\\PopToolsDesktopShared_v3"
-#define SHM_SLOTS 6 // 面板槽位数（v3：任意面板任意槽，0=日历 1..N=收纳盒等）
-#define SHM_OFFSET 4096
-#define WM_CLONE_UPDATE (WM_APP + 0x101)
-#define WM_CLONE_STOP   (WM_APP + 0x102)
-#define WM_CLONE_EVENT  (WM_APP + 0x103)
-
-#define EV_MOVE    1
-#define EV_DOWN    2
-#define EV_UP      3
-#define EV_DBLCLK  4
-#define EV_LEAVE   5
 
 #pragma pack(push, 1)
 struct SharedHeader {
@@ -43,12 +33,22 @@ struct SharedHeader {
     volatile LONG height;
     volatile LONG ready;
     volatile LONG hostWnd;
-    volatile LONG slotRect[SHM_SLOTS][4]; // 每槽 L/T/R/B（空槽 0 尺寸，DLL 跳过）
+    volatile LONG slotRect[POPTOOLS_DESKTOP_SHM_SLOTS][4]; // 每槽 L/T/R/B（空槽 0 尺寸，DLL 跳过）
     volatile LONG seq;
 };
 #pragma pack(pop)
 
-static const LONG kMagic = 0x434C4B33; // CLK3（v3 槽位数组：结构不兼容，失配拒画）
+// 头部布局与应用侧 POPTOOLS_HDR_* 偏移逐字节对齐（漂移即编译失败，S-01）
+static_assert(offsetof(SharedHeader, magic) == POPTOOLS_HDR_MAGIC, "SharedHeader layout drift: magic");
+static_assert(offsetof(SharedHeader, width) == POPTOOLS_HDR_WIDTH, "SharedHeader layout drift: width");
+static_assert(offsetof(SharedHeader, height) == POPTOOLS_HDR_HEIGHT, "SharedHeader layout drift: height");
+static_assert(offsetof(SharedHeader, ready) == POPTOOLS_HDR_READY, "SharedHeader layout drift: ready");
+static_assert(offsetof(SharedHeader, hostWnd) == POPTOOLS_HDR_HOSTWND, "SharedHeader layout drift: hostWnd");
+static_assert(offsetof(SharedHeader, slotRect) == POPTOOLS_HDR_SLOTRECT0, "SharedHeader layout drift: slotRect");
+static_assert(offsetof(SharedHeader, seq) == POPTOOLS_HDR_SEQ, "SharedHeader layout drift: seq");
+static_assert(sizeof(SharedHeader) == POPTOOLS_HDR_SEQ + 4, "SharedHeader layout drift: total size");
+
+static const LONG kMagic = POPTOOLS_DESKTOP_SHM_MAGIC; // CLK3（v3 槽位数组：结构不兼容，失配拒画）
 
 static HINSTANCE g_hInst = NULL;
 static HHOOK g_hook = NULL;
@@ -74,6 +74,7 @@ static LRESULT CALLBACK MsgWndProc(HWND, UINT, WPARAM, LPARAM);
 static LRESULT CALLBACK DefViewProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 static LRESULT CALLBACK ListViewProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
+// 追加一行到 %TEMP%\PopToolsCalendarHook.log（诊断用，失败静默）
 static void Log(const wchar_t* fmt, ...)
 {
     wchar_t path[MAX_PATH];
@@ -97,6 +98,8 @@ static void Log(const wchar_t* fmt, ...)
     CloseHandle(f);
 }
 
+// 找桌面图标列表：ProgMan→SHELLDLL_DefView→SysListView32 优先，失败再扫
+// WorkerW 链（壁纸轮换工具会把 DefView 挪进 WorkerW）
 static HWND FindDesktopListView()
 {
     HWND prog = FindWindowW(L"ProgMan", NULL);
@@ -118,6 +121,7 @@ static HWND FindDesktopListView()
     return NULL;
 }
 
+// 释放合成缓冲 DC：先 SelectObject 还原旧位图再删，防删占用对象
 static void ReleaseBgDC()
 {
     if (g_bgDC && g_bgOld) SelectObject(g_bgDC, g_bgOld);
@@ -126,6 +130,7 @@ static void ReleaseBgDC()
     g_bgDC = NULL; g_bgBmp = NULL; g_bgOld = NULL; g_bgW = 0; g_bgH = 0;
 }
 
+// 释放共享位图 DC（先还原旧位图再删），并级联释放 bg 合成缓冲
 static void ReleaseDib()
 {
     if (g_memDC && g_oldDib) SelectObject(g_memDC, g_oldDib);
@@ -135,6 +140,21 @@ static void ReleaseDib()
     ReleaseBgDC();
 }
 
+// 32bpp 顶行向下的 DIB 头（EnsureDib/EnsureBgDC 共用，S-03 纯提取）
+static BITMAPINFO MakeArgbTopDownInfo(int w, int h)
+{
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h; // 负高 = 顶行在前（与 QImage/共享位图布局一致）
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    return bi;
+}
+
+// 按头部 width/height 惰性建共享段 DIB + 内存 DC；尺寸 ≤0 或 >8192 防御性拒绝
+//（防应用侧异常值），尺寸变化才重建（应用侧重建画布后头部尺寸随之更新）
 static bool EnsureDib(HDC dc)
 {
     if (!g_hdr || !g_map) return false;
@@ -142,15 +162,9 @@ static bool EnsureDib(HDC dc)
     if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return false;
     if (g_memDC && g_bmpW == w && g_bmpH == h) return true;
     ReleaseDib();
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
+    BITMAPINFO bi = MakeArgbTopDownInfo(w, h);
     void* bits = NULL;
-    HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, g_map, SHM_OFFSET);
+    HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, g_map, POPTOOLS_DESKTOP_SHM_OFFSET);
     if (!dib) { Log(L"CreateDIBSection failed %lu", GetLastError()); return false; }
     HDC mem = CreateCompatibleDC(dc);
     if (!mem) { DeleteObject(dib); return false; }
@@ -160,18 +174,13 @@ static bool EnsureDib(HDC dc)
     return true;
 }
 
+// 惰性建与 DIB 同尺寸合成缓冲；EnsureDib 重建时经 ReleaseDib 级联重建
 static bool EnsureBgDC(HDC dc)
 {
     if (!g_hdr || !g_map) return false;
     if (g_bgDC && g_bgW == g_bmpW && g_bgH == g_bmpH) return true;
     ReleaseBgDC();
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = g_bmpW;
-    bi.bmiHeader.biHeight = -g_bmpH;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
+    BITMAPINFO bi = MakeArgbTopDownInfo(g_bmpW, g_bmpH);
     void* bits = NULL;
     HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
     if (!bmp) { Log(L"bg dib failed %lu", GetLastError()); return false; }
@@ -182,6 +191,8 @@ static bool EnsureBgDC(HDC dc)
     return true;
 }
 
+// 整幅共享位图按 AC_SRC_ALPHA 预乘混合到目标 DC（依赖调用方已设裁剪）；
+// 失败只记一次日志防刷屏
 static void BlendCalendar(HDC dc)
 {
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
@@ -191,15 +202,19 @@ static void BlendCalendar(HDC dc)
     }
 }
 
+// 鼠标事件打包转发宿主窗：wParam=ev|extra<<16（extra=点在图标上），
+// lParam=MAKELPARAM(屏幕坐标)；解码端 DesktopSurfaceHost::nativeEvent，
+// 两侧口径必须一致（协议常量见 desktop_protocol.h）
 static void ForwardEvent(UINT ev, int extra, POINT pt)
 {
     if (!g_hdr) return;
     HWND host = (HWND)(INT_PTR)g_hdr->hostWnd;
     if (!host || !IsWindow(host)) return;
-    PostMessageW(host, WM_CLONE_EVENT, (WPARAM)(ev | (extra << 16)),
+    PostMessageW(host, POPTOOLS_MSG_CLONE_EVENT, (WPARAM)(ev | (extra << 16)),
                  MAKELPARAM((short)pt.x, (short)pt.y));
 }
 
+// 光标处 LVM_HITTEST 是否命中桌面图标（决定 click/dblclk 是否穿透给系统）
 static bool IconAtCursor(POINT* screenPt)
 {
     GetCursorPos(screenPt);
@@ -212,12 +227,15 @@ static bool IconAtCursor(POINT* screenPt)
     return hti.iItem != -1;
 }
 
+// SHELLDLL_DefView 子类：WM_ERASEBKGND 双缓冲合成（壁纸+日历一次上屏），
+// WM_NOTIFY 转发 listview 的 click/dblclk（LVM_HITTEST 判图标定穿透）
 static LRESULT CALLBACK DefViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                     UINT_PTR uIdSubclass, DWORD_PTR)
 {
     if (msg == WM_ERASEBKGND) {
         HDC dc = (HDC)wParam;
         bool atomic = false;
+        // magic/ready 双门：失配或未就绪一律走兜底直画——版本不符宁可看不见日历，不可花屏
         if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc)) {
             RECT box;
             const int cb = GetClipBox(dc, &box);
@@ -254,11 +272,11 @@ static LRESULT CALLBACK DefViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (nh->code == NM_DBLCLK) {
                 POINT pt = {};
                 int icon = IconAtCursor(&pt) ? 1 : 0;
-                ForwardEvent(EV_DBLCLK, icon, pt);
+                ForwardEvent(POPTOOLS_EV_DBLCLK, icon, pt);
             } else if (nh->code == NM_CLICK) {
                 POINT pt = {};
                 int icon = IconAtCursor(&pt) ? 1 : 0;
-                ForwardEvent(EV_UP, icon, pt);
+                ForwardEvent(POPTOOLS_EV_UP, icon, pt);
             }
         }
     }
@@ -268,6 +286,8 @@ static LRESULT CALLBACK DefViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+// SysListView32 子类：擦除返 1（透明，桌面由 DefView 层合成）；鼠标事件打包
+// 转发宿主窗；双击先 LVM_HITTEST 判图标定穿透
 static LRESULT CALLBACK ListViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                      UINT_PTR uIdSubclass, DWORD_PTR)
 {
@@ -277,25 +297,25 @@ static LRESULT CALLBACK ListViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         case WM_MOUSEMOVE: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ClientToScreen(hwnd, &pt);
-            ForwardEvent(EV_MOVE, 0, pt);
+            ForwardEvent(POPTOOLS_EV_MOVE, 0, pt);
             break;
         }
         case WM_MOUSELEAVE: {
             POINT pt = { 0, 0 };
             GetCursorPos(&pt);
-            ForwardEvent(EV_LEAVE, 0, pt);
+            ForwardEvent(POPTOOLS_EV_LEAVE, 0, pt);
             break;
         }
         case WM_LBUTTONDOWN: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ClientToScreen(hwnd, &pt);
-            ForwardEvent(EV_DOWN, 0, pt);
+            ForwardEvent(POPTOOLS_EV_DOWN, 0, pt);
             break;
         }
         case WM_LBUTTONUP: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ClientToScreen(hwnd, &pt);
-            ForwardEvent(EV_UP, 0, pt);
+            ForwardEvent(POPTOOLS_EV_UP, 0, pt);
             break;
         }
         case WM_LBUTTONDBLCLK: {
@@ -305,7 +325,7 @@ static LRESULT CALLBACK ListViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             SendMessageW(hwnd, LVM_HITTEST, 0, (LPARAM)&hti);
             int icon = (hti.iItem != -1) ? 1 : 0;
             ClientToScreen(hwnd, &pt);
-            ForwardEvent(EV_DBLCLK, icon, pt);
+            ForwardEvent(POPTOOLS_EV_DBLCLK, icon, pt);
             break;
         }
         case WM_NCDESTROY:
@@ -315,6 +335,8 @@ static LRESULT CALLBACK ListViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+// 幂等清理：定时器/消息窗 → 双子类 → GDI/映射 → 重画桌面恢复原貌；STOP、
+// WM_DESTROY、进程退出多入口可达，全局清空保证可重入
 static void CleanupExplorer()
 {
     if (g_msgWnd) {
@@ -342,6 +364,8 @@ static void CleanupExplorer()
     }
 }
 
+// 注入后初始化（可重入）：子类存活即短路；窗口失效先 CleanupExplorer 再重查
+// 重挂（explorer 重启场景）；DLL 消息窗 + 1s 看门狗在此创建
 static bool EnsureInit()
 {
     if (g_initializing) return g_inited;
@@ -356,7 +380,7 @@ static bool EnsureInit()
     HWND def = GetParent(lv);
     if (!def) return false;
     if (!g_map) {
-        g_map = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, SHM_NAME);
+        g_map = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, POPTOOLS_DESKTOP_SHM_NAME);
         if (!g_map) {
             static bool once = false;
             if (!once) { once = true; Log(L"OpenFileMapping failed %lu", GetLastError()); }
@@ -383,16 +407,20 @@ static bool EnsureInit()
     bool s1 = SetWindowSubclass(def, DefViewProc, 0xC1C1, 0) ? true : false;
     bool s2 = SetWindowSubclass(lv, ListViewProc, 0xC1C2, 0) ? true : false;
     Log(L"subclass def=%p lv=%p ok=%d/%d", def, lv, s1, s2);
-    g_inited = true;
+    /* T-062 修复: BUG-05 原来无条件 g_inited=true——部分子类化失败（如 s1 败
+       s2 成）时 EnsureInit 早退、1s 看门狗不再重试，鼠标转发活着但永不渲染。
+       改为 s1&&s2：SetWindowSubclass 同 id 重装即替换，看门狗每秒重试幂等安全 */
+    g_inited = s1 && s2;
     InvalidateRect(def, NULL, TRUE);
     InvalidateRect(lv, NULL, TRUE);
     return true;
 }
 
+// DLL 消息窗过程：应用 UPDATE 按槽失效、STOP 清理自毁、TIMER(1s) 看门狗重初始化
 static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
-        case WM_CLONE_UPDATE:
+        case POPTOOLS_MSG_CLONE_UPDATE:
         {
             // 脏矩形失效（红线 4）：按各面板槽矩形 + 24px 边距逐槽失效（覆盖
             // 投影 ±18px 与发光外扩 ±11px 的溢出）；全部槽皆空时兜底全失效。
@@ -402,12 +430,12 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             // 像素已清空，但若只失效新矩形，explorer 不重绘旧位置——屏幕上
             // 残留上一次混合的旧画面（花屏残影）。故每槽记上次失效矩形，
             // 本次失效 = 当前 ∪ 上次（变了才多失效一次），残影无处可留
-            static RECT s_prev[SHM_SLOTS] = {};
-            static BOOL s_prevValid[SHM_SLOTS] = {};
-            RECT rc[SHM_SLOTS * 2];
+            static RECT s_prev[POPTOOLS_DESKTOP_SHM_SLOTS] = {};
+            static BOOL s_prevValid[POPTOOLS_DESKTOP_SHM_SLOTS] = {};
+            RECT rc[POPTOOLS_DESKTOP_SHM_SLOTS * 2];
             int nRect = 0;
             if (g_hdr && g_hdr->ready) {
-                for (int s = 0; s < SHM_SLOTS; ++s) {
+                for (int s = 0; s < POPTOOLS_DESKTOP_SHM_SLOTS; ++s) {
                     const LONG l = g_hdr->slotRect[s][0], t = g_hdr->slotRect[s][1];
                     const LONG r = g_hdr->slotRect[s][2], b = g_hdr->slotRect[s][3];
                     const BOOL curValid = (r > l && b > t) ? TRUE : FALSE;
@@ -435,6 +463,7 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     s_prevValid[s] = curValid;
                 }
             }
+            // 一条矩形都没算出（全部空槽/未就绪）→ NULL 全失效兜底，保证首帧必定上屏
             const int count = nRect > 0 ? nRect : 1;
             for (int i = 0; i < count; ++i) {
                 const BOOL haveRect = nRect > 0 ? TRUE : FALSE;
@@ -445,7 +474,7 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             }
             return 0;
         }
-        case WM_CLONE_STOP:
+        case POPTOOLS_MSG_CLONE_STOP:
         {
             HWND self = g_msgWnd;
             g_msgWnd = NULL;
@@ -468,16 +497,23 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+// 钩子过程：WH_CALLWNDPROC 首条消息到达时跑 EnsureInit——这是 DLL 真正完成
+// 注入初始化的触发点（钩子回调即代表本 DLL 已被加载进 explorer）
 static LRESULT CALLBACK HookProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
     if (nCode >= 0) EnsureInit();
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
+// 安装 WH_CALLWNDPROC 钩子触发注入：先把宿主 HWND 写进共享头（与应用侧
+// setHostWindow 互为冗余保险），再对桌面 listview 所在线程装钩子，末尾
+// WM_NULL 强制钩子立即执行以完成注入；重复调用先摘旧钩子（幂等）。
+// 返回 1=钩子已装（注入在钩子回调 EnsureInit 中完成），0=无桌面 listview 或
+// 装钩失败
 extern "C" __declspec(dllexport) int StartDock(HWND hostWnd)
 {
     Log(L"StartDock host=%p", hostWnd);
-    HANDLE m = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, SHM_NAME);
+    HANDLE m = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, POPTOOLS_DESKTOP_SHM_NAME);
     if (m) {
         SharedHeader* h = (SharedHeader*)MapViewOfFile(m, FILE_MAP_ALL_ACCESS, 0, 0, 0);
         if (h) { h->hostWnd = (LONG)(INT_PTR)hostWnd; UnmapViewOfFile(h); }
@@ -498,21 +534,30 @@ extern "C" __declspec(dllexport) int StartDock(HWND hostWnd)
     return 1;
 }
 
+// 摘钩子并投 WM_CLONE_STOP 让 DLL 消息窗自毁（异步完成子类/GDI/映射清理与
+// 桌面重画；立即返回，不等待清理完成）
 extern "C" __declspec(dllexport) int StopDock()
 {
     if (g_hook) { UnhookWindowsHookEx(g_hook); g_hook = NULL; }
     HWND w = FindWindowW(L"PopToolsCalendarHook_Framework", L"PopToolsCalendarHook_Title");
-    if (w) PostMessageW(w, WM_CLONE_STOP, 0, 0);
+    if (w) PostMessageW(w, POPTOOLS_MSG_CLONE_STOP, 0, 0);
     return 1;
 }
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+// DLL_PROCESS_DETACH 走 CleanupExplorer：进程终止期调用有风险，见下方修复注释（BUG-06）
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpvReserved)
 {
     if (reason == DLL_PROCESS_ATTACH) {
         g_hInst = hModule;
         DisableThreadLibraryCalls(hModule);
     } else if (reason == DLL_PROCESS_DETACH) {
-        CleanupExplorer();
+        /* T-062 修复: BUG-06 进程终止期（lpvReserved 非空）loader lock 持有、
+           comctl32 可能已卸载、其他线程已死——RemoveWindowSubclass/DestroyWindow/
+           UpdateWindow 均不可靠，强行清理可能给 explorer 退出引入 AV（留 WER
+           记录/拖慢关机）。进程消亡自然释放一切句柄，终止期直接跳过清理；
+           FreeLibrary 路径（lpvReserved==NULL）保留完整清理 */
+        if (lpvReserved == NULL)
+            CleanupExplorer();
     }
     return TRUE;
 }

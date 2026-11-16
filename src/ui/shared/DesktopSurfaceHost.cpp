@@ -10,19 +10,12 @@
 
 #include <cstdlib>
 
-// 与注入 DLL 的协议常量一致（见 src/hook/calendar_hook.cpp）
-namespace {
-constexpr UINT kMsgUpdate = WM_APP + 0x101;
-constexpr UINT kMsgEvent = WM_APP + 0x103;
-constexpr int kEvMove = 1;
-constexpr int kEvDown = 2;
-constexpr int kEvUp = 3;
-constexpr int kEvDblclk = 4;
-constexpr int kEvLeave = 5;
-} // namespace
+#include "hook/desktop_protocol.h" // 跨进程协议常量（与注入 DLL 同源，S-01）
 
 namespace poptools {
 
+// 1x1 屏外宿主窗：永不激活不显示，仅作 DLL 事件投递目标；主屏物理尺寸/DPR
+// 构造时快照（运行中改分辨率不跟随，登记 BUG-08，修复超出卫生范畴）
 DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint)
 {
@@ -37,6 +30,7 @@ DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
     m_screen = QRect(0, 0, qRound(m_screen.width() * m_dpr), qRound(m_screen.height() * m_dpr));
 }
 
+// 停值守（解除注入）并解除面板反引；QLibrary 随 QObject 父子关系析构
 DesktopSurfaceHost::~DesktopSurfaceHost()
 {
     stopDuty();
@@ -84,8 +78,29 @@ void DesktopSurfaceHost::startDuty()
     if (m_stopped)
         return;
     if (!m_canvas.isValid()) {
-        if (!m_canvas.create(m_screen.width(), m_screen.height()))
+        if (!m_canvas.create(m_screen.width(), m_screen.height())) {
+            // T-062 修复: BUG-02 段名不含尺寸——explorer 侧 DLL 长期持有同名旧段
+            //（仅 STOP/explorer 重启才释放），更高分辨率下重开本应用时 create 必败，
+            // 且此路径在 watchdog 创建之前、无任何重试 → 面板静默消失直到 explorer
+            // 重启。保守方案（不改段名/协议格式）：先惰性加载 DLL（首次启动 explorer
+            // 里也可能残留上一会话的旧段持有者），再 StopDock 请求 explorer 清理旧段，
+            // 延时（非阻塞 UI 线程，比报告的轮询等待更保守）重试一次创建，成功即续走
+            // 正常值守流程；仍失败放弃并告警
+            ensureHookLib();
+            if (m_stopDock) {
+                m_stopDock(); // 异步：explorer 收 WM_CLONE_STOP 后释放旧段
+                QTimer::singleShot(1500, this, [this] {
+                    if (m_stopped || m_dutyStarted || m_canvas.isValid())
+                        return;
+                    if (m_canvas.create(m_screen.width(), m_screen.height()))
+                        startDuty();
+                    else
+                        qWarning("DesktopSurface: 共享画布二次创建仍失败(%dx%d)，放弃本次值守",
+                                 m_screen.width(), m_screen.height());
+                });
+            }
             return;
+        }
     }
     if (!m_dutyStarted) {
         m_dutyStarted = true;
@@ -93,6 +108,7 @@ void DesktopSurfaceHost::startDuty()
             m_watchdog = new QTimer(this);
             m_watchdog->setInterval(2000);
             connect(m_watchdog, &QTimer::timeout, this, [this] {
+                // 自愈判据 = DLL 消息窗存在性：explorer 重启后窗口消失 → 重装钩子
                 if (findHookFrameworkWindow() == nullptr)
                     startDock();
             });
@@ -137,6 +153,8 @@ void DesktopSurfaceHost::commitSurface(const QRect &dirtyPhysical)
     const QRect dirty = dirtyPhysical.isEmpty() ? full : dirtyPhysical.intersected(full);
     if (dirty.isEmpty())
         return;
+    // m_composite 惰性重建：尺寸/格式没变就复用——脏矩形路径只改局部，其余区域
+    // 保留上次内容（= 共享位图现状），这是"位图总是完整一致"的前提
     if (m_composite.size() != m_canvas.image().size()
         || m_composite.format() != m_canvas.image().format())
         m_composite = QImage(m_canvas.image().size(), m_canvas.image().format());
@@ -156,18 +174,24 @@ void DesktopSurfaceHost::commitSurface(const QRect &dirtyPhysical)
     }
     g.end();
 
-    // 共享头矩形槽：按注册序写入（槽 0..kMaxSlots-1），多余槽写空矩形
+    m_canvas.publishFrame(m_composite, dirty);
+    // 共享头矩形槽：按注册序写入（槽 0..kMaxSlots-1），多余槽写空矩形。
+    // T-062 修复: BUG-04 槽矩形改在位图发布之后、markReady 之前写入——原顺序在
+    // 跨进程竞态下"头新图旧"（DLL 读到新矩形但位图还是旧内容，新位置闪现旧
+    // 画面，更显眼），重排后收窄为"图新头旧"（旧位置短暂残影，DLL 残影失效
+    // 逻辑本就兜底）。行为等价的纯重排
     for (int i = 0; i < DesktopSharedCanvas::kMaxSlots; ++i) {
         const bool has = i < m_panels.size() && m_panels.at(i).panel;
         m_canvas.setSlotRect(i, has ? m_panels.at(i).panel->rectPhysical() : QRect());
     }
-    m_canvas.publishFrame(m_composite, dirty);
     m_canvas.markReady();
     notifyHookUpdate();
 }
 
 void DesktopSurfaceHost::centerOnPanelRect(QWidget *w, const QRect &panelPhysical) const
 {
+    // 用 right()/bottom() 比 left+width 少 1 物理像素，弹窗居中偏差
+    // ≤ 1/(2·dpr) 逻辑 px（150% 下约 0.33px）；如需严格可改 topLeft()+size() 换算
     const QPoint tl = QPoint(qRound(panelPhysical.left() / (m_dpr > 0 ? m_dpr : 1.0)),
                              qRound(panelPhysical.top() / (m_dpr > 0 ? m_dpr : 1.0)));
     const QPoint br = QPoint(qRound(panelPhysical.right() / (m_dpr > 0 ? m_dpr : 1.0)),
@@ -176,37 +200,41 @@ void DesktopSurfaceHost::centerOnPanelRect(QWidget *w, const QRect &panelPhysica
             tl.y() + (br.y() - tl.y() - w->height()) / 2);
 }
 
+// DLL 转发鼠标事件入口：解码口径见 calendar_hook.cpp ForwardEvent（wParam 低
+// 16 位=事件号、高 16 位=extra、lParam=屏幕坐标 MAKELPARAM 符号扩展）。
+// move/leave 广播全面板（跨面板清 hover）；down 记配对面板，up 以 ≤4px 物理
+// 位移判单击且仍注册才派发；点在桌面图标上（extra!=0）穿透不消化
 bool DesktopSurfaceHost::nativeEvent(const QByteArray &eventType, void *message, qint64 *result)
 {
     Q_UNUSED(eventType)
     Q_UNUSED(result)
     MSG *msg = static_cast<MSG *>(message);
-    if (msg->message == kMsgEvent) {
+    if (msg->message == POPTOOLS_MSG_CLONE_EVENT) {
         const int ev = int(msg->wParam & 0xFFFF);
         const int extra = int((msg->wParam >> 16) & 0xFFFF);
         const int x = short(msg->lParam & 0xFFFF);
         const int y = short((msg->lParam >> 16) & 0xFFFF);
         const QPoint p(x, y);
         switch (ev) {
-            case kEvMove:
+            case POPTOOLS_EV_MOVE:
                 for (const PanelSlot &slot : m_panels) {
                     if (slot.panel)
                         slot.panel->onMove(p);
                 }
                 break;
-            case kEvLeave:
+            case POPTOOLS_EV_LEAVE:
                 for (const PanelSlot &slot : m_panels) {
                     if (slot.panel)
                         slot.panel->onLeave();
                 }
                 break;
-            case kEvDown:
+            case POPTOOLS_EV_DOWN:
                 m_downPanel = hitPanel(p);
                 m_downPoint = p;
                 if (m_downPanel)
                     m_downPanel->onDown(p);
                 break;
-            case kEvUp:
+            case POPTOOLS_EV_UP:
                 // extra!=0：点在桌面图标上，穿透给系统，不消化
                 if (extra != 0) {
                     m_downPanel = nullptr;
@@ -228,7 +256,7 @@ bool DesktopSurfaceHost::nativeEvent(const QByteArray &eventType, void *message,
                     m_downPanel = nullptr;
                 }
                 break;
-            case kEvDblclk:
+            case POPTOOLS_EV_DBLCLK:
                 if (extra != 0)
                     break;
                 if (DesktopPanel *panel = hitPanel(p))
@@ -254,8 +282,11 @@ DesktopPanel *DesktopSurfaceHost::hitPanel(const QPoint &physical) const
     return nullptr;
 }
 
-void DesktopSurfaceHost::startDock()
+// 惰性加载注入 DLL 并解析导出（只加载一次；加载/解析失败即丢弃，见 BUG-01 修复注释）
+bool DesktopSurfaceHost::ensureHookLib()
 {
+    if (m_hookLib && m_startDock)
+        return true;
     if (!m_hookLib) {
         const QString dllPath = QDir(QCoreApplication::applicationDirPath())
                                     .absoluteFilePath(QStringLiteral("PopToolsCalendarHook.dll"));
@@ -263,25 +294,50 @@ void DesktopSurfaceHost::startDock()
         if (!m_hookLib->load()) {
             qWarning("DesktopSurface: 加载注入 DLL 失败: %s",
                      qUtf8Printable(m_hookLib->errorString()));
-            return;
+            // T-062 修复: BUG-01 加载失败后若保留 m_hookLib，看门狗每 2s 调本函数
+            // 都在 if(!m_hookLib) 短路、永不重试——首次加载失败（DLL 未拷齐/被杀软
+            // 占用/部署时序）会让面板静默消失整个值守周期。失败即丢弃，看门狗
+            // 下个周期自动重载
+            m_hookLib->deleteLater();
+            m_hookLib = nullptr;
+            return false;
         }
         m_startDock = reinterpret_cast<int (*)(HWND)>(m_hookLib->resolve("StartDock"));
         m_stopDock = reinterpret_cast<int (*)()>(m_hookLib->resolve("StopDock"));
+        if (!m_startDock || !m_stopDock) {
+            qWarning("DesktopSurface: 注入 DLL 缺少 StartDock/StopDock 导出: %s",
+                     qUtf8Printable(m_hookLib->errorString()));
+            // T-062 修复: BUG-01 同上——resolve 失败也必须丢弃，否则看门狗永久短路
+            m_hookLib->deleteLater();
+            m_hookLib = nullptr;
+            m_startDock = nullptr;
+            m_stopDock = nullptr;
+            return false;
+        }
     }
-    if (!m_startDock)
+    return m_startDock != nullptr;
+}
+
+// 加载注入 DLL 并 StartDock；setHostWindow 与 DLL 内写头部互为冗余保险
+void DesktopSurfaceHost::startDock()
+{
+    if (!ensureHookLib())
         return;
     m_canvas.setHostWindow(reinterpret_cast<HWND>(winId()));
     m_startDock(reinterpret_cast<HWND>(winId()));
     notifyHookUpdate();
 }
 
+// 投递 WM_APP+0x101 让 DLL 逐槽失效重绘；消息窗不存在（未注入/已停）静默跳过
 void DesktopSurfaceHost::notifyHookUpdate()
 {
     const HWND fw = findHookFrameworkWindow();
     if (fw)
-        ::PostMessageW(fw, kMsgUpdate, 0, 0);
+        ::PostMessageW(fw, POPTOOLS_MSG_CLONE_UPDATE, 0, 0);
 }
 
+// 跨进程查 DLL 消息窗（类名/标题须与 calendar_hook.cpp EnsureInit 一致）；
+// nullptr = 注入未生效
 HWND DesktopSurfaceHost::findHookFrameworkWindow()
 {
     return ::FindWindowW(L"PopToolsCalendarHook_Framework", L"PopToolsCalendarHook_Title");

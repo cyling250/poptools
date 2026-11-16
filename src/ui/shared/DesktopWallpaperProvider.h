@@ -19,6 +19,7 @@ public:
 
     QImage blurredWallpaper(); // 缓存 20s 内直接返回
     void refresh();
+    // 释放缓存省内存；下次 blurredWallpaper 自动重算
     void dispose() { m_blurred = QImage(); }
 
 private:

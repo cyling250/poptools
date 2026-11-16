@@ -47,8 +47,6 @@ public:
 
 protected:
     DesktopSurfaceHost *m_surface = nullptr; // registerPanel 时由宿主回填
-
-private:
 };
 
 // ============================================================
@@ -66,6 +64,8 @@ public:
     ~DesktopSurfaceHost() override;
 
     int registerPanel(DesktopPanel *panel); // 返回面板 id（<0 失败）；重复注册忽略
+    // 按 id 反注册：同步清点击配对与面板回引；后续面板槽位前移，DLL 侧旧矩形
+    // 失效逻辑兜底清残影
     void unregisterPanel(int id);
 
     DesktopSharedCanvas &canvas() { return m_canvas; }
@@ -92,6 +92,7 @@ protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qint64 *result) override;
 
 private:
+    bool ensureHookLib(); // 惰性加载注入 DLL 并解析 StartDock/StopDock 导出
     void startDock();
     void notifyHookUpdate();
     static HWND findHookFrameworkWindow();

@@ -35,6 +35,10 @@ private:
     int hitZone(const QPoint &localPt) const;
     QRect toPhysical(const QRect &logical) const;
     void updateBoundsFromInner();
+    // ✓/× 按钮热区（窗口局部坐标，锚定内框右上角实时推导——不存成员，
+    // paint 未跑前命中也拿到最新位置，T-062 BUG-07/S-05）
+    QRect checkRectNow() const;
+    QRect cancelRectNow() const;
 
     std::function<void(const QRect &)> m_changed;
     std::function<void(const QRect &)> m_confirmed;
@@ -46,8 +50,6 @@ private:
     QPoint m_startLocal;
     int m_zone = 0;
     bool m_dragging = false;
-    QRect m_checkRect;
-    QRect m_cancelRect;
 };
 
 } // namespace poptools

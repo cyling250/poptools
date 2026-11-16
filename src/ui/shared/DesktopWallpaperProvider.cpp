@@ -12,6 +12,7 @@
 
 namespace poptools {
 
+// 记录毛玻璃输出目标尺寸（与画布同尺寸）
 DesktopWallpaperProvider::DesktopWallpaperProvider(int width, int height)
     : m_w(width)
     , m_h(height)
@@ -26,6 +27,8 @@ QImage DesktopWallpaperProvider::blurredWallpaper()
     return m_blurred;
 }
 
+// 强制刷新（绕过 20s 缓存）：磁盘读图 + 1/4 降采样 + 两遍模糊 + 放大，全程调用
+// 线程同步执行——宿主 30s 定时器触发，勿挪进交互关键路径
 void DesktopWallpaperProvider::refresh()
 {
     const QString path = wallpaperPath();
@@ -47,6 +50,12 @@ void DesktopWallpaperProvider::refresh()
     m_lastPath = path;
 }
 
+// 壁纸路径探测：注册表 WallPaper / TranscodedWallpaper / CachedFiles 最新一张 /
+// 聚焦候选（>200KB 且 ≥1024×600，整图解码成功才收），全部存在者按修改时间取最新。
+// 曾按 S-07 试 QImageReader::size() 只读文件头免整图解码——但"头完整、扫描数据
+// 截断"的图 size() 仍返回有效尺寸，不实际解码就无法识别，候选语义与基线出现
+// 行为分歧（收进坏候选 vs 基线取次新有效候选）；严格等价做不到，按行为等价红线
+// 回退为整图解码（T-062 R3 G-01 方案 A）
 QString DesktopWallpaperProvider::wallpaperPath() const
 {
     struct Candidate
@@ -121,6 +130,10 @@ QString DesktopWallpaperProvider::wallpaperPath() const
     return candidates.first().path;
 }
 
+// 按系统 WallpaperStyle 铺排：tile+style0=平铺、2=拉伸、10=填充(max 比例)、
+// 其余=适应(min 比例)；无图时暗色渐变兜底。style0（系统居中=1:1 原尺寸）按
+// 适应缩放处理与真实壁纸形变有偏差——登记 BUG-09（保真修复需改视觉输出，
+// 超出行为等价范畴，本轮不修）
 QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src) const
 {
     QImage bmp(m_w, m_h, QImage::Format_ARGB32);
@@ -181,6 +194,7 @@ QImage DesktopWallpaperProvider::boxBlur(const QImage &src, int radius, int pass
     return bmp;
 }
 
+// 水平滑窗盒模糊：进出像素增量更新均摊 O(1)；边缘 clamp 等效扩边重复计权
 void DesktopWallpaperProvider::boxBlurH(const uchar *src, uchar *dst, int w, int h, int stride, int r)
 {
     const int div = r * 2 + 1;
@@ -212,6 +226,7 @@ void DesktopWallpaperProvider::boxBlurH(const uchar *src, uchar *dst, int w, int
     }
 }
 
+// 垂直滑窗盒模糊（与 boxBlurH 同构，按列走）
 void DesktopWallpaperProvider::boxBlurV(const uchar *src, uchar *dst, int w, int h, int stride, int r)
 {
     const int div = r * 2 + 1;
