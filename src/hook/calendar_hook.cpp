@@ -381,6 +381,10 @@ extern "C" __declspec(dllexport) int StartDock(HWND hostWnd)
     Log(L"hook=%p tid=%lu err=%lu", g_hook, tid, GetLastError());
     if (!g_hook) return 0;
     PostMessageW(lv, WM_NULL, 0, 0);
+    // WH_CALLWNDPROC 只拦 SendMessage 投递的消息——显式发一条无害 WM_NULL
+    // 强制目标线程立刻执行钩子过程（触发 DLL 注入），不等环境消息
+    DWORD_PTR sentRet = 0;
+    SendMessageTimeoutW(lv, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 1000, &sentRet);
     return 1;
 }
 

@@ -48,7 +48,11 @@ add_subdirectory(src/app)
 # WM_ERASEBKGND 中 AlphaBlend 共享内存位图；输出与 PopTools.exe 同目录
 #（应用侧经 QLibrary 从 exe 目录加载并 StartDock）
 add_library(poptools_calendar_hook SHARED src/hook/calendar_hook.cpp)
-set_target_properties(poptools_calendar_hook PROPERTIES OUTPUT_NAME PopToolsCalendarHook)
+set_target_properties(poptools_calendar_hook PROPERTIES
+    OUTPUT_NAME PopToolsCalendarHook
+    # 注入 DLL 必须静态 CRT：explorer 进程内加载，动态 CRT 是一类静默注入失败源
+    #（rlqd 原 build.bat 的 cl /LD 默认 /MT，同此理）
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_compile_definitions(poptools_calendar_hook PRIVATE WIN32_LEAN_AND_MEAN)
 target_link_libraries(poptools_calendar_hook PRIVATE user32 gdi32 comctl32 msimg32)
 
