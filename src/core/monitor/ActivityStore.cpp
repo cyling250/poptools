@@ -27,6 +27,7 @@ class ActivityStoreWorker : public QObject
 {
     Q_OBJECT
 public:
+    // 参数快照进 worker（构造后不再读主对象——跨线程纪律）
     explicit ActivityStoreWorker(QString baseDir, int retentionDays)
         : m_baseDir(std::move(baseDir)), m_retentionDays(retentionDays)
     {
@@ -49,6 +50,8 @@ public slots:
             QDir().mkpath(dayDir);
             ensureMeta(dayDir);
             f = new QFile(dayDir + QLatin1Char('/') + stream + QStringLiteral(".jsonl"));
+            // Text 模式：Windows 下 '\n' 落盘为 CRLF；JSONL 读取方（readLine）
+            // 双行尾兼容
             if (!f->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
                 qWarning("ActivityStore: 打开 %s 失败：%s", qPrintable(f->fileName()),
                          qPrintable(f->errorString()));
@@ -132,6 +135,7 @@ private:
 // ============================================================
 // 主线程侧：缓冲 + 定时移交
 // ============================================================
+// baseDir 空则取 AppLocalDataLocation/monitor；定时器只建不启（start 统一拉起）
 ActivityStore::ActivityStore(const QString &baseDir, QObject *parent)
     : QObject(parent)
     , m_baseDir(baseDir.isEmpty()
@@ -144,6 +148,7 @@ ActivityStore::ActivityStore(const QString &baseDir, QObject *parent)
     connect(m_timer, &QTimer::timeout, this, [this] { sendAll(); });
 }
 
+// 析构即 stop：余量落盘 + 停 worker（防丢尾部缓冲）
 ActivityStore::~ActivityStore()
 {
     stop();
@@ -187,19 +192,22 @@ void ActivityStore::stop()
 void ActivityStore::append(const QString &stream, const QJsonObject &obj)
 {
     m_bufs[stream] << QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
-    int total = 0;
-    for (auto it = m_bufs.cbegin(); it != m_bufs.cend(); ++it)
-        total += it->size();
-    if (total >= kFlushThresholdLines)
+    if (totalBuffered() >= kFlushThresholdLines)
         sendAll();
 }
 
-int ActivityStore::bufferedLines() const
+// 各流缓冲行数求和（T-062 S-1：原 append/bufferedLines 两处逐字重复）
+int ActivityStore::totalBuffered() const
 {
     int total = 0;
     for (auto it = m_bufs.cbegin(); it != m_bufs.cend(); ++it)
         total += it->size();
     return total;
+}
+
+int ActivityStore::bufferedLines() const
+{
+    return totalBuffered();
 }
 
 void ActivityStore::flushSoon()

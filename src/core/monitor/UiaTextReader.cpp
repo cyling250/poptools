@@ -21,6 +21,7 @@ class UiaTextReader::Worker : public QObject
 {
     Q_OBJECT
 public:
+    // 必须无 parent：moveToThread 对带 parent 对象静默失败（P-025）
     explicit Worker(QObject *parent = nullptr)
         : QObject(parent)
     {
@@ -81,6 +82,7 @@ private:
         return m_uia != nullptr;
     }
 
+    // 按 BSTR 自带长度转 QString（不依赖 NUL 截断——BSTR 允许内嵌 NUL）
     static QString bstrToQString(BSTR b)
     {
         return QString::fromWCharArray(b, static_cast<int>(SysStringLen(b)));
@@ -247,6 +249,7 @@ private:
         UIA_HWND h = nullptr;
         el->get_CurrentNativeWindowHandle(&h);
         res.elHwnd = reinterpret_cast<quintptr>(h);
+        // GetAncestor 可能返回 NULL（窗口已亡）→ topHwnd=0，语义同"不可知"
         res.topHwnd = h ? reinterpret_cast<quintptr>(GetAncestor(
                               reinterpret_cast<HWND>(h), GA_ROOT))
                         : 0;

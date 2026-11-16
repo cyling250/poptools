@@ -84,6 +84,8 @@ ClipboardCodec::ClipboardPayload readTextPayload()
         p.chars = len;
         // 哈希只算前 65536 字节（T-047-FIX(P3-4)：kHashHeadBytes，UTF-8
         // 字节语义；大文本不做全文换码/哈希）+ 总长
+        // 先取 65536 个 UTF-16 码元（≥ 所需 UTF-8 字节量），contentHash 内
+        // 再按 UTF-8 字节截断——净效果即"前 64KiB 字节"（中间量只多不少）
         const QString head64k = QString::fromWCharArray(
             ptr, static_cast<int>(qMin<qint64>(len, ClipboardCodec::kHashHeadBytes)));
         p.hash = ClipboardCodec::contentHash(head64k.toUtf8(), len);
@@ -101,6 +103,7 @@ ClipboardCodec::ClipboardPayload readFilesPayload()
     HANDLE h = GetClipboardData(CF_HDROP);
     if (!h)
         return p;
+    // 0xFFFFFFFF = DragQueryFileW 的"查总数"专用 item 下标
     const UINT count = DragQueryFileW(reinterpret_cast<HDROP>(h), 0xFFFFFFFF, nullptr, 0);
     if (count == 0)
         return p;
@@ -178,6 +181,7 @@ ClipboardCodec::ClipboardPayload readClipboardPayload()
 
 } // namespace
 
+// 防抖定时器随本对象；store 指针由模块保证先建后用
 ClipboardListener::ClipboardListener(ActivityStore *store, QObject *parent)
     : QObject(parent)
     , m_store(store)
@@ -189,6 +193,7 @@ ClipboardListener::ClipboardListener(ActivityStore *store, QObject *parent)
     connect(m_debounce, &QTimer::timeout, this, &ClipboardListener::onDebounce);
 }
 
+// 析构即 stop：卸监听 + 冲账挂起 repeat
 ClipboardListener::~ClipboardListener()
 {
     stop();
@@ -204,6 +209,18 @@ void ClipboardListener::noteUpdate()
 
 bool ClipboardListener::start()
 {
+#ifdef Q_OS_WIN
+    // T-062 修复: 单实例防重入运行期守卫（对齐 GlobalKeyboardHook R6-C4 /
+    // ForegroundTracker 口径）——Release 构建下无此守卫时，第二实例 start
+    // 会覆盖 g_listener，而第一实例的 message-only 窗口仍在收
+    // WM_CLIPBOARDUPDATE，wndProc 经 g_listener 把事件路由到第二实例，
+    // 两套防抖/去重状态机互相踩踏
+    if (g_listener && g_listener != this) {
+        qWarning("ClipboardListener: 已有其他监听器 %p，拒绝二次启动",
+                 static_cast<void *>(g_listener));
+        return false;
+    }
+#endif
     if (m_listening)
         return true;
     m_stopped = false; // T-047-FIX(P3-2)：重新开启后恢复在途载荷接收
@@ -264,6 +281,9 @@ void ClipboardListener::stop()
     }
 }
 
+// 防抖到点：把最近一次更新的 seq 取走并投入线程池提取（busy 门卫：提取
+// 在途时丢弃本次堆积，提取完成后由回包侧补一拍 50ms 防抖）。
+// m_pendingSeq==0 说明上一次提取已覆盖本次，无事可做
 void ClipboardListener::onDebounce()
 {
     if (m_extracting || m_pendingSeq == 0)
@@ -274,6 +294,9 @@ void ClipboardListener::onDebounce()
     const QPointer<ClipboardListener> self(this);
     QThreadPool::globalInstance()->start([self, seq] {
         const ClipboardCodec::ClipboardPayload p = readClipboardPayload();
+        // 注（T-062 B-4 登记）：下方 if(!self) 与 invokeMethod 解引用之间存在
+        // 极窄竞争窗口（销毁恰撞回包投递），代码库已接受同款模式
+        //（MonitorQueryTool/FsTool 口径），保持现状防误改
         if (!self)
             return; // 监听器已销毁：结果作废
         QMetaObject::invokeMethod(
@@ -294,6 +317,9 @@ void ClipboardListener::onDebounce()
     });
 }
 
+// 提取回包落点（GUI 线程）：停止后整条丢弃 → 自写排除 → 空载荷跳过（不动
+// 去重状态）→ 去重状态机裁决：内容变化先冲账 repeat 行再落新条目。seq 仅
+// 用于自写判定，载荷归属即本次提取结果
 void ClipboardListener::handlePayload(const ClipboardCodec::ClipboardPayload &p,
                                       qint64 seq)
 {
@@ -309,16 +335,23 @@ void ClipboardListener::handlePayload(const ClipboardCodec::ClipboardPayload &p,
     const auto o = m_deduper.observe(p.hash);
     if (!o.repeatHash.isEmpty() && o.repeatCount >= 2) {
         // 内容变化：先冲账上一内容的连续重复（count=总次数，含首条 entry）
-        QJsonObject r;
-        r.insert(QStringLiteral("kind"), QStringLiteral("repeat"));
-        r.insert(QStringLiteral("hash"), o.repeatHash);
-        r.insert(QStringLiteral("count"), o.repeatCount);
-        r.insert(QStringLiteral("ts"), now);
-        m_store->append(QStringLiteral("clipboard"), r);
+        writeRepeatRow(o.repeatHash, o.repeatCount);
     }
     if (o.entry)
         m_store->append(QStringLiteral("clipboard"),
                         ClipboardCodec::buildClipboardEvent(now, p, m_app, m_title));
+}
+
+// repeat 冲账行（kind/hash/count/ts）：handlePayload 与 flushPendingRepeat
+// 共用（T-062 S-2）；ts 取冲账时刻——两处原实现语义一致
+void ClipboardListener::writeRepeatRow(const QString &hash, int count)
+{
+    QJsonObject r;
+    r.insert(QStringLiteral("kind"), QStringLiteral("repeat"));
+    r.insert(QStringLiteral("hash"), hash);
+    r.insert(QStringLiteral("count"), count);
+    r.insert(QStringLiteral("ts"), QDateTime::currentMSecsSinceEpoch());
+    m_store->append(QStringLiteral("clipboard"), r);
 }
 
 void ClipboardListener::flushPendingRepeat()
@@ -328,12 +361,7 @@ void ClipboardListener::flushPendingRepeat()
     const auto o = m_deduper.flush();
     if (o.repeatHash.isEmpty() || o.repeatCount < 2)
         return;
-    QJsonObject r;
-    r.insert(QStringLiteral("kind"), QStringLiteral("repeat"));
-    r.insert(QStringLiteral("hash"), o.repeatHash);
-    r.insert(QStringLiteral("count"), o.repeatCount);
-    r.insert(QStringLiteral("ts"), QDateTime::currentMSecsSinceEpoch());
-    m_store->append(QStringLiteral("clipboard"), r);
+    writeRepeatRow(o.repeatHash, o.repeatCount);
 }
 
 } // namespace poptools

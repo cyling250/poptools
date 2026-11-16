@@ -25,6 +25,7 @@ const char *const kSecretPrefixes[] = {
     "eyJ",                                                 // JWT（base64 头固定开头）
 };
 
+// 密钥字符集 [A-Za-z0-9_\-+/=]
 bool isSecretChar(QChar c)
 {
     return (c >= QLatin1Char('A') && c <= QLatin1Char('Z'))
@@ -39,6 +40,20 @@ constexpr int kPrefixTailMin = 8; // 前缀后至少还要有这么多密钥字�
 constexpr int kGenericMinLen = 20;
 constexpr int kGenericDistinctMin = 10;
 
+// 前缀尾段"全密钥字符"检查（T-062 S-3：maskEmbeddedPrefix 与 looksLikeSecret
+// 原两处逐字重复）：tail 长度达标（≥kPrefixTailMin）且全部落在密钥字符集
+bool tailAllSecret(QStringView tail)
+{
+    if (tail.size() < kPrefixTailMin)
+        return false;
+    for (QChar c : tail) {
+        if (!isSecretChar(c))
+            return false;
+    }
+    return true;
+}
+
+// Unicode 空白（QChar::isSpace 直通，留名以便语义检索）
 bool isWhitespace(QChar c)
 {
     return c.isSpace();
@@ -61,14 +76,7 @@ QString maskEmbeddedPrefix(const QString &token)
                                   || prev == QLatin1Char('\'');
             const QStringView tail(token.constData() + pos + prefix.size(),
                                    token.size() - pos - prefix.size());
-            bool allSecret = tail.size() >= kPrefixTailMin;
-            for (QChar c : tail) {
-                if (!isSecretChar(c)) {
-                    allSecret = false;
-                    break;
-                }
-            }
-            if (boundary && allSecret)
+            if (boundary && tailAllSecret(tail))
                 return token.left(pos) + QStringLiteral("[masked]");
             ++pos;
         }
@@ -92,14 +100,7 @@ bool looksLikeSecret(const QString &token)
             continue;
         const QStringView tail(token.constData() + prefix.size(),
                                token.size() - prefix.size());
-        bool allSecret = tail.size() >= kPrefixTailMin;
-        for (QChar c : tail) {
-            if (!isSecretChar(c)) {
-                allSecret = false;
-                break;
-            }
-        }
-        if (allSecret)
+        if (tailAllSecret(tail))
             return true;
     }
 

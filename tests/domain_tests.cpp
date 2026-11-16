@@ -1938,14 +1938,17 @@ private slots:
         QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b2, 7, QStringLiteral("hello world")),
                  QStringLiteral("world"));
 
-        // 缓存超 32 窗整体清空：下一拍等价首拍（全量返回），旧窗基线一并失效
+        // 缓存超 32 窗整体清空：下一拍等价首拍（全量返回），旧窗基线一并失效；
+        // 当前窗基线存活——T-062 修复(B-1)：原实现"先插后清"把刚插入的当前窗
+        // 基线一并清掉，下一次同窗快照会把已记内容重当增量重复落盘
         QHash<quintptr, QString> b3;
         for (quintptr h = 1; h <= 32; ++h)
             SnapshotOcrPipeline::consumeBaselineAdded(b3, h, QStringLiteral("w%1").arg(h));
         QCOMPARE(b3.size(), 32);
         QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b3, 33, QStringLiteral("new")),
                  QStringLiteral("new"));
-        QVERIFY(b3.isEmpty()); // 整体清空（防膨胀），不是逐窗淘汰
+        QCOMPARE(b3.size(), 1); // 整体清空（防膨胀）后仅当前窗存活，不是逐窗淘汰
+        QVERIFY(b3.contains(quintptr(33))); // 修复点：当前窗基线不被连根清掉
         QCOMPARE(SnapshotOcrPipeline::consumeBaselineAdded(b3, 1, QStringLiteral("w1-late")),
                  QStringLiteral("w1-late")); // 清空后旧窗再拍 = 首拍全量
     }

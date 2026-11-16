@@ -77,8 +77,13 @@ signals:
                       const QString &source);
 
 private slots:
+    // 防抖到点：busy/退避/限流/密码四道门卫后发起 UIA-first 取文（计费限流预算）
     void captureNow();
+    // UIA 回包落点：密码态缓存回写+整链静默；窗口/进程对号成功走 UIA 基线
+    // diff，否则回落 OCR
     void onUiaFinished(const UiaTextReader::Result &result);
+    // OCR 回包落点：m_pending 归属门卫 → 失败退避 5s → 版面排序拼文 →
+    // OCR 基线 diff 落信号
     void onOcrFinished(bool ok, const QVector<OcrBox> &boxes, const QString &error);
 
 private:

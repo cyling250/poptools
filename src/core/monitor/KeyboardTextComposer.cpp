@@ -4,6 +4,7 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include "ForegroundHkl.h"
 #endif
 
 namespace poptools {
@@ -34,6 +35,9 @@ void KeyboardTextComposer::onKeyEvent(int vk, int scan, bool extended, bool down
     Q_UNUSED(extended);
 
 #ifdef Q_OS_WIN
+    // 已知边界（T-062 B-6 登记）：LL 钩子报告 L/R 变体 VK（VK_LSHIFT 等），
+    // 此处不区分计数——同按异松（两 Shift 同按后松开其一）时状态可能短暂
+    // 漂移，下一次该修饰键完整按下-松开循环即自纠（罕见输入，不改语义）
     switch (vk) {
     case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT:
         m_shift = down; return;
@@ -106,6 +110,7 @@ void KeyboardTextComposer::flush()
     m_runMasked = false;
 }
 
+// 追加一个产出字符：密码态记 m_runMasked；满 512 字立即冲刷（单段体量护栏）
 void KeyboardTextComposer::notePrintable(const QChar &c)
 {
     m_text += c;
@@ -121,11 +126,9 @@ void KeyboardTextComposer::notePrintable(const QChar &c)
 bool KeyboardTextComposer::translateVk(int vk, int scan, QChar &out) const
 {
 #ifdef Q_OS_WIN
-    const HWND fg = GetForegroundWindow();
-    DWORD tid = 0;
-    if (fg)
-        tid = GetWindowThreadProcessId(fg, nullptr);
-    const HKL hkl = GetKeyboardLayout(tid);
+    // 布局取处理时刻前台（与打码判定的捕获时刻焦点不同口径：罕见切窗瞬间
+    // 可能用错布局，自纠）
+    const HKL hkl = foregroundKeyboardLayout();
 
     BYTE state[256] = {};
     if (m_shift) state[VK_SHIFT] = 0x80;

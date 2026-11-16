@@ -20,6 +20,7 @@ constexpr qint64 kCacheTtlMs = 500;
 // hwnd → (是否密码框, 探测时刻)：同控件连打时跳过重复探测
 QHash<quintptr, QPair<bool, qint64>> g_cache;
 
+// Win32 启发式探测（样式+类名），结果按 hwnd 缓存于调用方
 bool probePassword(HWND hwnd)
 {
     if (!hwnd)
@@ -36,6 +37,18 @@ bool probePassword(HWND hwnd)
     const QString className = QString::fromWCharArray(cls).toLower();
     return className.contains(QLatin1String("password"))
            || className.contains(QLatin1String("secret"));
+}
+
+// 容量护栏：超 64 条整体清空（不逐条按 TTL 淘汰——焦点控件本来就高频更替，
+// 过期条目下次探测自然 miss）。（T-062 B-7 登记）：UIA 正判条目被驱逐即回退
+// Win32 启发式——对启发式探测不到的自绘密码框（见 cacheUiaPassword 注释），
+// 正判条目在 500ms TTL 窗口内被驱逐会提前失去保护（键入流 setMasked 与 OCR
+// 门卫共用本缓存，ActivityMonitorModule 接线）；TTL 本就限定正判保护时长，
+// 驱逐只是可能提前这一回退。OCR 链另有读取期 UIA IsPassword 精确复查兜底
+void evictIfNeeded()
+{
+    if (g_cache.size() > 64)
+        g_cache.clear();
 }
 
 } // namespace
@@ -64,8 +77,7 @@ bool isPasswordWindow(quintptr hwnd)
         return it->first;
 
     const bool pwd = probePassword(reinterpret_cast<HWND>(hwnd));
-    if (g_cache.size() > 64)
-        g_cache.clear(); // 简单防膨胀：焦点控件本来就高频更替
+    evictIfNeeded();
     g_cache.insert(hwnd, qMakePair(pwd, now));
     return pwd;
 }
@@ -79,8 +91,7 @@ void cacheUiaPassword(quintptr hwnd, bool pwd)
     if (!hwnd)
         return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (g_cache.size() > 64)
-        g_cache.clear();
+    evictIfNeeded();
     g_cache.insert(hwnd, qMakePair(pwd, now));
 }
 #else

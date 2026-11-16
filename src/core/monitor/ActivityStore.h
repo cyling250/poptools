@@ -63,6 +63,9 @@ signals:
 private:
     void sendAll(); // 缓冲 → worker
 
+    // 各流缓冲行数求和：append 的阈值判定与 bufferedLines 共用
+    int totalBuffered() const;
+
     QString m_baseDir;
     int m_retentionDays = 14;
     bool m_running = false;

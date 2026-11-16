@@ -41,6 +41,7 @@ SnapshotOcrPipeline::SnapshotOcrPipeline(RapidOcrService *ocr, QObject *parent)
             &SnapshotOcrPipeline::onOcrFinished);
 }
 
+// 停防抖即可：在途线程池任务以 QPointer 交付自弃，UIA worker 随父子对象树析构
 SnapshotOcrPipeline::~SnapshotOcrPipeline()
 {
     m_debounce->stop();
@@ -120,6 +121,12 @@ void SnapshotOcrPipeline::onUiaFinished(const UiaTextReader::Result &result)
     //（topHwnd=0 恒不等于请求窗口），原条件恒假导致即便 PID 对号成功
     // 也全额回落 OCR。防串窗语义不变：elPid（焦点元素进程号）是权威
     // 校验（worker 侧已比对请求窗口进程），topHwnd 匹配是加强条件
+    // 已知边界（T-062 B-5 登记，不改协议）：对号是进程级——若 UIA 往返
+    //（数百 ms）内从同进程窗口 A 切到窗口 B，焦点元素属 B 进程仍通过对号，
+    // B 的文本按 A 的 m_reqApp/m_reqTitle 落盘且基线记在 A 的 hwnd 名下
+    //（宁缺毋滥语义下最多一次增量误记/丢失）。OCR 兜底路径有窗口级校验
+    //（startOcrCapture 的 fg == m_reqHwnd）；UIA 路径升级窗口级校验属
+    // worker 对号协议变更，供后续版本评估
     if (result.ok && (result.topHwnd == m_reqHwnd || result.elPid == m_reqPid)) {
         // T-047-UIA：UIA 成功且窗口/进程对号 → 记 source:"uia"。
         // diff 用 UIA 专用基线（与 OCR 基线隔离：文本粒度不同，混用
@@ -227,6 +234,8 @@ void SnapshotOcrPipeline::onOcrFinished(bool ok, const QVector<OcrBox> &boxes,
     }
     const QString text = lines.join(QLatin1Char('\n'));
 
+    // OCR 路径用默认 diffAdded；与 UIA 基线（m_lastUiaText + diffUiaAdded）
+    // 的隔离见 onUiaFinished
     const QString added = consumeBaselineAdded(m_lastText, m_reqHwnd, text);
     if (!added.isEmpty())
         emit ocrTextReady(m_reqApp, m_reqTitle, added, QStringLiteral("ocr"));
@@ -240,8 +249,17 @@ QString SnapshotOcrPipeline::consumeBaselineAdded(QHash<quintptr, QString> &base
     if (added.size() > kMaxAddedChars)
         added = added.right(kMaxAddedChars); // 只保留尾部（最新输入）
     baseline.insert(hwnd, text); // 基线更新与新增无关（无新增也要推进）
-    if (baseline.size() > kMaxWindowCache)
+    if (baseline.size() > kMaxWindowCache) {
+        // T-062 修复(B-1): 溢出清空后必须回插当前窗口基线——原实现把刚插入
+        // 的当前窗口一并清掉，下一次同窗快照 baseline.value(hwnd) 为空，
+        // diffAdded 返回全文，已记过的屏幕内容被重当增量重复落进
+        // ocrtext.jsonl（source=uia/ocr 同病）。对齐 PasswordFieldGuard
+        // "当前条目存活"的口径；不改溢出触发条件与上限 32，满缓存时重复
+        // 触碰既有窗口不误清其他窗基线（先清后插配 > 实际上限涨到 33、配 >=
+        // 会在满缓存时误清其他窗基线，二者不可兼得）
         baseline.clear(); // 简单防膨胀：窗口集合本就高频更替
+        baseline.insert(hwnd, text);
+    }
     return added;
 }
 
@@ -280,6 +298,7 @@ QString SnapshotOcrPipeline::diffUiaAdded(const QString &oldText, const QString 
     // 解法：旧文本的最长后缀 == 新文本的前缀（= 两窗口的重叠段），
     // 新文本余下的尾部即新增。从最长候选降序试起，首个命中即最大重叠
     // → 新增最少（宁缺毋滥；周期性文本可能少记，与 diffAdded 同哲学）
+    // 最坏 O(n²)（n≤2000），主线程毫秒级可接受；命中即最大重叠，宁缺毋滥
     const int maxL = qMin(oldText.size(), newText.size());
     for (int l = maxL; l > 0; --l) {
         if (oldText.right(l) == newText.left(l))

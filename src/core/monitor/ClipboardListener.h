@@ -56,6 +56,10 @@ private slots:
 private:
     void handlePayload(const ClipboardCodec::ClipboardPayload &p, qint64 seq);
 
+    // repeat 冲账行落盘（T-062 S-2：handlePayload 内容变化冲账与
+    // flushPendingRepeat 停止冲账原两处逐字重复）；ts 在函数内取冲账时刻
+    void writeRepeatRow(const QString &hash, int count);
+
     ActivityStore *m_store = nullptr;
     QTimer *m_debounce = nullptr; // 300ms 单发：burst 合并
     qint64 m_pendingSeq = 0;      // 最近一次更新的剪贴板序列号

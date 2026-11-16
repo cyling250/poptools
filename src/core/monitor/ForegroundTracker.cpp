@@ -56,11 +56,13 @@ QString windowTitle(HWND hwnd)
 } // namespace
 #endif
 
+// 无状态：全部资源在 start 建立
 ForegroundTracker::ForegroundTracker(QObject *parent)
     : QObject(parent)
 {
 }
 
+// 析构即 stop：卸 WinEvent 钩子
 ForegroundTracker::~ForegroundTracker()
 {
     stop();
@@ -68,10 +70,20 @@ ForegroundTracker::~ForegroundTracker()
 
 void ForegroundTracker::start()
 {
+#ifdef Q_OS_WIN
+    // T-062 修复: 单实例防重入由 Q_ASSERT 改运行期防御（对齐
+    // GlobalKeyboardHook R6-C4 口径）——Release 构建断言失效，第二个实例
+    // start 会不卸旧钩子直接覆盖 g_eventHook（旧钩泄漏）且新旧两钩同时
+    // 回调造成前台事件翻倍。已有消费者时拒绝激活并告警
+    if (g_tracker && g_tracker != this) {
+        qWarning("ForegroundTracker: 已有其他消费者 %p，拒绝二次启动",
+                 static_cast<void *>(g_tracker));
+        return;
+    }
+#endif
     if (m_active)
         return;
 #ifdef Q_OS_WIN
-    Q_ASSERT(!g_tracker && "ForegroundTracker 目前只支持单实例");
     g_tracker = this;
     // WINEVENT_OUTOFCONTEXT：回调投递到安装线程（主线程）的消息循环
     g_eventHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
@@ -112,6 +124,9 @@ void ForegroundTracker::stop()
 #endif
 }
 
+// 前台事件落点（主线程队列）：读标题、同窗同标题去重（Alt+Tab 回自己不重发），
+// 变化则解析进程名并转发。进程名/标题读取在此完成而非钩子回调
+//（WinEventProc 只入队纪律）
 void ForegroundTracker::onForegroundWindow(qlonglong hwnd)
 {
 #ifdef Q_OS_WIN

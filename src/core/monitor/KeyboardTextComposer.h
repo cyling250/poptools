@@ -31,6 +31,8 @@ class KeyboardTextComposer : public QObject
 public:
     explicit KeyboardTextComposer(QObject *parent = nullptr);
 
+    // 总打码开关（Settings monitor/maskPasswords，默认 true）：false 时密码段
+    // 直接记明文——只随用户显式关闭生效；与 setMasked（每键判定的临时态）独立
     void setMaskPasswords(bool on) { m_maskPasswords = on; }
 
 public slots:

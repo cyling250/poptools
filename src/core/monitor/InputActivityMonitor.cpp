@@ -73,6 +73,8 @@ void InputActivityMonitor::flush()
     closeSegment(false);
 }
 
+// 以记忆的窗口上下文开新段：startMs=now，键鼠计数清零。上下文来自最近一次
+// setWindowContext（段闭合后同窗新输入原位续开的依据）
 void InputActivityMonitor::openSegment()
 {
     m_cur = TimelineSegment{};
@@ -82,6 +84,8 @@ void InputActivityMonitor::openSegment()
     m_hasCur = true;
 }
 
+// 闭合当前段并发出：idleEnded=true 时 end=最后一次输入时刻（发呆不计时长）；
+// end<start 钳到 start（切片续段后未及输入即空闲的零长段）。发射后 m_hasCur=false
 void InputActivityMonitor::closeSegment(bool idleEnded)
 {
     if (!m_hasCur)

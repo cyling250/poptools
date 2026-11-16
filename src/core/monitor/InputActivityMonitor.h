@@ -14,7 +14,7 @@ struct TimelineSegment
     QString title;    // 窗口标题
     qint64 startMs = 0; // epoch ms
     qint64 endMs = 0;
-    int activeSec = 0;    // 活跃秒数（有键/鼠输入的秒）
+    int activeSec = 0;    // 段存续且未过空闲阈值的心跳秒（≈停留秒；空闲超时一次性闭合，end=最后输入时刻）
     int keystrokes = 0;   // 键入次数
     int clicks = 0;       // 点击次数
     bool idleEnded = false; // 以空闲超时结束（end=最后一次输入时刻）

@@ -81,8 +81,7 @@ public:
     Outcome observe(const QString &hash);
     Outcome flush(); // 无挂起 repeat 时返回无效 Outcome 并复位
 
-    QString lastHash() const { return m_lastHash; }
-    int pendingRepeatCount() const { return m_repeat; }
+    int pendingRepeatCount() const { return m_repeat; } // 累计未冲账重复数（测试/诊断用）
 
 private:
     QString m_lastHash;

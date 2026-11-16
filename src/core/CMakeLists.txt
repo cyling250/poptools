@@ -76,6 +76,7 @@ add_library(poptools_core STATIC
     monitor/ClipboardListener.h
     monitor/ForegroundTracker.cpp
     monitor/ForegroundTracker.h
+    monitor/ForegroundHkl.h
     monitor/GlobalKeyboardHook.cpp
     monitor/GlobalKeyboardHook.h
     monitor/ImeCommitDetector.cpp

@@ -30,6 +30,7 @@ LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             GUITHREADINFO gi = {};
             gi.cbSize = sizeof(gi);
             const HWND focusHwnd = GetGUIThreadInfo(0, &gi) ? gi.hwndFocus : nullptr;
+            // 字符串签名须与 keyEvent 形参表逐一对应（运行期解析，失配=事件静默丢失）
             QMetaObject::invokeMethod(g_consumer, "keyEvent", Qt::QueuedConnection,
                                       Q_ARG(int, static_cast<int>(info->vkCode)),
                                       Q_ARG(int, static_cast<int>(info->scanCode)),
@@ -44,11 +45,13 @@ LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 } // namespace
 #endif
 
+// 无状态：钩子在 start 安装
 GlobalKeyboardHook::GlobalKeyboardHook(QObject *parent)
     : QObject(parent)
 {
 }
 
+// 析构即 stop：卸 LL 钩子
 GlobalKeyboardHook::~GlobalKeyboardHook()
 {
     stop();
