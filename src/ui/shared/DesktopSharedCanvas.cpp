@@ -1,28 +1,27 @@
-#include "CalendarSharedCanvas.h"
+#include "DesktopSharedCanvas.h"
+
+#include <cstring>
 
 namespace poptools {
 
 namespace {
-constexpr wchar_t kShmName[] = L"Local\\PopToolsCalendarShared_v1";
+constexpr wchar_t kShmName[] = L"Local\\PopToolsDesktopShared_v3";
 // 头部字段偏移（与注入 DLL 的 SharedHeader 逐字段对齐）
 constexpr int kOffMagic = 0;
 constexpr int kOffWidth = 4;
 constexpr int kOffHeight = 8;
 constexpr int kOffReady = 12;
 constexpr int kOffHostWnd = 16;
-constexpr int kOffRectL = 20;
-constexpr int kOffRectT = 24;
-constexpr int kOffRectR = 28;
-constexpr int kOffRectB = 32;
-constexpr int kOffSeq = 36;
+constexpr int kOffSlotRect0 = 20; // slotRect[6][4]，每槽 16 字节 → 20..115
+constexpr int kOffSeq = 20 + DesktopSharedCanvas::kMaxSlots * 16;
 } // namespace
 
-CalendarSharedCanvas::~CalendarSharedCanvas()
+DesktopSharedCanvas::~DesktopSharedCanvas()
 {
     dispose();
 }
 
-bool CalendarSharedCanvas::create(int width, int height)
+bool DesktopSharedCanvas::create(int width, int height)
 {
     dispose();
     if (width <= 0 || height <= 0)
@@ -66,7 +65,7 @@ bool CalendarSharedCanvas::create(int width, int height)
     return true;
 }
 
-void CalendarSharedCanvas::dispose()
+void DesktopSharedCanvas::dispose()
 {
     m_image = QImage();
     if (m_dib)
@@ -83,27 +82,30 @@ void CalendarSharedCanvas::dispose()
     m_height = 0;
 }
 
-void CalendarSharedCanvas::writeHeaderInt(int offset, LONG value)
+void DesktopSharedCanvas::writeHeaderInt(int offset, LONG value)
 {
     if (!m_view)
         return;
     *reinterpret_cast<volatile LONG *>(static_cast<BYTE *>(m_view) + offset) = value;
 }
 
-void CalendarSharedCanvas::setHostWindow(HWND hwnd)
+void DesktopSharedCanvas::setHostWindow(HWND hwnd)
 {
     writeHeaderInt(kOffHostWnd, static_cast<LONG>(reinterpret_cast<LONG_PTR>(hwnd)));
 }
 
-void CalendarSharedCanvas::setCalendarRect(const QRect &r)
+void DesktopSharedCanvas::setSlotRect(int slot, const QRect &r)
 {
-    writeHeaderInt(kOffRectL, r.left());
-    writeHeaderInt(kOffRectT, r.top());
-    writeHeaderInt(kOffRectR, r.left() + r.width()); // C# Rectangle.Right = X+Width
-    writeHeaderInt(kOffRectB, r.top() + r.height());
+    if (slot < 0 || slot >= kMaxSlots)
+        return;
+    const int base = kOffSlotRect0 + slot * 16;
+    writeHeaderInt(base + 0, r.left());
+    writeHeaderInt(base + 4, r.top());
+    writeHeaderInt(base + 8, r.left() + r.width()); // C# Rectangle.Right = X+Width
+    writeHeaderInt(base + 12, r.top() + r.height());
 }
 
-void CalendarSharedCanvas::markReady()
+void DesktopSharedCanvas::markReady()
 {
     if (!m_view)
         return;
@@ -113,19 +115,25 @@ void CalendarSharedCanvas::markReady()
     writeHeaderInt(kOffReady, 1);
 }
 
-void CalendarSharedCanvas::publishFrame(const QImage &frame)
+void DesktopSharedCanvas::publishFrame(const QImage &frame, const QRect &dirty)
 {
     if (!m_dib || m_image.isNull())
         return;
     if (frame.size() != m_image.size() || frame.format() != m_image.format())
         return;
     const int stride = m_image.bytesPerLine();
-    if (frame.bytesPerLine() == stride) {
+    const QRect r = dirty.isEmpty() ? m_image.rect() : dirty.intersected(m_image.rect());
+    if (r.isEmpty())
+        return;
+    if (r == m_image.rect() && frame.bytesPerLine() == stride) {
         memcpy(m_bits, frame.constBits(), static_cast<size_t>(stride) * m_image.height());
-    } else {
-        for (int y = 0; y < m_image.height(); ++y)
-            memcpy(static_cast<BYTE *>(m_bits) + y * stride, frame.constScanLine(y), stride);
+        return;
     }
+    const size_t xBytes = static_cast<size_t>(r.left()) * 4;
+    const size_t wBytes = static_cast<size_t>(r.width()) * 4;
+    for (int y = r.top(); y <= r.bottom(); ++y)
+        memcpy(static_cast<BYTE *>(m_bits) + y * stride + xBytes,
+               frame.constScanLine(y) + xBytes, wBytes);
 }
 
 } // namespace poptools

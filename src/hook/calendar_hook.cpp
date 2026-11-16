@@ -23,7 +23,8 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "msimg32.lib")
 
-#define SHM_NAME L"Local\\PopToolsCalendarShared_v1"
+#define SHM_NAME L"Local\\PopToolsDesktopShared_v3"
+#define SHM_SLOTS 6 // 面板槽位数（v3：任意面板任意槽，0=日历 1..N=收纳盒等）
 #define SHM_OFFSET 4096
 #define WM_CLONE_UPDATE (WM_APP + 0x101)
 #define WM_CLONE_STOP   (WM_APP + 0x102)
@@ -42,15 +43,12 @@ struct SharedHeader {
     volatile LONG height;
     volatile LONG ready;
     volatile LONG hostWnd;
-    volatile LONG rectLeft;
-    volatile LONG rectTop;
-    volatile LONG rectRight;
-    volatile LONG rectBottom;
+    volatile LONG slotRect[SHM_SLOTS][4]; // 每槽 L/T/R/B（空槽 0 尺寸，DLL 跳过）
     volatile LONG seq;
 };
 #pragma pack(pop)
 
-static const LONG kMagic = 0x434C4B31; // CLK1（与 rlqd 同值，协议不变）
+static const LONG kMagic = 0x434C4B33; // CLK3（v3 槽位数组：结构不兼容，失配拒画）
 
 static HINSTANCE g_hInst = NULL;
 static HHOOK g_hook = NULL;
@@ -396,22 +394,55 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     switch (msg) {
         case WM_CLONE_UPDATE:
         {
-            // 脏矩形失效（红线 4）：此前整桌面失效，hover 高亮这类高频重绘会连
-            // 壁纸一起重刷，肉眼可见闪烁。失效范围收窄到日历面板 + 24px 边距
-            //（覆盖投影 ±18px 与今日发光环外扩 ±11px 的溢出）；头部缺失时兜底全失效
-            RECT rc;
-            BOOL haveRect = FALSE;
+            // 脏矩形失效（红线 4）：按各面板槽矩形 + 24px 边距逐槽失效（覆盖
+            // 投影 ±18px 与发光外扩 ±11px 的溢出）；全部槽皆空时兜底全失效。
+            // 整桌面失效会让 hover 这类高频重绘连壁纸一起重刷，肉眼闪烁。
+            //
+            // 拖动/改列数场景（T-060 花屏修复）：共享位图整帧原子更新后旧位置
+            // 像素已清空，但若只失效新矩形，explorer 不重绘旧位置——屏幕上
+            // 残留上一次混合的旧画面（花屏残影）。故每槽记上次失效矩形，
+            // 本次失效 = 当前 ∪ 上次（变了才多失效一次），残影无处可留
+            static RECT s_prev[SHM_SLOTS] = {};
+            static BOOL s_prevValid[SHM_SLOTS] = {};
+            RECT rc[SHM_SLOTS * 2];
+            int nRect = 0;
             if (g_hdr && g_hdr->ready) {
-                rc.left = g_hdr->rectLeft - 24;
-                rc.top = g_hdr->rectTop - 24;
-                rc.right = g_hdr->rectRight + 24;
-                rc.bottom = g_hdr->rectBottom + 24;
-                haveRect = TRUE;
+                for (int s = 0; s < SHM_SLOTS; ++s) {
+                    const LONG l = g_hdr->slotRect[s][0], t = g_hdr->slotRect[s][1];
+                    const LONG r = g_hdr->slotRect[s][2], b = g_hdr->slotRect[s][3];
+                    const BOOL curValid = (r > l && b > t) ? TRUE : FALSE;
+                    const RECT cur = { l, t, r, b };
+                    const BOOL prevChanged =
+                        s_prevValid[s] != curValid
+                        || !s_prevValid[s]
+                        || memcmp(&s_prev[s], &cur, sizeof(RECT)) != 0;
+                    if (curValid) {
+                        rc[nRect].left = l - 24;
+                        rc[nRect].top = t - 24;
+                        rc[nRect].right = r + 24;
+                        rc[nRect].bottom = b + 24;
+                        ++nRect;
+                    }
+                    if (s_prevValid[s] && (!curValid || prevChanged)) {
+                        // 旧位置已不在位图上（移动/缩放/隐藏）——一并失效清残影
+                        rc[nRect].left = s_prev[s].left - 24;
+                        rc[nRect].top = s_prev[s].top - 24;
+                        rc[nRect].right = s_prev[s].right + 24;
+                        rc[nRect].bottom = s_prev[s].bottom + 24;
+                        ++nRect;
+                    }
+                    s_prev[s] = cur;
+                    s_prevValid[s] = curValid;
+                }
             }
-            if (g_defview && IsWindow(g_defview))
-                InvalidateRect(g_defview, haveRect ? &rc : NULL, TRUE);
-            if (g_listview && IsWindow(g_listview))
-                InvalidateRect(g_listview, haveRect ? &rc : NULL, TRUE);
+            const int count = nRect > 0 ? nRect : 1;
+            for (int i = 0; i < count; ++i) {
+                const BOOL haveRect = nRect > 0 ? TRUE : FALSE;
+                if (g_defview && IsWindow(g_defview))
+                    InvalidateRect(g_defview, haveRect ? &rc[i] : NULL, TRUE);
+                if (g_listview && IsWindow(g_listview))
+                    InvalidateRect(g_listview, haveRect ? &rc[i] : NULL, TRUE);
+            }
             return 0;
         }
         case WM_CLONE_STOP:

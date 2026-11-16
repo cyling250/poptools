@@ -8,13 +8,13 @@
 #include "core/calendar/CalendarLayout.h"
 #include "core/calendar/CalendarSettings.h"
 #include "core/calendar/CalendarTaskStore.h"
-#include "WallpaperProvider.h"
+#include "ui/shared/DesktopWallpaperProvider.h"
 
 class QPainter;
 
 namespace poptools {
 
-class CalendarSharedCanvas;
+class DesktopSharedCanvas;
 
 // ============================================================
 // 日历渲染器（照搬 rlqd CalendarClone/CalendarRenderer.cs，GDI+ → QPainter）：
@@ -30,7 +30,7 @@ public:
     Q_DISABLE_COPY(CalendarRenderer)
 
     // 绘制整幅画面并返回本次布局（供命中测试使用）
-    CalendarLayout render(QPainter *g, CalendarSharedCanvas &canvas, const CalendarSettings &settings,
+    CalendarLayout render(QPainter *g, DesktopSharedCanvas &canvas, const CalendarSettings &settings,
                           const CalendarTaskStore &store, const QDate &today, int year, int month,
                           const QPoint &hover, const QString &hoverHint, bool adjusting);
 
@@ -52,7 +52,7 @@ private:
     static QImage loadAsset(const QString &qrcPath);
     static QPainterPath roundRectPath(const QRectF &r, qreal radius);
 
-    WallpaperProvider m_wallpaper;
+    DesktopWallpaperProvider m_wallpaper;
     QImage m_cellBg;
     QImage m_cellBgDark;
     QImage m_breakBg;

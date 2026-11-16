@@ -1,6 +1,6 @@
 #include "CalendarRenderer.h"
 
-#include "CalendarSharedCanvas.h"
+#include "ui/shared/DesktopSharedCanvas.h"
 #include "core/calendar/ChineseCalendar.h"
 
 #include <QFontMetrics>
@@ -90,7 +90,7 @@ QFont CalendarRenderer::font(qreal pointSize, bool bold) const
     return f;
 }
 
-CalendarLayout CalendarRenderer::render(QPainter *g, CalendarSharedCanvas &canvas,
+CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas,
                                         const CalendarSettings &settings,
                                         const CalendarTaskStore &store, const QDate &today,
                                         int year, int month, const QPoint &hover,
@@ -107,7 +107,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, CalendarSharedCanvas &canva
     g->setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     if (settings.hidden) {
-        canvas.setCalendarRect(panel);
+        canvas.setSlotRect(0, panel);
         canvas.markReady();
         return layout;
     }
@@ -352,7 +352,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, CalendarSharedCanvas &canva
     g->setBrush(Qt::NoBrush);
     g->drawPath(panelPath);
 
-    canvas.setCalendarRect(panel);
+    canvas.setSlotRect(0, panel);
     canvas.markReady();
     return layout;
 }

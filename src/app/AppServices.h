@@ -12,6 +12,7 @@ class QMenu;
 
 namespace poptools {
 
+class DesktopSurfaceHost;
 class GlobalHotKey;
 class RapidOcrService;
 class ToolRegistry;
@@ -37,6 +38,9 @@ public:
     ToolRegistry *toolRegistry = nullptr; // Goody 工具注册表（模块 init 中
                                           // registerTool 贡献"掌控本软件"能力）
     QMenu *trayMenu = nullptr;        // 托盘菜单（模块经 addTrayAction 贡献菜单项）
+    // 桌面表面（T-059：注入通道 + 共享画布 + 面板事件路由；贴壁纸类面板共用，
+    // 日历/收纳盒模块 registerPanel 到它上面）
+    DesktopSurfaceHost *desktopSurface = nullptr;
 
     // ---- 跨模块能力槽与共享态（提供方：CaptureModule） ----
     // 截图窗口当前是否可见

@@ -70,6 +70,16 @@ target_link_libraries(poptools_module_calendar PUBLIC
     poptools_ui_calendar
 )
 
+# ---- 功能模块：桌面收纳盒（T-059：贴壁纸虚拟文件夹） ----
+add_library(poptools_module_box STATIC
+    modules/BoxModule.cpp
+    modules/BoxModule.h
+)
+target_link_libraries(poptools_module_box PUBLIC
+    poptools_app_infra
+    poptools_ui_box
+)
+
 # ---- 功能模块：活动监控（无独立窗口，仅 core 服务接线） ----
 add_library(poptools_module_activitymonitor STATIC
     modules/ActivityMonitorModule.cpp
@@ -97,5 +107,6 @@ target_link_libraries(poptools_modules INTERFACE
     poptools_module_selectiontranslate
     poptools_module_activitymonitor
     poptools_module_calendar
+    poptools_module_box
     poptools_module_goody
 )

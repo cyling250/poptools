@@ -14,12 +14,12 @@ namespace poptools {
 // 内部一律 Qt 逻辑坐标（物理坐标 ÷ dpr 构造，回调换回物理坐标交还宿主），
 // changed 在拖动过程中持续回调（宿主实时重渲染共享位图）。
 // ============================================================
-class CalendarAdjustOverlay : public QWidget
+class DesktopAdjustOverlay : public QWidget
 {
     Q_OBJECT
 public:
     // calendarRect/screen 均为物理像素；dpr 为主屏缩放比
-    CalendarAdjustOverlay(const QRect &calendarRectPhysical, const QRect &screenPhysical,
+    DesktopAdjustOverlay(const QRect &calendarRectPhysical, const QRect &screenPhysical,
                           qreal dpr, std::function<void(const QRect &)> onChangedPhysical,
                           std::function<void(const QRect &)> onConfirmedPhysical,
                           std::function<void()> onCanceled, QWidget *parent = nullptr);

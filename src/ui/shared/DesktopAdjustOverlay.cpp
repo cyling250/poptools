@@ -1,4 +1,4 @@
-#include "CalendarAdjustOverlay.h"
+#include "DesktopAdjustOverlay.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -21,7 +21,7 @@ QRect mulRect(const QRect &r, qreal dpr)
 }
 } // namespace
 
-CalendarAdjustOverlay::CalendarAdjustOverlay(const QRect &calendarRectPhysical,
+DesktopAdjustOverlay::DesktopAdjustOverlay(const QRect &calendarRectPhysical,
                                              const QRect &screenPhysical, qreal dpr,
                                              std::function<void(const QRect &)> onChangedPhysical,
                                              std::function<void(const QRect &)> onConfirmedPhysical,
@@ -40,7 +40,7 @@ CalendarAdjustOverlay::CalendarAdjustOverlay(const QRect &calendarRectPhysical,
     updateBoundsFromInner();
 }
 
-void CalendarAdjustOverlay::paintEvent(QPaintEvent *)
+void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
 {
     QPainter g(this);
     g.setRenderHint(QPainter::Antialiasing);
@@ -84,7 +84,7 @@ void CalendarAdjustOverlay::paintEvent(QPaintEvent *)
                QStringLiteral("拖动边缘调整大小，拖动内部移动位置"));
 }
 
-void CalendarAdjustOverlay::keyPressEvent(QKeyEvent *event)
+void DesktopAdjustOverlay::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
         if (m_canceled)
@@ -98,7 +98,7 @@ void CalendarAdjustOverlay::keyPressEvent(QKeyEvent *event)
     QWidget::keyPressEvent(event);
 }
 
-int CalendarAdjustOverlay::hitZone(const QPoint &localPt) const
+int DesktopAdjustOverlay::hitZone(const QPoint &localPt) const
 {
     // rlqd 以屏幕坐标做边缘判定；此处等效为窗口局部坐标
     constexpr int edge = 14;
@@ -118,12 +118,12 @@ int CalendarAdjustOverlay::hitZone(const QPoint &localPt) const
     return innerLocal.contains(localPt) ? 0 : -1;
 }
 
-QRect CalendarAdjustOverlay::toPhysical(const QRect &logical) const
+QRect DesktopAdjustOverlay::toPhysical(const QRect &logical) const
 {
     return mulRect(logical, m_dpr);
 }
 
-void CalendarAdjustOverlay::mousePressEvent(QMouseEvent *event)
+void DesktopAdjustOverlay::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton)
         return;
@@ -149,7 +149,7 @@ void CalendarAdjustOverlay::mousePressEvent(QMouseEvent *event)
     grabMouse();
 }
 
-void CalendarAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
+void DesktopAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
 {
     if (!m_dragging) {
         const int z = hitZone(event->pos());
@@ -215,7 +215,7 @@ void CalendarAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
         m_changed(toPhysical(m_inner));
 }
 
-void CalendarAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
+void DesktopAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
 {
     Q_UNUSED(event)
     if (m_dragging) {
@@ -226,7 +226,7 @@ void CalendarAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
-void CalendarAdjustOverlay::updateBoundsFromInner()
+void DesktopAdjustOverlay::updateBoundsFromInner()
 {
     constexpr int margin = 26;
     QRect bounds(m_inner.left() - margin, m_inner.top() - margin, m_inner.width() + margin * 2,

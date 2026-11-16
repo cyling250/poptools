@@ -13,10 +13,18 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
-# ---- 共享窗口技术（贴桌 Z 序协调器） ----
+# ---- 共享窗口技术（贴桌 Z 序协调器 + 桌面表面注入通道 T-059） ----
 add_library(poptools_ui_shared STATIC
     shared/DesktopStack.cpp
     shared/DesktopStack.h
+    shared/DesktopSharedCanvas.cpp
+    shared/DesktopSharedCanvas.h
+    shared/DesktopSurfaceHost.cpp
+    shared/DesktopSurfaceHost.h
+    shared/DesktopAdjustOverlay.cpp
+    shared/DesktopAdjustOverlay.h
+    shared/DesktopWallpaperProvider.cpp
+    shared/DesktopWallpaperProvider.h
 )
 target_link_libraries(poptools_ui_shared PUBLIC
     poptools_core
@@ -24,6 +32,8 @@ target_link_libraries(poptools_ui_shared PUBLIC
     Qt6::Gui
     Qt6::Widgets
     user32
+    gdi32
+    msimg32
 )
 target_include_directories(poptools_ui_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
@@ -121,25 +131,20 @@ target_link_libraries(poptools_ui_goody PUBLIC
 )
 target_include_directories(poptools_ui_goody PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
-# ---- 桌面日历（照搬 rlqd 复刻：注入 DLL + 共享内存画布 + QPainter 渲染） ----
+# ---- 桌面日历（照搬 rlqd 复刻；注入通道/画布/覆盖层 T-059 起在 ui/shared） ----
 add_library(poptools_ui_calendar STATIC
-    calendar/CalendarSharedCanvas.cpp
-    calendar/CalendarSharedCanvas.h
-    calendar/WallpaperProvider.cpp
-    calendar/WallpaperProvider.h
     calendar/CalendarRenderer.cpp
     calendar/CalendarRenderer.h
-    calendar/CalendarHostWidget.cpp
-    calendar/CalendarHostWidget.h
+    calendar/CalendarPanel.cpp
+    calendar/CalendarPanel.h
     calendar/CalendarEventEditor.cpp
     calendar/CalendarEventEditor.h
     calendar/CalendarSearchForm.cpp
     calendar/CalendarSearchForm.h
-    calendar/CalendarAdjustOverlay.cpp
-    calendar/CalendarAdjustOverlay.h
 )
 target_link_libraries(poptools_ui_calendar PUBLIC
     poptools_core
+    poptools_ui_shared
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -147,6 +152,28 @@ target_link_libraries(poptools_ui_calendar PUBLIC
     gdi32
 )
 target_include_directories(poptools_ui_calendar PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# ---- 桌面收纳盒（T-060 文件夹门户式多盒，共用桌面表面注入通道） ----
+add_library(poptools_ui_box STATIC
+    box/BoxRenderer.cpp
+    box/BoxRenderer.h
+    box/BoxPanel.cpp
+    box/BoxPanel.h
+    box/BoxAdjustOverlay.cpp
+    box/BoxAdjustOverlay.h
+    box/BoxManagerDialog.cpp
+    box/BoxManagerDialog.h
+)
+target_link_libraries(poptools_ui_box PUBLIC
+    poptools_core
+    poptools_ui_shared
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    user32
+    gdi32
+)
+target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
 add_library(poptools_ui_settings STATIC
@@ -169,6 +196,7 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_pin
     poptools_ui_translate
     poptools_ui_calendar
+    poptools_ui_box
     poptools_ui_goody
     poptools_ui_settings
     poptools_ui_shared

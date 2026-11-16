@@ -1,4 +1,4 @@
-#include "WallpaperProvider.h"
+#include "DesktopWallpaperProvider.h"
 
 #include <QDir>
 #include <QDateTime>
@@ -12,13 +12,13 @@
 
 namespace poptools {
 
-WallpaperProvider::WallpaperProvider(int width, int height)
+DesktopWallpaperProvider::DesktopWallpaperProvider(int width, int height)
     : m_w(width)
     , m_h(height)
 {
 }
 
-QImage WallpaperProvider::blurredWallpaper()
+QImage DesktopWallpaperProvider::blurredWallpaper()
 {
     if (!m_blurred.isNull() && m_lastRefresh.msecsTo(QDateTime::currentDateTimeUtc()) < 20000)
         return m_blurred;
@@ -26,7 +26,7 @@ QImage WallpaperProvider::blurredWallpaper()
     return m_blurred;
 }
 
-void WallpaperProvider::refresh()
+void DesktopWallpaperProvider::refresh()
 {
     const QString path = wallpaperPath();
     QImage src;
@@ -47,7 +47,7 @@ void WallpaperProvider::refresh()
     m_lastPath = path;
 }
 
-QString WallpaperProvider::wallpaperPath() const
+QString DesktopWallpaperProvider::wallpaperPath() const
 {
     struct Candidate
     {
@@ -121,7 +121,7 @@ QString WallpaperProvider::wallpaperPath() const
     return candidates.first().path;
 }
 
-QImage WallpaperProvider::renderWallpaper(const QImage &src) const
+QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src) const
 {
     QImage bmp(m_w, m_h, QImage::Format_ARGB32);
     bmp.fill(QColor(10, 12, 20));
@@ -165,7 +165,7 @@ QImage WallpaperProvider::renderWallpaper(const QImage &src) const
     return bmp;
 }
 
-QImage WallpaperProvider::boxBlur(const QImage &src, int radius, int passes)
+QImage DesktopWallpaperProvider::boxBlur(const QImage &src, int radius, int passes)
 {
     // 与 rlqd 逐字节同构：ARGB32 字节序 BGRA，滑窗累加水平 + 垂直各一遍
     QImage bmp = src.convertToFormat(QImage::Format_ARGB32);
@@ -181,7 +181,7 @@ QImage WallpaperProvider::boxBlur(const QImage &src, int radius, int passes)
     return bmp;
 }
 
-void WallpaperProvider::boxBlurH(const uchar *src, uchar *dst, int w, int h, int stride, int r)
+void DesktopWallpaperProvider::boxBlurH(const uchar *src, uchar *dst, int w, int h, int stride, int r)
 {
     const int div = r * 2 + 1;
     for (int y = 0; y < h; ++y) {
@@ -212,7 +212,7 @@ void WallpaperProvider::boxBlurH(const uchar *src, uchar *dst, int w, int h, int
     }
 }
 
-void WallpaperProvider::boxBlurV(const uchar *src, uchar *dst, int w, int h, int stride, int r)
+void DesktopWallpaperProvider::boxBlurV(const uchar *src, uchar *dst, int w, int h, int stride, int r)
 {
     const int div = r * 2 + 1;
     for (int x = 0; x < w; ++x) {

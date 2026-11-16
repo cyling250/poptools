@@ -32,6 +32,8 @@
 #include "core/assistant/WorkingMemory.h"
 #include "core/annotation/AnnotationCanvas.h"
 #include "core/calendar/CalendarLayout.h"
+#include "core/box/BoxLayout.h"
+#include "core/box/BoxCatalog.h"
 #include "core/calendar/CalendarSettings.h"
 #include "core/calendar/CalendarTaskStore.h"
 #include "core/calendar/ChineseCalendar.h"
@@ -3441,6 +3443,146 @@ private slots:
         QCOMPARE(back.showLunar, false);
         QCOMPARE(back.fontScale, 135);
         QCOMPARE(back.rect(), QRect(100, 200, 800, 600));
+    }
+
+    void box_layout_sizing_snap_pagination_hit()
+    {
+        // 尺寸纪律：面板宽 = cols×kCellW 整数倍；单页高 = 头部 + rows×kCellH
+        const QRect screen(0, 0, 1920, 1080);
+        const auto single = BoxLayout::compute(QPoint(1400, 220), 4, 12, screen);
+        QCOMPARE(single.rows, 3);            // 12 项 ÷ 4 列 = 3 行
+        QCOMPARE(single.pageCount, 1);       // 恰好一页
+        QCOMPARE(single.panel.width(), 4 * BoxLayout::kCellW);
+        QCOMPARE(single.panel.height(),
+                 BoxLayout::kHeaderHeight + 3 * BoxLayout::kCellH); // 无页圆点条
+
+        // 自动增高：条目变多 → 行数增加但不超过屏；超容量翻页（高度含圆点条）
+        const auto paged = BoxLayout::compute(QPoint(1400, 220), 4, 40, screen);
+        QVERIFY(paged.rows < (40 + 3) / 4);              // 行数被屏幕钳制
+        QVERIFY(paged.pageCount >= 2);
+        QCOMPARE(paged.panel.height(), BoxLayout::kHeaderHeight
+                                           + paged.rows * BoxLayout::kCellH
+                                           + BoxLayout::kDotsHeight);
+
+        // 逐项布局：构造与命中
+        const BoxLayout layout(paged.panel, 4, 40, 0);
+        QCOMPARE(layout.cols, 4);
+        QCOMPARE(layout.capacity, layout.cols * layout.rows);
+        QCOMPARE(layout.pageCountFor(40, layout.capacity),
+                 40 % layout.capacity == 0 ? 40 / layout.capacity : 40 / layout.capacity + 1);
+        QCOMPARE(layout.page, 0); // 构造钳制
+        QCOMPARE(layout.headerButtons.size(), 3);
+        QVERIFY(layout.headerButtons.at(0).left() < layout.headerButtons.at(2).left());
+        QCOMPARE(layout.hitHeader(layout.headerButtons.at(1).center()), 1);
+        QCOMPARE(layout.hitHeader(QPoint(-1, -1)), -1);
+        QCOMPARE(layout.entryIndexAt(layout.cells.at(0).center()), 0);
+        QCOMPARE(layout.entryIndexAt(layout.cells.at(layout.capacity - 1).center()),
+                 layout.capacity - 1);
+        int cell = -1;
+        QCOMPARE(layout.hitCell(layout.cells.at(5).center(), &cell), 5);
+        QCOMPARE(cell, 5);
+        // 空盒：全格无效命中
+        const auto emptySz = BoxLayout::compute(QPoint(0, 0), 4, 0, screen);
+        const BoxLayout empty(emptySz.panel, 4, 0, 0);
+        QCOMPARE(empty.entryIndexAt(empty.cells.at(0).center()), -1);
+        QCOMPARE(empty.pageCount, 1);
+        // 页钳制 + 圆点可见性（≤9 页画圆点，>9 页画 n/m 文本）
+        const BoxLayout clamped(paged.panel, 4, 40, 99);
+        QCOMPARE(clamped.page, clamped.pageCount - 1);
+        QCOMPARE(clamped.dots.isEmpty(), clamped.pageCount > 9);
+
+        // 拖拽吸附：任意宽度/高度 → 列/行整数（2~8 列）
+        QCOMPARE(BoxLayout::snapCols(180), 2);
+        QCOMPARE(BoxLayout::snapCols(300), 3);
+        QCOMPARE(BoxLayout::snapCols(8 * BoxLayout::kCellW), 8);
+        QCOMPARE(BoxLayout::snapCols(9 * BoxLayout::kCellW + 40), 8); // 钳上限
+        QCOMPARE(BoxLayout::snapCols(30), 2);                         // 钳下限
+        const int rows3 = BoxLayout::snapRows(BoxLayout::kHeaderHeight
+                                                  + 3 * BoxLayout::kCellH
+                                                  + BoxLayout::kDotsHeight,
+                                              true);
+        QCOMPARE(rows3, 3);
+        const QRect snapped = BoxLayout::snappedRect(QPoint(100, 100), 5, 2, false);
+        QCOMPARE(snapped.width(), 5 * BoxLayout::kCellW);
+        QCOMPARE(snapped.height(),
+                 BoxLayout::kHeaderHeight + 2 * BoxLayout::kCellH); // 无页 → 无圆点条
+    }
+
+    void box_catalog_roundtrip_ops_and_bad_file()
+    {
+        // 数据目录重定向到临时目录，绝不写真实用户数据
+        QTemporaryDir dataDir;
+        QVERIFY(dataDir.isValid());
+        BoxCatalog::setDataDirOverride(dataDir.path());
+        // 多盒增改 + 落盘往返
+        QString idA, idB;
+        {
+            BoxCatalog catalog;
+            BoxDef a;
+            a.name = QStringLiteral("工具");
+            a.dir = QStringLiteral("C:\\Users\\x\\Documents\\工具");
+            a.x = 1400;
+            a.y = 220;
+            a.cols = 4;
+            idA = catalog.addBox(a);
+            BoxDef b;
+            b.name = QStringLiteral("下载");
+            b.dir = QDir::toNativeSeparators(dataDir.path());
+            idB = catalog.addBox(b);
+            QVERIFY(!idA.isEmpty() && !idB.isEmpty() && idA != idB);
+            catalog.renameBox(idA, QStringLiteral("常用工具"));
+            BoxDef updated = a;
+            updated.name = QStringLiteral("常用工具");
+            updated.x = 1500;
+            updated.page = 1;
+            updated.cols = 9; // 越界列数入库时钳制
+            catalog.updateBox(idA, updated);
+            catalog.setHiddenAll(true);
+            QCOMPARE(catalog.boxes().size(), 2);
+            QCOMPARE(catalog.indexOf(idB), 1);
+        }
+        {
+            const BoxCatalog reloaded = BoxCatalog::load();
+            QCOMPARE(reloaded.boxes().size(), 2);
+            const BoxDef &a = reloaded.boxes().at(0);
+            QCOMPARE(a.id, idA);
+            QCOMPARE(a.name, QStringLiteral("常用工具"));
+            QCOMPARE(a.x, 1500);
+            QCOMPARE(a.page, 1);
+            QCOMPARE(a.cols, 8);        // 钳制生效
+            QCOMPARE(a.hidden, true);
+            QVERIFY(QDir::fromNativeSeparators(a.dir).endsWith(
+                QDir::fromNativeSeparators(QStringLiteral("Documents/工具"))));
+            const BoxDef &b = reloaded.boxes().at(1);
+            QCOMPARE(b.id, idB);
+            QCOMPARE(b.dir, QDir::toNativeSeparators(dataDir.path()));
+            // 解除绑定不删文件夹（文件夹门户语义核心红线）
+            BoxCatalog mutableReload = reloaded;
+            mutableReload.removeBox(idB);
+            QCOMPARE(mutableReload.boxes().size(), 1);
+            QVERIFY(QDir(dataDir.path()).exists()); // 文件夹仍在
+        }
+        // 托管目录重名顺延（-2），绝不并目录
+        {
+            const QString base = BoxCatalog::managedDirFor(QStringLiteral("收藏"));
+            QVERIFY(QDir().mkpath(base));
+            const QString second = BoxCatalog::managedDirFor(QStringLiteral("收藏"));
+            QVERIFY(second != base);
+            QVERIFY(second.endsWith(QStringLiteral("-2")));
+        }
+        // 坏档自愈：.bad 留证 + 空载继续（防坏档反复崩溃）
+        {
+            QFile bad(BoxCatalog::storePath());
+            QVERIFY(bad.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            bad.write("{ broken json !!");
+            bad.close();
+            const BoxCatalog recovered = BoxCatalog::load();
+            QCOMPARE(recovered.boxes().size(), 0);
+            QVERIFY(QFileInfo::exists(BoxCatalog::storePath() + QStringLiteral(".bad")));
+            BoxCatalog parser;
+            QCOMPARE(parser.fromJson(QStringLiteral("not json")), false);
+        }
+        BoxCatalog::setDataDirOverride(QString());
     }
 };
 

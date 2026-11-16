@@ -7,12 +7,14 @@
 #include "core/assistant/ToolRegistry.h"
 #include "core/ocr/RapidOcrService.h"
 #include "modules/ActivityMonitorModule.h"
+#include "modules/BoxModule.h"
 #include "modules/CalendarModule.h"
 #include "modules/CaptureModule.h"
 #include "modules/GoodyModule.h"
 #include "modules/PinModule.h"
 #include "modules/SelectionTranslateModule.h"
 #include "ui/settings/SettingsDialog.h"
+#include "ui/shared/DesktopSurfaceHost.h"
 
 namespace poptools {
 
@@ -37,6 +39,10 @@ MainWindow::MainWindow(QObject *parent)
     m_services->ocr = m_ocr;
     m_services->toolRegistry = m_toolRegistry;
     m_services->trayMenu = m_menu;
+    // 桌面表面：注入通道 + 共享画布 + 面板事件路由（日历/收纳盒等贴壁纸
+    // 面板共用；本体只有隐藏 1x1 窗，重活在 startDuty，由模块延迟触发）
+    m_desktopSurface = new DesktopSurfaceHost();
+    m_services->desktopSurface = m_desktopSurface;
     // 托盘气泡通知（模块的非交互结果反馈，如贴图 OCR 完成/失败）
     m_services->notify = [this](const QString &title, const QString &body) {
         m_tray->showMessage(title, body, QSystemTrayIcon::Information);
@@ -51,6 +57,7 @@ MainWindow::MainWindow(QObject *parent)
     m_registry.add(std::make_unique<ActivityMonitorModule>());
     m_registry.add(std::make_unique<GoodyModule>());
     m_registry.add(std::make_unique<CalendarModule>());
+    m_registry.add(std::make_unique<BoxModule>());
     m_registry.initAll(*m_services);
 
     // 能力槽完整性自检：拔掉 CaptureModule 时贴图会静默退化为"剪贴板 + 鼠标位置"，

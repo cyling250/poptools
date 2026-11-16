@@ -7,15 +7,15 @@
 namespace poptools {
 
 // ============================================================
-// 当前壁纸读取 + 毛玻璃模糊（照搬 rlqd CalendarClone/WallpaperProvider.cs）：
+// 当前壁纸读取 + 毛玻璃模糊（照搬 rlqd CalendarClone/DesktopWallpaperProvider.cs）：
 // 注册表壁纸路径 → TranscodedWallpaper → CachedFiles → Spotlight 候选，
 // 按系统 WallpaperStyle 铺排，1/4 降采样 + 双向 BoxBlur（r=10, 2 遍）后放大。
 // 20s 缓存；30s 定时刷新由宿主控制器驱动。
 // ============================================================
-class WallpaperProvider
+class DesktopWallpaperProvider
 {
 public:
-    WallpaperProvider(int width, int height);
+    DesktopWallpaperProvider(int width, int height);
 
     QImage blurredWallpaper(); // 缓存 20s 内直接返回
     void refresh();

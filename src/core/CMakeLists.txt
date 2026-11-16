@@ -51,6 +51,12 @@ add_library(poptools_core STATIC
     calendar/CalendarSettings.h
     calendar/CalendarTaskStore.cpp
     calendar/CalendarTaskStore.h
+    box/BoxCatalog.cpp
+    box/BoxCatalog.h
+    box/BoxLayout.cpp
+    box/BoxLayout.h
+    box/IconService.cpp
+    box/IconService.h
     capture/ScreenCapturer.cpp
     capture/ScreenCapturer.h
     capture/SmartRectDetector.cpp
@@ -107,9 +113,10 @@ target_link_libraries(poptools_core PUBLIC
 
 # Windows 全局热键、窗口/控件枚举（user32）、DWM 扩展窗口边界（dwmapi）、
 # 回收站删除（shell32：SHFileOperation，FsTool）、
-# UIA 取文（ole32：CoInitializeEx/CoCreateInstance；oleaut32：BSTR）
+# UIA 取文（ole32：CoInitializeEx/CoCreateInstance；oleaut32：BSTR）、
+# 收纳盒图标提取（shell32：SHGetFileInfo/SHGetImageList；gdi32：GetIconInfo/GetDIBits）
 if(WIN32)
-    target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32 ole32 oleaut32)
+    target_link_libraries(poptools_core PRIVATE user32 dwmapi shell32 gdi32 ole32 oleaut32)
 endif()
 
 # ---- 二维码识别（可选）：zxing-cpp 静态编入（源码由 scripts/install_zxing.py
