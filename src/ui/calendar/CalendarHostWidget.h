@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDate>
+#include <QImage>
 #include <QObject>
 #include <QPointer>
 #include <QPoint>
@@ -74,8 +75,10 @@ private:
     void notifyHookUpdate();
     void trackModal(QWidget *w);
     void centerOnPanel(QWidget *w);
+    QImage &stagingImage(); // 私有暂存帧（渲染完成后整帧发布进共享位图）
 
     CalendarSharedCanvas m_canvas;
+    QImage m_staging;
     std::unique_ptr<CalendarRenderer> m_renderer;
     CalendarSettings m_settings;
     CalendarTaskStore m_store;

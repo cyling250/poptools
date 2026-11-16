@@ -113,4 +113,19 @@ void CalendarSharedCanvas::markReady()
     writeHeaderInt(kOffReady, 1);
 }
 
+void CalendarSharedCanvas::publishFrame(const QImage &frame)
+{
+    if (!m_dib || m_image.isNull())
+        return;
+    if (frame.size() != m_image.size() || frame.format() != m_image.format())
+        return;
+    const int stride = m_image.bytesPerLine();
+    if (frame.bytesPerLine() == stride) {
+        memcpy(m_bits, frame.constBits(), static_cast<size_t>(stride) * m_image.height());
+    } else {
+        for (int y = 0; y < m_image.height(); ++y)
+            memcpy(static_cast<BYTE *>(m_bits) + y * stride, frame.constScanLine(y), stride);
+    }
+}
+
 } // namespace poptools

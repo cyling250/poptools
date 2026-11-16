@@ -5,8 +5,9 @@
 // 机制（与原版 dkdockexplorerx64.dll 一致）：
 //   1. StartDock(hostWnd)：对 ProgMan→SHELLDLL_DefView→SysListView32 所在
 //      explorer 线程安装 WH_CALLWNDPROC 钩子（本 DLL 随钩子注入 explorer）；
-//   2. 注入后子类化 SHELLDLL_DefView：WM_ERASEBKGND 先画壁纸再 AlphaBlend
-//      共享内存位图（日历位于壁纸之上、图标之下）；SysListView32：
+//   2. 注入后子类化 SHELLDLL_DefView：WM_ERASEBKGND 在内存 DC 合成
+//      壁纸+共享内存位图后一次 BitBlt 上屏（日历位于壁纸之上、图标之下，
+//      一次上屏消除"壁纸已刷、日历未贴"的中间帧闪烁）；SysListView32：
 //      WM_ERASEBKGND 返回 1（透明）并转发鼠标消息（LVM_HITTEST 区分图标）；
 //   3. 日历位图由应用渲染进命名共享内存 DIB（CreateDIBSection 绑定共享段）；
 //   4. 1s 定时器守护：explorer 重启后自动重注入。
@@ -66,6 +67,10 @@ static HDC g_memDC = NULL;
 static HBITMAP g_dib = NULL;
 static HGDIOBJ g_oldDib = NULL;
 static int g_bmpW = 0, g_bmpH = 0;
+static HDC g_bgDC = NULL;      // 双缓冲：壁纸+日历先合成在这里，再一次上屏
+static HBITMAP g_bgBmp = NULL;
+static HGDIOBJ g_bgOld = NULL;
+static int g_bgW = 0, g_bgH = 0;
 
 static LRESULT CALLBACK MsgWndProc(HWND, UINT, WPARAM, LPARAM);
 static LRESULT CALLBACK DefViewProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
@@ -115,12 +120,21 @@ static HWND FindDesktopListView()
     return NULL;
 }
 
+static void ReleaseBgDC()
+{
+    if (g_bgDC && g_bgOld) SelectObject(g_bgDC, g_bgOld);
+    if (g_bgBmp) DeleteObject(g_bgBmp);
+    if (g_bgDC) DeleteDC(g_bgDC);
+    g_bgDC = NULL; g_bgBmp = NULL; g_bgOld = NULL; g_bgW = 0; g_bgH = 0;
+}
+
 static void ReleaseDib()
 {
     if (g_memDC && g_oldDib) SelectObject(g_memDC, g_oldDib);
     if (g_dib) DeleteObject(g_dib);
     if (g_memDC) DeleteDC(g_memDC);
     g_memDC = NULL; g_dib = NULL; g_oldDib = NULL; g_bits = NULL; g_bmpW = 0; g_bmpH = 0;
+    ReleaseBgDC();
 }
 
 static bool EnsureDib(HDC dc)
@@ -148,6 +162,37 @@ static bool EnsureDib(HDC dc)
     return true;
 }
 
+static bool EnsureBgDC(HDC dc)
+{
+    if (!g_hdr || !g_map) return false;
+    if (g_bgDC && g_bgW == g_bmpW && g_bgH == g_bmpH) return true;
+    ReleaseBgDC();
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = g_bmpW;
+    bi.bmiHeader.biHeight = -g_bmpH;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = NULL;
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bmp) { Log(L"bg dib failed %lu", GetLastError()); return false; }
+    HDC mem = CreateCompatibleDC(dc);
+    if (!mem) { DeleteObject(bmp); return false; }
+    g_bgOld = SelectObject(mem, bmp);
+    g_bgDC = mem; g_bgBmp = bmp; g_bgW = g_bmpW; g_bgH = g_bmpH;
+    return true;
+}
+
+static void BlendCalendar(HDC dc)
+{
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (!AlphaBlend(dc, 0, 0, g_bmpW, g_bmpH, g_memDC, 0, 0, g_bmpW, g_bmpH, bf)) {
+        static bool once = false;
+        if (!once) { once = true; Log(L"AlphaBlend failed %lu", GetLastError()); }
+    }
+}
+
 static void ForwardEvent(UINT ev, int extra, POINT pt)
 {
     if (!g_hdr) return;
@@ -173,17 +218,35 @@ static LRESULT CALLBACK DefViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                                     UINT_PTR uIdSubclass, DWORD_PTR)
 {
     if (msg == WM_ERASEBKGND) {
-        DefSubclassProc(hwnd, msg, wParam, lParam);
-        if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready) {
-            HDC dc = (HDC)wParam;
-            if (EnsureDib(dc)) {
-                BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-                BOOL ok = AlphaBlend(dc, 0, 0, g_bmpW, g_bmpH, g_memDC, 0, 0, g_bmpW, g_bmpH, bf);
-                if (!ok) {
-                    static bool once = false;
-                    if (!once) { once = true; Log(L"AlphaBlend failed %lu", GetLastError()); }
+        HDC dc = (HDC)wParam;
+        bool atomic = false;
+        if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc)) {
+            RECT box;
+            const int cb = GetClipBox(dc, &box);
+            if (cb != NULLREGION && cb != ERROR && EnsureBgDC(dc)) {
+                // 双缓冲擦除（修 hover 头部按钮时整面板闪一下）：壁纸由原擦除过程
+                // 改道画进内存 DC，日历叠加其上，最后 BitBlt 一次上屏——屏幕上只有
+                // 旧帧或完整新帧，DWM 任何时刻合成都不会看到"壁纸已刷、日历未贴"
+                // 的中间帧。原点/画刷原点对齐屏幕 DC，保证壁纸相位与直画一致
+                HRGN clip = CreateRectRgnIndirect(&box);
+                if (clip) {
+                    SelectClipRgn(g_bgDC, clip);
+                    DeleteObject(clip);
                 }
+                POINT org;
+                if (GetViewportOrgEx(dc, &org)) SetViewportOrgEx(g_bgDC, org.x, org.y, NULL);
+                if (GetBrushOrgEx(dc, &org)) SetBrushOrgEx(g_bgDC, org.x, org.y, NULL);
+                DefSubclassProc(hwnd, msg, (WPARAM)g_bgDC, lParam); // 壁纸 → 内存
+                BlendCalendar(g_bgDC);                              // 日历 → 内存
+                BitBlt(dc, 0, 0, g_bmpW, g_bmpH, g_bgDC, 0, 0, SRCCOPY); // 一次上屏
+                atomic = true;
             }
+        }
+        if (!atomic) {
+            // 兜底：双缓冲不可用（无裁剪区/内存位图失败）时维持旧直画路径
+            DefSubclassProc(hwnd, msg, wParam, lParam);
+            if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc))
+                BlendCalendar(dc);
         }
         return 1;
     }

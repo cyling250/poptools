@@ -40,6 +40,9 @@ public:
     void setHostWindow(HWND hwnd);
     void setCalendarRect(const QRect &r);
     void markReady(); // seq++ + ready=1（DLL 端据此决定是否上屏）
+    // 整帧原子发布：把绘制好的暂存帧一次拷入共享位图。共享位图是 explorer
+    // 随时可采样的，不能在上面"清屏→重绘"——中间态被采到就是整面板消失一帧
+    void publishFrame(const QImage &frame);
 
 private:
     void writeHeaderInt(int offsetInHeader, LONG value);

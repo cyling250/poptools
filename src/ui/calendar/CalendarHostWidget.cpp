@@ -163,13 +163,27 @@ void CalendarHostWidget::notifyHookUpdate()
         ::PostMessageW(fw, kMsgUpdate, 0, 0);
 }
 
+QImage &CalendarHostWidget::stagingImage()
+{
+    const QImage &canvas = m_canvas.image();
+    if (m_staging.size() != canvas.size() || m_staging.format() != canvas.format())
+        m_staging = QImage(canvas.size(), canvas.format());
+    return m_staging;
+}
+
 void CalendarHostWidget::render()
 {
     if (m_adjusting || !m_renderer || !m_canvas.isValid())
         return;
-    QPainter g(&m_canvas.image());
+    // 先画进私有暂存帧再整帧发布：直接在共享位图上"清屏→重绘"的 10~30ms
+    // 窗口内，explorer 的擦除流程可能采到近全透明的中间态——悬停头部按钮
+    // 时连续两次渲染重叠，表现为日历整面板消失一帧再恢复（闪烁）
+    QImage &buf = stagingImage();
+    QPainter g(&buf);
     m_layout = m_renderer->render(&g, m_canvas, m_settings, m_store, m_today, m_year, m_month,
                                   m_hover, m_hoverHint, false);
+    g.end();
+    m_canvas.publishFrame(buf);
     notifyHookUpdate();
 }
 
@@ -177,9 +191,12 @@ void CalendarHostWidget::renderDuringAdjust()
 {
     if (!m_renderer || !m_canvas.isValid())
         return;
-    QPainter g(&m_canvas.image());
+    QImage &buf = stagingImage();
+    QPainter g(&buf);
     m_layout = m_renderer->render(&g, m_canvas, m_settings, m_store, m_today, m_year, m_month,
                                   QPoint(-9999, -9999), QString(), false);
+    g.end();
+    m_canvas.publishFrame(buf);
     notifyHookUpdate();
 }
 
