@@ -141,6 +141,7 @@ add_library(poptools_ui_calendar STATIC
     calendar/CalendarEventEditor.h
     calendar/CalendarSearchForm.cpp
     calendar/CalendarSearchForm.h
+    calendar/CalendarPaintUtils.h
 )
 target_link_libraries(poptools_ui_calendar PUBLIC
     poptools_core

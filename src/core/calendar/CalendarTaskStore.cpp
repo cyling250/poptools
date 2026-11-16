@@ -97,23 +97,26 @@ CalendarTaskStore CalendarTaskStore::load()
     return store;
 }
 
+// 全库序列化（save/exportJson 共用）：同一遍历顺序、同一序列化器，输出字节一致
+QJsonObject CalendarTaskStore::toJsonObject() const
+{
+    QJsonObject root;
+    for (auto it = m_days.constBegin(); it != m_days.constEnd(); ++it)
+        root.insert(it.key(), tasksToArray(it.value()));
+    return root;
+}
+
 void CalendarTaskStore::save() const
 {
     QFile f(CalendarSettings::tasksPath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return;
-    QJsonObject root;
-    for (auto it = m_days.constBegin(); it != m_days.constEnd(); ++it)
-        root.insert(it.key(), tasksToArray(it.value()));
-    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    f.write(QJsonDocument(toJsonObject()).toJson(QJsonDocument::Indented));
 }
 
 QString CalendarTaskStore::exportJson() const
 {
-    QJsonObject root;
-    for (auto it = m_days.constBegin(); it != m_days.constEnd(); ++it)
-        root.insert(it.key(), tasksToArray(it.value()));
-    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    return QString::fromUtf8(QJsonDocument(toJsonObject()).toJson(QJsonDocument::Indented));
 }
 
 void CalendarTaskStore::mergeFrom(const CalendarTaskStore &other)

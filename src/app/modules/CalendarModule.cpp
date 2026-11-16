@@ -17,10 +17,14 @@ void CalendarModule::init(AppServices &services)
     if (services.desktopSurface) {
         m_panel = new CalendarPanel();
         m_panelId = services.desktopSurface->registerPanel(m_panel);
-        // 上下文用表面宿主：它若先亡则回调自动丢弃
-        QTimer::singleShot(1200, services.desktopSurface, [this] {
-            if (m_services && m_services->desktopSurface)
-                m_services->desktopSurface->startDuty();
+        // T-062 修复: G-09 上下文原为 desktopSurface（无 parent、活到进程末尾），
+        // lambda 捕获模块裸 this——启动后 1.2s 内退出时，事件循环可能在模块析构后
+        // 仍处理到期定时器 → 读已析构对象（UB）。上下文改面板：shutdown 先于宿主
+        // 析构 delete m_panel，面板亡则回调自动丢弃；面板存活到宿主亡，届时
+        // registerPanel 期建立的 surface 回引随宿主同灭，lambda 不再执行
+        QTimer::singleShot(1200, m_panel, [panel = m_panel] {
+            if (panel && panel->surface())
+                panel->surface()->startDuty();
         });
     }
 
@@ -55,9 +59,11 @@ void CalendarModule::init(AppServices &services)
         if (m_panel)
             m_panel->enterAdjustMode();
     };
-    const auto openSettings = [&services] {
-        if (services.openCalendarSettings)
-            services.openCalendarSettings();
+    // S-10：与其余槽位统一 [this] 捕获风格（原按引用捕获形参 services，语义
+    // 等价但可读性差）
+    const auto openSettings = [this] {
+        if (m_services && m_services->openCalendarSettings)
+            m_services->openCalendarSettings();
     };
     const auto toggleDuty = [this] {
         if (!m_services || !m_services->desktopSurface || !m_toggleAction)

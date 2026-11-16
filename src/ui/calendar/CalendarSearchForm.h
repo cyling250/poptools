@@ -18,9 +18,11 @@ class CalendarSearchForm : public QDialog
 public:
     explicit CalendarSearchForm(const CalendarTaskStore &store, QWidget *parent = nullptr);
 
+    // 仅"打开"accept 路径写入；取消 / 未选中返回无效日期
     QDate selectedDate() const { return m_selectedDate; }
 
 private:
+    // 全量重建列表：日期键降序、逐条文本过滤，无匹配时占位行
     void rebuild();
 
     const CalendarTaskStore &m_store;

@@ -36,10 +36,14 @@ public:
     // 数据目录重定向（单测注入 QTemporaryDir 用；空串 = 恢复默认路径）
     static void setDataDirOverride(const QString &dir);
 
+    // 文件缺失 / JSON 损坏 → 返回默认设置（不报错）
     static CalendarSettings load();
+    // 整文件覆写（Truncate），失败静默
     void save() const;
 
+    // 全设置 → JSON（save 的载荷；与 fromJson 对称）
     QJsonObject toJson() const;
+    // 缺键回退默认值（部分损坏仍可读）
     void fromJson(const QJsonObject &o);
 };
 

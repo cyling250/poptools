@@ -1,5 +1,6 @@
 #include "CalendarRenderer.h"
 
+#include "CalendarPaintUtils.h" // 圆角矩形路径（S-03 模块内收敛）
 #include "ui/shared/DesktopSharedCanvas.h"
 #include "core/calendar/ChineseCalendar.h"
 
@@ -11,26 +12,6 @@
 #include <cmath>
 
 namespace poptools {
-
-namespace {
-
-QPainterPath roundedPath(const QRectF &r, qreal radius)
-{
-    QPainterPath path;
-    const qreal d = std::min(radius * 2, std::min(r.width(), r.height()));
-    path.moveTo(r.left(), r.top() + d);
-    path.arcTo(QRectF(r.left(), r.top(), d, d), 180, -90);
-    path.lineTo(r.right() - d, r.top());
-    path.arcTo(QRectF(r.right() - d, r.top(), d, d), 90, -90);
-    path.lineTo(r.right(), r.bottom() - d);
-    path.arcTo(QRectF(r.right() - d, r.bottom() - d, d, d), 0, -90);
-    path.lineTo(r.left() + d, r.bottom());
-    path.arcTo(QRectF(r.left(), r.bottom() - d, d, d), 270, -90);
-    path.closeSubpath();
-    return path;
-}
-
-} // namespace
 
 CalendarRenderer::CalendarRenderer(int width, int height, qreal dpr)
     : m_wallpaper(width, height)
@@ -107,8 +88,11 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
     g->setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     if (settings.hidden) {
-        canvas.setSlotRect(0, panel);
-        canvas.markReady();
+        // T-062 修复: G-01/S-09 删除 renderer 直写 canvas（setSlotRect/markReady）——
+        // 槽位/ready/发布全权归 DesktopSurfaceHost::commitSurface（它在 render 末尾
+        // 被调用，无条件重写全部槽位并 markReady；hidden 时宿主照常发布本面板的
+        // 透明帧）。pre-T-059 直渲架构残留，还把"槽 0=日历"的注册顺序依赖固化进了
+        // 渲染器（硬编码槽 0）
         return layout;
     }
 
@@ -159,7 +143,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
             const DayLabel label = ChineseCalendar::dayLabel(date, settings.showLunar);
             const QImage &bg = !m_cellBgDark.isNull() ? m_cellBgDark : m_cellBg;
             if (!bg.isNull())
-                drawNineSlice(g, bg, cell, 12);
+                drawNinePatch(g, bg, cell, 12, 12, true);
             if (!inMonth)
                 continue;
 
@@ -176,6 +160,8 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                     case DayLabelKind::LunarMonth: lc = QColor(214, 214, 214, 255); break;
                     default: lc = QColor(188, 188, 188, 255); break;
                 }
+                // 农历字号更小，顶锚点再下移 3px 使两行文字基线近似对齐
+                //（与 drawShadowText 顶锚语义配套）
                 drawShadowText(g, label.text, lunarFont, lc,
                                datePos + QPointF(dateTextW + 6, 3));
             }
@@ -183,9 +169,10 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
             if (settings.showEvents) {
                 const QVector<CalendarTaskItem> tasks = store.get(date);
                 if (!tasks.isEmpty()) {
-                    const qreal lineH = 17 * scale;
+                    const qreal lineH = 17 * scale; // 17 = rlqd 日程行高节奏（100% 时），随 fontScale 折算
                     g->save();
                     g->setClipRect(QRect(cell.left(), cell.top(), cell.width(), cell.height() - 2));
+                    // 27 = 日期行占位高（顶 3px + 日期字高），日程首行从其下开始
                     qreal ey = cell.top() + 27;
                     for (int i = 0; i < tasks.size(); ++i) {
                         if (ey + lineH > cell.bottom())
@@ -214,7 +201,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                 // 中心内缩 ~15.5px，经 sb20→db14 映射后落在绘制矩形内缩 ~11px 处，
                 // 外扩 11px 恰好抵消）。原「外圈白线 + 内圈发光」双框废弃
                 if (!m_todayGlow.isNull())
-                    drawNineSliceBorder(g, m_todayGlow, cell.adjusted(-11, -11, 11, 11), 20, 14);
+                    drawNinePatch(g, m_todayGlow, cell.adjusted(-11, -11, 11, 11), 20, 14, false);
             }
         }
     }
@@ -245,7 +232,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
     {
         for (int c = 0; c < 7; ++c) {
             const QDate day(2020, 1, 6 + c); // 2020-01-06 = 周一 … 01-12 = 周日
-            const QString text = ChineseCalendar::weekdayShort(day);
+            const QString text = ChineseCalendar::weekdayName(day);
             const QRectF col(layout.gridContent.left() + c * layout.cellWidth,
                              layout.weekHeader.top() + 3, layout.cellWidth,
                              layout.kWeekHeaderHeight);
@@ -352,13 +339,17 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
     g->setBrush(Qt::NoBrush);
     g->drawPath(panelPath);
 
-    canvas.setSlotRect(0, panel);
-    canvas.markReady();
+    // T-062 修复: G-01/S-09 同 hidden 分支——槽位矩形/ready/发布不再由 renderer
+    // 直写（原 markReady 早于宿主 publishFrame，会让 explorer 在新帧尚未发布时
+    // 被唤醒采样旧帧，并在第二条路径上破坏宿主"发布→槽位→markReady"次序纪律）。
+    // CalendarPanel::render() 末尾调 commitSurface 统一完成
     return layout;
 }
 
 void CalendarRenderer::drawShadow(QPainter *g, const QRect &panel)
 {
+    // 投影配方（i=18..1 step2、alpha 6、pen 宽 4）与 BoxRenderer 同族（box-r1
+    // C-03），改参数须两处对齐
     for (int i = 18; i >= 1; i -= 2) {
         QPen pen(QColor(0, 0, 0, 6), 4);
         pen.setJoinStyle(Qt::RoundJoin);
@@ -404,28 +395,12 @@ void CalendarRenderer::drawShadowTextInRect(QPainter *g, const QString &text, co
     g->drawText(rect, align, text);
 }
 
-void CalendarRenderer::drawNineSlice(QPainter *g, const QImage &img, const QRect &dst, int border)
-{
-    const int w = img.width(), h = img.height();
-    const int b = std::min(border, std::min(w / 2, h / 2));
-    const int dw = dst.width(), dh = dst.height();
-    g->drawImage(QRect(dst.left(), dst.top(), b, b), img, QRect(0, 0, b, b));
-    g->drawImage(QRect(dst.right() - b + 1, dst.top(), b, b), img, QRect(w - b, 0, b, b));
-    g->drawImage(QRect(dst.left(), dst.bottom() - b + 1, b, b), img, QRect(0, h - b, b, b));
-    g->drawImage(QRect(dst.right() - b + 1, dst.bottom() - b + 1, b, b), img,
-                 QRect(w - b, h - b, b, b));
-    g->drawImage(QRect(dst.left() + b, dst.top(), dw - 2 * b, b), img, QRect(b, 0, w - 2 * b, b));
-    g->drawImage(QRect(dst.left() + b, dst.bottom() - b + 1, dw - 2 * b, b), img,
-                 QRect(b, h - b, w - 2 * b, b));
-    g->drawImage(QRect(dst.left(), dst.top() + b, b, dh - 2 * b), img, QRect(0, b, b, h - 2 * b));
-    g->drawImage(QRect(dst.right() - b + 1, dst.top() + b, b, dh - 2 * b), img,
-                 QRect(w - b, b, b, h - 2 * b));
-    g->drawImage(QRect(dst.left() + b, dst.top() + b, dw - 2 * b, dh - 2 * b), img,
-                 QRect(b, b, w - 2 * b, h - 2 * b));
-}
-
-void CalendarRenderer::drawNineSliceBorder(QPainter *g, const QImage &img, const QRect &dst,
-                                           int srcBorder, int destBorder)
+// S-02：原 drawNineSlice（9 块，源/目标边宽相同）与 drawNineSliceBorder（8 块，
+// 源/目标边宽独立）约 90% 同构，合并为此函数。行为等价：两处调用点（格子背景
+// srcBorder=destBorder=12；今日光环 20/14 无中心）逐块矩形按现公式代入与原
+// 实现一致（皮肤贴图均 60×60，源边钳制结果相同）
+void CalendarRenderer::drawNinePatch(QPainter *g, const QImage &img, const QRect &dst,
+                                     int srcBorder, int destBorder, bool withCenter)
 {
     const int w = img.width(), h = img.height();
     const int sb = std::min(srcBorder, std::min(w / 2, h / 2));
@@ -442,6 +417,9 @@ void CalendarRenderer::drawNineSliceBorder(QPainter *g, const QImage &img, const
     g->drawImage(QRect(dst.left(), dst.top() + db, db, dh - 2 * db), img, QRect(0, sb, sb, h - 2 * sb));
     g->drawImage(QRect(dst.right() - db + 1, dst.top() + db, db, dh - 2 * db), img,
                  QRect(w - sb, sb, sb, h - 2 * sb));
+    if (withCenter)
+        g->drawImage(QRect(dst.left() + db, dst.top() + db, dw - 2 * db, dh - 2 * db), img,
+                     QRect(sb, sb, w - 2 * sb, h - 2 * sb));
 }
 
 void CalendarRenderer::drawHeaderIcon(QPainter *g, HeaderButtonKind kind, const QRect &r)
@@ -474,11 +452,6 @@ void CalendarRenderer::drawHeaderIcon(QPainter *g, HeaderButtonKind kind, const 
                                               QPointF(cx + 3, cy + 4) });
             break;
     }
-}
-
-QPainterPath CalendarRenderer::roundRectPath(const QRectF &r, qreal radius)
-{
-    return roundedPath(r, radius);
 }
 
 } // namespace poptools

@@ -51,8 +51,11 @@ constexpr int kSolarTermInfo[24] = {
     462224, 483532, 504758
 };
 
+// y 年闰月月份（1-12），0 = 无闰月；y 须在表范围内（1900-2100），越界保护由
+// getLunar 入口的年份检查承担（表内无闰十二月）——T-062 G-11 登记为不可达路径
 int lunarLeapMonth(int y) { return kLunarInfo[y - 1900] & 0xf; }
 
+// 闰月天数（bit16=大小位），无闰月返回 0
 int lunarLeapDaysRaw(int y)
 {
     if (!lunarLeapMonth(y))
@@ -71,10 +74,12 @@ int lunarYearDays(int y)
     return sum + lunarLeapDaysRaw(y);
 }
 
+// 标准 m 月（1-12，不含闰月位）天数 30/29
 int lunarMonthDays(int y, int m) { return (kLunarInfo[y - 1900] & (0x10000 >> m)) ? 30 : 29; }
 
 } // namespace
 
+// 星期全称。原另有 weekdayShort 纯别名（唯一调用点已改用本函数，S-06 删除）
 QString ChineseCalendar::weekdayName(const QDate &d)
 {
     switch (d.dayOfWeek()) { // Qt：1=周一 … 7=周日
@@ -87,8 +92,6 @@ QString ChineseCalendar::weekdayName(const QDate &d)
         default: return QStringLiteral("星期日");
     }
 }
-
-QString ChineseCalendar::weekdayShort(const QDate &d) { return weekdayName(d); }
 
 bool ChineseCalendar::getLunar(const QDate &d, int *year, int *month, int *day)
 {
@@ -186,6 +189,8 @@ QString ChineseCalendar::solarTerm(const QDate &d)
             continue;
         // 与 rlqd 相同：1900-01-06 02:05 + 每年 365.2422 天的分钟级近似
         const double ms = 31556925974.7 * (d.year() - 1900) + kSolarTermInfo[idx] * 60000.0;
+        // 与 rlqd 同口径按本地时间推算；1986-1991 中国夏令时切换日的交节日期
+        // 可能有 ±1 天理论偏差（分钟级近似公式精度之内，可接受）
         const QDateTime base(QDate(1900, 1, 6), QTime(2, 5, 0), Qt::LocalTime);
         const QDateTime term = base.addMSecs(qRound64(ms));
         const QDate td = term.date();
@@ -197,6 +202,7 @@ QString ChineseCalendar::solarTerm(const QDate &d)
 
 namespace {
 
+// y 年 m 月第 n 个星期 dow；不存在（越出月尾）返回无效 QDate
 QDate nthWeekdayOfMonth(int year, int month, Qt::DayOfWeek dow, int n)
 {
     const QDate first(year, month, 1);

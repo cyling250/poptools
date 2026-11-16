@@ -50,8 +50,12 @@ public:
     CalendarLayout(const QRect &panelRect, int year, int month);
 
     QRect cellRect(int row, int col) const;
+    // cellDate = firstCellDate + row*7+col；首尾行列的日期可能越出显示月
     QDate cellDate(int row, int col) const;
+    // 命中测试：p∈gridContent 返回 true，行列 clamp 到 [0,rows)×[0,7]；返回的
+    // date 可能越出显示月（首尾行），调用方必须自查 inDisplayMonth
     bool tryGetCell(const QPoint &p, int *row, int *col, QDate *date, QRect *rect) const;
+    // 命中头部按钮返回下标（语义对应 headerKinds），无命中 -1
     int hitHeader(const QPoint &p) const;
     bool inDisplayMonth(const QDate &d) const { return d.year() == year && d.month() == month; }
 };

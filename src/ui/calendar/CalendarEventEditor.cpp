@@ -1,5 +1,6 @@
 #include "CalendarEventEditor.h"
 
+#include "CalendarPaintUtils.h" // 圆角矩形路径（S-03 模块内收敛，原 editorRoundPath）
 #include "core/calendar/CalendarTaskStore.h"
 #include "core/calendar/ChineseCalendar.h"
 
@@ -12,26 +13,6 @@
 
 namespace poptools {
 
-namespace {
-
-QPainterPath editorRoundPath(const QRectF &r, qreal radius)
-{
-    QPainterPath path;
-    const qreal d = std::min(radius * 2, std::min(r.width(), r.height()));
-    path.moveTo(r.left(), r.top() + d);
-    path.arcTo(QRectF(r.left(), r.top(), d, d), 180, -90);
-    path.lineTo(r.right() - d, r.top());
-    path.arcTo(QRectF(r.right() - d, r.top(), d, d), 90, -90);
-    path.lineTo(r.right(), r.bottom() - d);
-    path.arcTo(QRectF(r.right() - d, r.bottom() - d, d, d), 0, -90);
-    path.lineTo(r.left() + d, r.bottom());
-    path.arcTo(QRectF(r.left(), r.bottom() - d, d, d), 270, -90);
-    path.closeSubpath();
-    return path;
-}
-
-} // namespace
-
 CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *store,
                                          const QPoint &pos, QWidget *parent)
     : QWidget(parent, Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
@@ -42,7 +23,7 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowFlag(Qt::Tool, false);
     setMouseTracking(true);
-    resize(380, 430);
+    resize(kEditorSize); // S-07：与面板定位共用同一常量
     move(pos);
 
     m_text = new QPlainTextEdit(this);
@@ -90,7 +71,7 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
                    .arg(ChineseCalendar::weekdayName(m_date)));
 
     m_checkRect = QRect(width() - 42, 10, 28, 28);
-    g.fillPath(editorRoundPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60));
+    g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60));
     QPen checkPen(QColor(240, 166, 72), 2);
     checkPen.setCapStyle(Qt::RoundCap);
     checkPen.setJoinStyle(Qt::RoundJoin);
@@ -107,7 +88,7 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
         const QRect r(14 + i * 36, toolbarY, 28, 28);
         m_toolRects[i] = r;
         if (i == m_hoverTool)
-            g.fillPath(editorRoundPath(QRectF(r), 5), QColor(255, 255, 255, 42));
+            g.fillPath(roundedPath(QRectF(r), 5), QColor(255, 255, 255, 42));
         drawToolIcon(&g, i, r);
     }
 

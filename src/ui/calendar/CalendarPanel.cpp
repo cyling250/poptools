@@ -117,32 +117,35 @@ void CalendarPanel::reloadSettings()
 
 void CalendarPanel::render()
 {
-    if (m_adjusting || !m_renderer || !m_surface || !m_surface->canvas().isValid())
+    // 调整期间事件/渲染被 m_adjusting 抑制（覆盖层窗口自绘装饰）
+    if (m_adjusting)
         return;
-    // 先画进私有暂存帧再整帧发布：直接在共享位图上"清屏→重绘"的 10~30ms
-    // 窗口内，explorer 的擦除流程可能采到近全透明的中间态——悬停头部按钮
-    // 时连续两次渲染重叠，表现为日历整面板消失一帧再恢复（闪烁，T-058）
-    QImage &canvasImage = m_surface->canvas().image();
-    if (m_staging.size() != canvasImage.size() || m_staging.format() != canvasImage.format())
-        m_staging = QImage(canvasImage.size(), canvasImage.format());
-    QPainter g(&m_staging);
-    m_layout = m_renderer->render(&g, m_surface->canvas(), m_settings, m_store, m_today, m_year,
-                                  m_month, m_hover, m_hoverHint, false);
-    g.end();
-    m_surface->commitSurface();
+    renderFrame(m_hover, m_hoverHint, false);
 }
 
 void CalendarPanel::renderDuringAdjust()
 {
+    // 调整装饰（虚线框/✓×）由覆盖层窗口自绘，位图只画正常内容（与原实现一致）
+    renderFrame(QPoint(-9999, -9999), QString(), false);
+}
+
+// S-04：render()/renderDuringAdjust() 的公共体（原两函数除 m_adjusting 守卫与
+// hover/hint 实参外逐行相同）。先画进私有暂存帧再整帧发布：直接在共享位图上
+// "清屏→重绘"的 10~30ms 窗口内，explorer 的擦除流程可能采到近全透明的中间态
+// ——悬停头部按钮时连续两次渲染重叠，表现为日历整面板消失一帧再恢复（闪烁，T-058）
+void CalendarPanel::renderFrame(const QPoint &hover, const QString &hoverHint,
+                                bool suppressIfAdjusting)
+{
+    if (suppressIfAdjusting && m_adjusting)
+        return;
     if (!m_renderer || !m_surface || !m_surface->canvas().isValid())
         return;
     QImage &canvasImage = m_surface->canvas().image();
     if (m_staging.size() != canvasImage.size() || m_staging.format() != canvasImage.format())
         m_staging = QImage(canvasImage.size(), canvasImage.format());
     QPainter g(&m_staging);
-    // 调整装饰（虚线框/✓×）由覆盖层窗口自绘，位图只画正常内容（与原实现一致）
     m_layout = m_renderer->render(&g, m_surface->canvas(), m_settings, m_store, m_today, m_year,
-                                  m_month, QPoint(-9999, -9999), QString(), false);
+                                  m_month, hover, hoverHint, false);
     g.end();
     m_surface->commitSurface();
 }
@@ -230,8 +233,15 @@ void CalendarPanel::handleSingleClick(const QPoint &p)
         return;
     const int hh = m_layout->hitHeader(p);
     if (hh >= 0) {
+        // T-062 修复: G-03 边界翻页跳变——原实现先做月加减再 clamp 年份，
+        // 1901-01 再往前会跳到 1901-12、2100-12 往后跳到 2100-01（跳变 11 个月），
+        // clamp 本意应是"停在边界"。翻页前先守卫，clamp 保留作兜底
         switch (CalendarLayout::headerKinds[hh]) {
             case HeaderButtonKind::Previous:
+                // 下限 1901 而非 1900：农历表自 1900-01-31（正月初一）起，
+                // 1900 年首月翻页会让格首落入表前无数据区，故从 1901-01 起可翻（L-07）
+                if (m_year == 1901 && m_month == 1)
+                    break;
                 m_month--;
                 while (m_month < 1) {
                     m_month += 12;
@@ -241,6 +251,8 @@ void CalendarPanel::handleSingleClick(const QPoint &p)
                 render();
                 break;
             case HeaderButtonKind::Next:
+                if (m_year == 2100 && m_month == 12)
+                    break;
                 m_month++;
                 while (m_month > 12) {
                     m_month -= 12;
@@ -264,7 +276,10 @@ void CalendarPanel::handleSingleClick(const QPoint &p)
     QDate date;
     QRect cell;
     int row = 0, col = 0;
-    if (m_layout->tryGetCell(p, &row, &col, &date, &cell)
+    // T-062 修复: G-05 单击格子的唯一效果是消引导气泡——原实现无 showGuide
+    // 前置条件，引导消失后每次点击仍同步覆写 settings.json + 一次无差异整帧
+    // 渲染（写盘 churn）。与上方胶囊分支同款条件式写法；设置键格式不变
+    if (m_settings.showGuide && m_layout->tryGetCell(p, &row, &col, &date, &cell)
         && m_layout->inDisplayMonth(date)) {
         m_settings.showGuide = false;
         m_settings.save();
@@ -288,19 +303,28 @@ void CalendarPanel::handleDoubleClick(const QPoint &p)
 
 void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
 {
-    m_modal = true;
-    const int w = 380, h = 430;
+    // 坐标口径（T-062 修复: G-02）：cell/screen/编辑器落点均为物理像素，而
+    // 编辑器尺寸 380×430 是 Qt 逻辑坐标（CalendarEventEditor 构造 resize）。
+    // 原实现直接拿逻辑尺寸对物理屏做钳制，150% 下编辑器物理占 570×645，最右
+    // 列/最底行双击时右/底缘最多溢出屏幕 190/215 物理px。统一为物理算：
+    // w/h 先按 dpr 折算成物理尺寸参与钳制，最终落点经 logicalPos 转回逻辑
+    // 坐标传给编辑器（Qt 窗口 move 用逻辑坐标）
+    const int w = CalendarEventEditor::kEditorSize.width(); // 逻辑尺寸（S-07 收敛常量）
+    const int h = CalendarEventEditor::kEditorSize.height();
+    const qreal dpr = m_surface ? m_surface->dpr() : 1.0;
+    const int wPhys = qRound(w * (dpr > 0.0 ? dpr : 1.0));
+    const int hPhys = qRound(h * (dpr > 0.0 ? dpr : 1.0));
     const QRect screen = m_surface ? m_surface->screenPhysical() : QRect();
     int x = cell.left() + 12;
-    if (x + w > screen.right() + 1 - 12)
-        x = cell.left() + cell.width() - w - 12;
+    if (x + wPhys > screen.right() + 1 - 12)
+        x = cell.left() + cell.width() - wPhys - 12;
     int y = cell.top() + 12;
-    if (y + h > screen.bottom() + 1 - 60)
-        y = screen.bottom() + 1 - h - 60;
+    if (y + hPhys > screen.bottom() + 1 - 60) // 60 = 底部预留（任务栏高度余量）
+        y = screen.bottom() + 1 - hPhys - 60;
     x = std::max(screen.left() + 10, x);
     y = std::max(screen.top() + 10, y);
     auto *editor = new CalendarEventEditor(date, &m_store, logicalPos(QPoint(x, y)), nullptr);
-    trackModal(editor);
+    trackModal(editor); // m_modal/m_modalWidget 唯一权威置位处（S-08 删去开头重复裸置位）
     // 外点关闭兜底：编辑器靠 WindowDeactivate 关闭，但双击源自桌面（前台进程是
     // explorer），activateWindow 作为后台进程常被 Windows 前台锁拒绝——编辑器
     // 从未激活过，外点就永远不会"失焦"，表现即"有时点外面关不掉、且无规律"
@@ -383,7 +407,13 @@ void CalendarPanel::searchTasks()
                 m_year = d.year();
                 m_month = d.month();
                 render();
-                if (m_layout.has_value()) {
+                // T-062 修复: G-06 值守未启（stopDuty 后或尚未 startDuty）时
+                // render() 是 no-op，m_layout 仍是上一次的旧月布局——以旧
+                // firstCellDate 换算 row/col 会把编辑器开在错误格子的矩形上
+                //（日期语义正确、位置错）。布局与目标月一致才开编辑器，否则
+                // 只翻月；m_layout 为空（从未渲染过）同样跳过
+                if (m_layout.has_value() && m_layout->year == d.year()
+                    && m_layout->month == d.month()) {
                     const int row = int(QDate(m_layout->firstCellDate).daysTo(d) / 7);
                     const int col = int(QDate(m_layout->firstCellDate).daysTo(d) % 7);
                     if (row >= 0 && row < m_layout->rows && col >= 0 && col < 7)
@@ -425,7 +455,10 @@ void CalendarPanel::exportTasks()
 {
     const QString file = QFileDialog::getSaveFileName(
         nullptr, QStringLiteral("导出"), QStringLiteral("calendar-tasks.json"),
-        QStringLiteral("JSON 文件|*.json"));
+        // T-062 修复: G-04 过滤器语法——"描述|*.json" 不是 Qt 语法（应为
+        // "描述 (*.ext)"），原串被当作无通配模式的一条过滤器，文件列表不按
+        // 扩展名过滤
+        QStringLiteral("JSON 文件 (*.json)"));
     if (file.isEmpty())
         return;
     QFile f(file);
@@ -441,7 +474,7 @@ void CalendarPanel::importTasks()
 {
     const QString file =
         QFileDialog::getOpenFileName(nullptr, QStringLiteral("导入"), QString(),
-                                     QStringLiteral("JSON 文件|*.json"));
+                                     QStringLiteral("JSON 文件 (*.json)")); // T-062 修复: G-04
     if (file.isEmpty())
         return;
     QFile f(file);
@@ -485,6 +518,16 @@ void CalendarPanel::trackModal(QWidget *w)
             render();
         }
     });
+}
+
+// T-062 修复: G-10 增补 activeModalWidget 兜底：exportTasks/importTasks 的
+// QFileDialog 静态函数自带模态循环、不经 trackModal（m_modal 不置位），对话框
+// 打开期间 explorer 转发的桌面鼠标事件仍被处理（悬停重绘、点击翻月，用户关闭
+// 对话框后发现月份被误翻）。该判断覆盖现有与未来一切原生模态；openEditor 的
+// 无边框编辑器不是 activeModalWidget，仍由 m_modal 管控
+bool CalendarPanel::eventsAccepted() const
+{
+    return !m_modal && !m_adjusting && QApplication::activeModalWidget() == nullptr;
 }
 
 } // namespace poptools
