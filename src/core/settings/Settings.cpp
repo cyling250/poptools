@@ -479,4 +479,15 @@ void Settings::setAssistantBallPos(const QString &xy)
     syncChecked();
 }
 
+QString Settings::updateIgnoredVersion() const
+{
+    return m_s.value("update/ignoredVersion", QString()).toString();
+}
+
+void Settings::setUpdateIgnoredVersion(const QString &version)
+{
+    m_s.setValue("update/ignoredVersion", version);
+    syncChecked();
+}
+
 } // namespace poptools

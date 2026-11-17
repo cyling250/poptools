@@ -1,12 +1,17 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QDesktopServices>
 #include <QMessageBox>
 #include <QScreen>
+#include <QTimer>
+#include <QUrl>
 
 #include "AppServices.h"
 #include "core/assistant/ToolRegistry.h"
 #include "core/ocr/RapidOcrService.h"
+#include "core/settings/Settings.h"
+#include "core/update/UpdateChecker.h"
 #include "modules/ActivityMonitorModule.h"
 #include "modules/BoxModule.h"
 #include "modules/CalendarModule.h"
@@ -72,16 +77,22 @@ MainWindow::MainWindow(QObject *parent)
     m_menu->addSeparator();
     m_menu->addAction("设置...", this, &MainWindow::onShowSettings);
     m_menu->addSeparator();
-    m_menu->addAction("关于", [] {
+    m_menu->addAction("关于", [this] {
+        QMessageBox box(nullptr);
+        box.setWindowTitle(QStringLiteral("关于 PopTools"));
         // 构建时间用于辨别安装的是哪一版包（多轮修复期间包名相同易混淆）
-        QMessageBox::about(nullptr, "PopTools",
-            QStringLiteral("PopTools v0.4.0\n\n"
-                           "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
-                           "快捷键：F1 截图\n"
-                           "OCR 引擎：RapidOCR（本地离线）\n"
-                           "翻译：OpenAI 兼容大模型 API（可配置）\n\n"
-                           "构建时间：%1 %2")
-                .arg(QLatin1String(__DATE__), QLatin1String(__TIME__)));
+        box.setText(QStringLiteral("PopTools v" POPTOOLS_VERSION "\n\n"
+                                   "全场景截图软件：区域截图 + OCR 识别 + 翻译\n\n"
+                                   "快捷键：F1 截图\n"
+                                   "OCR 引擎：RapidOCR（本地离线）\n"
+                                   "翻译：OpenAI 兼容大模型 API（可配置）\n\n"
+                                   "构建时间：%1 %2")
+                        .arg(QLatin1String(__DATE__), QLatin1String(__TIME__)));
+        // 标准按钮 + setButtonText（绕开 QAbstractButton* 判定，exec 返回值判定）
+        box.setStandardButtons(QMessageBox::Ok | QMessageBox::Yes);
+        box.setButtonText(QMessageBox::Yes, QStringLiteral("检查更新"));
+        if (box.exec() == QMessageBox::Yes)
+            doUpdateCheck(true);
     });
     m_menu->addSeparator();
     m_menu->addAction("退出", this, &QApplication::quit);
@@ -100,6 +111,48 @@ MainWindow::MainWindow(QObject *parent)
                 .arg(failedHotKeys.join(QLatin1Char('\n'))),
             QSystemTrayIcon::Warning);
     }
+
+    // 启动更新自查：延迟 5s（避开启动路径，红线 6），静默模式——仅发现新版时
+    // 弹提示，无更新/失败不打扰；用户"跳过此版本"后同版本不再提示
+    QTimer::singleShot(5000, this, [this] { doUpdateCheck(false); });
+}
+
+void MainWindow::doUpdateCheck(bool interactive)
+{
+    auto *checker = new UpdateChecker(this);
+    connect(checker, &UpdateChecker::updateAvailable, this,
+            [this, interactive](const QString &version, const QString &url) {
+                // 启动静默模式：用户跳过过的版本不再提示（手动检查不受限）
+                if (!interactive && version == Settings::instance().updateIgnoredVersion())
+                    return;
+                QMessageBox box(nullptr);
+                box.setWindowTitle(QStringLiteral("发现新版本"));
+                box.setText(QStringLiteral("PopTools %1 已发布（当前版本 v%2）。\n\n"
+                                           "是否前往下载页获取安装包？")
+                                .arg(version, QLatin1String(POPTOOLS_VERSION)));
+                // 标准按钮 + setButtonText（exec 返回值判定，绕开 QAbstractButton*）
+                box.setStandardButtons(QMessageBox::Yes | QMessageBox::No
+                                       | QMessageBox::Cancel);
+                box.setButtonText(QMessageBox::Yes, QStringLiteral("前往下载"));
+                box.setButtonText(QMessageBox::No, QStringLiteral("跳过此版本"));
+                box.setButtonText(QMessageBox::Cancel, QStringLiteral("关闭"));
+                const int pick = box.exec();
+                if (pick == QMessageBox::Yes) {
+                    QDesktopServices::openUrl(QUrl(url));
+                } else if (pick == QMessageBox::No && interactive) {
+                    Settings::instance().setUpdateIgnoredVersion(version);
+                }
+            });
+    connect(checker, &UpdateChecker::upToDate, this, [interactive] {
+        if (interactive)
+            QMessageBox::information(nullptr, QStringLiteral("检查更新"),
+                                     QStringLiteral("当前已是最新版本。"));
+    });
+    connect(checker, &UpdateChecker::checkFailed, this, [interactive](const QString &reason) {
+        if (interactive)
+            QMessageBox::warning(nullptr, QStringLiteral("检查更新失败"), reason);
+    });
+    checker->checkForUpdates(interactive);
 }
 
 MainWindow::~MainWindow()

@@ -35,6 +35,10 @@ private slots:
     void onShowSettings(bool openCalendarPage = false);
 
 private:
+    // 更新自查：interactive=false 为启动静默检查（仅发现新版时提示），
+    // true 为关于对话框手动检查（无更新/失败也反馈）
+    void doUpdateCheck(bool interactive);
+
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
     GlobalHotKey m_hotKey;              // 全局热键注册器（nativeEventFilter 由该类安装）

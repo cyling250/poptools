@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PopTools VERSION 0.4.0 LANGUAGES CXX)
+project(PopTools VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -75,6 +75,11 @@ target_link_libraries(PopTools PRIVATE
     poptools_modules      # 功能模块聚合（截图 / 贴图 / 划词翻译；拔插改此处一行）
     poptools_ui_settings  # 设置界面（外壳自有，不属于任何模块）
     poptools_app_infra    # 组合根基础设施（AppServices / FeatureRegistry）
+)
+
+# 应用版本号宏（关于对话框/更新检查用）：与 project VERSION 单一来源，随构建注入
+target_compile_definitions(PopTools PRIVATE
+    POPTOOLS_VERSION=\"${PROJECT_VERSION}\"
 )
 
 # Qt 运行库：构建（make）完成后由本地 Qt 套件自带的 windeployqt 自动部署到

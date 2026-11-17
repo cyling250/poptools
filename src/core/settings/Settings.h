@@ -132,6 +132,12 @@ public:
     QString assistantBallPos() const;
     void setAssistantBallPos(const QString &xy);
 
+    // ---- 更新自查 ----
+    // 用户选择"跳过此版本"的 Release 版本号（如 "v0.5.0"）；启动自动检查时
+    // 命中则静默，不再弹提示。手动检查不受此键影响
+    QString updateIgnoredVersion() const;
+    void setUpdateIgnoredVersion(const QString &version);
+
 private:
     Settings();
     // 落盘并检查可写性（安装到无写权限目录时 sync 静默失败，首次失败告警一次）
