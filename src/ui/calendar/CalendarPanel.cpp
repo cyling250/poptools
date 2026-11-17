@@ -4,6 +4,10 @@
 #include "CalendarSearchForm.h"
 #include "core/hotkey/GlobalMouseHook.h"
 #include "ui/shared/DesktopAdjustOverlay.h"
+#include "ui/shared/DesktopScreens.h" // 多屏几何（归属屏解析/虚拟桌面并集）
+
+#include <QGuiApplication>
+#include <QScreen>
 
 #include <QApplication>
 #include <QDateTime>
@@ -32,6 +36,10 @@ CalendarPanel::~CalendarPanel() = default;
 
 QRect CalendarPanel::rectPhysical() const
 {
+    // 调整期间槽置空：桌面层日历消失（预览画在覆盖层，T-063），DLL 逐槽失效
+    // 清掉旧位（远端每槽 prev 失效机制天然覆盖）
+    if (m_hiddenDuringAdjust)
+        return QRect();
     return m_layout.has_value() ? m_layout->panel : QRect();
 }
 
@@ -81,15 +89,16 @@ void CalendarPanel::onDutyStopped()
 
 void CalendarPanel::clampSettings()
 {
-    const QRect screen = m_surface ? m_surface->screenPhysical() : QRect();
-    if (screen.isEmpty())
+    // 单屏归属（T-063 移植）：矩形中心落在哪块屏就归哪块屏，并钳制在该屏内
+    //（跨屏拖动由调整覆盖层完成；拔屏时矩形被收回最近的可用屏）
+    m_screenNative = deskscreens::resolveScreenForRect(m_settings.rect());
+    if (m_screenNative.isEmpty())
         return;
-    const int w = std::clamp(m_settings.width, 520, std::max(520, screen.width()));
-    const int h = std::clamp(m_settings.height, 420, std::max(420, screen.height()));
-    const int x = std::clamp(m_settings.x, screen.left(),
-                             std::max(screen.left(), screen.right() + 1 - w));
-    const int y = std::clamp(m_settings.y, screen.top(),
-                             std::max(screen.top(), screen.bottom() + 1 - h));
+    const QRect &s = m_screenNative;
+    const int w = std::clamp(m_settings.width, 520, std::max(520, s.width()));
+    const int h = std::clamp(m_settings.height, 420, std::max(420, s.height()));
+    const int x = std::clamp(m_settings.x, s.left(), std::max(s.left(), s.right() + 1 - w));
+    const int y = std::clamp(m_settings.y, s.top(), std::max(s.top(), s.bottom() + 1 - h));
     m_settings.x = x;
     m_settings.y = y;
     m_settings.width = w;
@@ -115,18 +124,12 @@ void CalendarPanel::reloadSettings()
     render();
 }
 
-void CalendarPanel::render()
+void CalendarPanel::render(bool force)
 {
-    // 调整期间事件/渲染被 m_adjusting 抑制（覆盖层窗口自绘装饰）
-    if (m_adjusting)
+    // force：确认回调里立即恢复桌面帧（跳过 m_adjusting 守卫，无空窗）
+    if (!force && m_adjusting)
         return;
     renderFrame(m_hover, m_hoverHint, false);
-}
-
-void CalendarPanel::renderDuringAdjust()
-{
-    // 调整装饰（虚线框/✓×）由覆盖层窗口自绘，位图只画正常内容（与原实现一致）
-    renderFrame(QPoint(-9999, -9999), QString(), false);
 }
 
 // S-04：render()/renderDuringAdjust() 的公共体（原两函数除 m_adjusting 守卫与
@@ -361,40 +364,100 @@ void CalendarPanel::enterAdjustMode()
         return;
     m_adjusting = true;
     m_settings.showGuide = false;
+    m_previewMs = 0;
+    m_previewPending = false;
     const QRect original = m_settings.rect();
+    // 调整期间桌面层日历隐藏（槽置空），预览画在覆盖层里——跟虚线框同帧同层，
+    // 跨进程擦除链路退出拖动感知路径（T-063 跟手根治）
+    m_hiddenDuringAdjust = true;
+    m_surface->commitSurface();
+    updateAdjustPreview(true);
+    // 拖动范围 = 整个虚拟桌面：矩形中心跨过屏幕边界即整体换屏
+    const QList<QRect> screenRects = deskscreens::nativeScreenRects();
+    QRect desktopPhysical;
+    QRect desktopLogical;
+    const auto screens = QGuiApplication::screens();
+    for (QScreen *s : screens)
+        desktopLogical = desktopLogical.united(s->geometry());
+    desktopPhysical = deskscreens::virtualDesktopPhysical();
+    if (desktopPhysical.isEmpty())
+        desktopPhysical = m_screenNative;
+    if (desktopLogical.isEmpty())
+        desktopLogical = QRect(0, 0, m_screenNative.width(), m_screenNative.height());
+    const qreal dpr = m_surface->dpr();
     auto *overlay =
-        new DesktopAdjustOverlay(original, m_surface->screenPhysical(), m_surface->dpr(),
+        new DesktopAdjustOverlay(original, desktopPhysical, desktopLogical, screenRects,
+                                 dpr, [this] { return m_adjustPreview; },
                                  [this](const QRect &r) {
                                      m_settings.x = r.x();
                                      m_settings.y = r.y();
                                      m_settings.width = r.width();
                                      m_settings.height = r.height();
-                                     renderDuringAdjust();
+                                     clampSettings();
+                                     // 画布=虚拟桌面并集，跨屏无需重建；仅归属屏
+                                     // 元数据随 clampSettings 更新
+                                     updateAdjustPreview(false); // 尺寸变化才重渲染
                                  },
                                  [this](const QRect &r) {
                                      m_settings.x = r.x();
                                      m_settings.y = r.y();
                                      m_settings.width = r.width();
                                      m_settings.height = r.height();
+                                     clampSettings();
                                      m_settings.save();
-                                 },
-                                 [this, original]() {
-                                     m_settings.x = original.x();
-                                     m_settings.y = original.y();
-                                     m_settings.width = original.width();
-                                     m_settings.height = original.height();
-                                     m_settings.save();
+                                     // 立即恢复桌面帧（槽恢复 + 合成发布），无空窗
+                                     m_hiddenDuringAdjust = false;
+                                     render(true);
+                                     m_surface->requestFullRepaint(); // 全失效兜底
                                  },
                                  nullptr);
-    connect(overlay, &QObject::destroyed, this, [this, original] {
+    connect(overlay, &QObject::destroyed, this, [this] {
         m_adjusting = false;
-        // 取消路径：overlay 内部已回调 onCanceled 恢复 original 并 save；
-        // 关闭后无论哪条路径都回到正常渲染
-        render();
+        m_hiddenDuringAdjust = false;
+        m_adjustPreview = QImage();
+        render(); // 确认路径已渲染过；取消路径（Esc/✓ 之外）由此恢复桌面帧
     });
     overlay->show();
     overlay->raise();
     overlay->activateWindow();
+}
+
+// 调整预览帧渲染：面板内容 + 四周 32px 余量（阴影/发光）；移动模式尺寸不变
+// → 复用既有帧（overlay 平移绘制，宿主零参与 = 跟手天花板）；缩放模式尺寸
+// 变化才节流重渲染（16ms + 补帧定时器兜底）
+void CalendarPanel::updateAdjustPreview(bool force)
+{
+    if (!m_renderer)
+        return;
+    constexpr int kPreviewMargin = 32;
+    const QSize want = QSize(m_settings.width, m_settings.height) + QSize(64, 64);
+    if (want != m_adjustPreview.size())
+        m_adjustPreview = QImage(want, QImage::Format_ARGB32_Premultiplied);
+    else if (!force)
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 since = now - m_previewMs;
+    if (!force && m_previewMs > 0 && since >= 0 && since < 16) {
+        if (!m_previewPending) {
+            m_previewPending = true;
+            QTimer::singleShot(int(16 - since), this, [this] {
+                m_previewPending = false;
+                if (m_adjusting)
+                    updateAdjustPreview(true);
+            });
+        }
+        return;
+    }
+    QPainter p(&m_adjustPreview);
+    // 面板画在预览帧 (32,32)；renderer 会污染头部日历矩形为预览坐标，画完
+    // 恢复真实虚拟坐标（桌面层隐藏期间头部仅脏矩形用途，保持一致）
+    CalendarSettings local = m_settings;
+    local.x = kPreviewMargin;
+    local.y = kPreviewMargin;
+    m_renderer->render(&p, m_surface->canvas(), local, m_store, m_today, m_year, m_month,
+                       QPoint(-9999, -9999), QString(), false);
+    p.end();
+    m_previewMs = QDateTime::currentMSecsSinceEpoch();
 }
 
 void CalendarPanel::searchTasks()

@@ -11,6 +11,7 @@
 #include <cstdlib>
 
 #include "hook/desktop_protocol.h" // 跨进程协议常量（与注入 DLL 同源，S-01）
+#include "DesktopScreens.h" // 多屏几何 helper（虚拟桌面并集/归属屏解析）
 
 namespace poptools {
 
@@ -25,9 +26,10 @@ DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
     setGeometry(-32000, -32000, 1, 1);
     show();
 
-    m_screen = QGuiApplication::primaryScreen()->geometry();
+    // 画布覆盖整个虚拟桌面（并集物理像素）：面板槽矩形即虚拟桌面坐标，面板
+    // 跨屏/归属切换只改槽矩形，画布无需重建（T-063 多屏移植）
+    m_screen = deskscreens::virtualDesktopPhysical();
     m_dpr = QGuiApplication::primaryScreen()->devicePixelRatio();
-    m_screen = QRect(0, 0, qRound(m_screen.width() * m_dpr), qRound(m_screen.height() * m_dpr));
 }
 
 // 停值守（解除注入）并解除面板反引；QLibrary 随 QObject 父子关系析构
@@ -111,6 +113,22 @@ void DesktopSurfaceHost::startDuty()
                 // 自愈判据 = DLL 消息窗存在性：explorer 重启后窗口消失 → 重装钩子
                 if (findHookFrameworkWindow() == nullptr)
                     startDock();
+                // 屏拓扑自愈（拔屏/改分辨率，T-063 移植）：虚拟桌面并集变化 →
+                // 画布按新尺寸重建，全面板重建渲染器并重绘
+                const QRect vdesk = deskscreens::virtualDesktopPhysical();
+                if (!vdesk.isEmpty() && vdesk != m_screen && m_canvas.isValid()) {
+                    m_screen = vdesk;
+                    m_canvas.create(m_screen.width(), m_screen.height());
+                    m_canvas.setHostWindow(reinterpret_cast<HWND>(winId()));
+                    for (const PanelSlot &slot : m_panels) {
+                        if (slot.panel) {
+                            slot.panel->onDutyStopped();
+                            slot.panel->onDutyStarted();
+                            slot.panel->render();
+                        }
+                    }
+                    notifyHookUpdate();
+                }
             });
         }
         m_watchdog->start();
@@ -167,7 +185,9 @@ void DesktopSurfaceHost::commitSurface(const QRect &dirtyPhysical)
     g.fillRect(dirty, Qt::transparent);
     g.setCompositionMode(QPainter::CompositionMode_SourceOver);
     for (const PanelSlot &slot : m_panels) {
-        if (slot.panel) {
+        // 空槽矩形面板（调整模式隐藏等）不参与合成——槽矩形与合成一致地"缺席"，
+        // 桌面层即无该面板（T-063 覆盖层预览拖动的桌面隐藏机制）
+        if (slot.panel && !slot.panel->rectPhysical().isNull()) {
             if (QImage *f = slot.panel->frame())
                 g.drawImage(0, 0, *f);
         }
@@ -334,6 +354,13 @@ void DesktopSurfaceHost::notifyHookUpdate()
     const HWND fw = findHookFrameworkWindow();
     if (fw)
         ::PostMessageW(fw, POPTOOLS_MSG_CLONE_UPDATE, 0, 0);
+}
+
+void DesktopSurfaceHost::requestFullRepaint()
+{
+    const HWND fw = findHookFrameworkWindow();
+    if (fw)
+        ::PostMessageW(fw, POPTOOLS_MSG_CLONE_UPDATE, 1, 0);
 }
 
 // 跨进程查 DLL 消息窗（类名/标题须与 calendar_hook.cpp EnsureInit 一致）；

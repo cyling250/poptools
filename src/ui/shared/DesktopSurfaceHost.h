@@ -27,7 +27,7 @@ public:
 
     virtual QRect rectPhysical() const = 0; // 命中与脏矩形（空矩形 = 不参与命中/失效）
     virtual QImage *frame() = 0;            // 最近整帧（画布尺寸；尚未渲染过返回 nullptr）
-    virtual void render() = 0;              // 重绘进 frame()，末尾调 surface()->commitPanel(this)
+    virtual void render(bool force = false) = 0; // 重绘进 frame()，末尾调 commitSurface（force=确认立即恢复）
 
     // 鼠标事件（explorer 转发，物理像素）。move/leave 广播给全部面板（跨面板
     // 清 hover）；click/dblclk 只发给命中面板（surface 负责按下/抬起配对与
@@ -87,6 +87,10 @@ public:
     // 弹窗锚定指定面板中心（物理 → Qt 逻辑换算；show 后尺寸才定的窗体由
     // 调用方 show 后再调一次，见 P-059）
     void centerOnPanelRect(QWidget *w, const QRect &panelPhysical) const;
+
+    // 全桌面失效兜底（DLL POPTOOLS_MSG_CLONE_UPDATE wParam!=0）：窄失效区域
+    // 遗漏时（确认恢复等场景）一次性全桌面重绘补齐
+    void requestFullRepaint();
 
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qint64 *result) override;

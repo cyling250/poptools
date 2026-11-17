@@ -138,8 +138,9 @@ void BoxPanel::refreshEntries()
 }
 
 // DesktopPanel：整帧重绘 + 整帧提交（commitSurface 空脏矩形）
-void BoxPanel::render()
+void BoxPanel::render(bool force /*对收纳盒无差异*/)
 {
+    Q_UNUSED(force)
     renderFrame(QRect());
 }
 

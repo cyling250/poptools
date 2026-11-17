@@ -97,6 +97,8 @@ add_library(poptools_core STATIC
     ocr/RapidOcrService.h
     settings/Settings.cpp
     settings/Settings.h
+    update/UpdateChecker.cpp
+    update/UpdateChecker.h
     translation/Translator.cpp
     translation/Translator.h
     translation/SelectionTranslator.cpp
@@ -104,6 +106,10 @@ add_library(poptools_core STATIC
     translation/Languages.h
     translation/ApiTester.cpp
     translation/ApiTester.h
+)
+
+target_compile_definitions(poptools_core PRIVATE
+    POPTOOLS_VERSION=\"${PROJECT_VERSION}\"
 )
 
 target_link_libraries(poptools_core PUBLIC

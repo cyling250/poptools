@@ -42,7 +42,7 @@ public:
     // ---- DesktopPanel ----
     QRect rectPhysical() const override;
     QImage *frame() override;
-    void render() override;
+    void render(bool force = false) override; // force 对收纳盒无差异（无调整隐藏态）
     void onMove(const QPoint &p) override;
     void onLeave() override;
     void onClick(const QPoint &p) override;

@@ -36,7 +36,7 @@ public:
     // ---- DesktopPanel ----
     QRect rectPhysical() const override;
     QImage *frame() override;
-    void render() override;
+    void render(bool force = false) override;
     void onMove(const QPoint &p) override;
     void onLeave() override;
     void onClick(const QPoint &p) override;
@@ -61,10 +61,12 @@ public:
     void importTasks();
 
 private:
-    // 渲染公共体（S-04 从 render/renderDuringAdjust 提取）：hover/hint 为真实
-    // 悬停值时画悬停反馈；suppressIfAdjusting 时调整模式直接跳过（覆盖层自绘装饰）
+    // 调整预览帧渲染（T-063 移植）：仅面板尺寸变化才重渲染（节流），移动模式
+    // overlay 平移既有帧——桌面擦除链路退出拖动感知路径（跟手天花板）
+    void updateAdjustPreview(bool force);
+    // 渲染公共体（S-04）：hover/hint 为真实悬停值时画悬停反馈；suppressIfAdjusting
+    // 时调整模式直接跳过（覆盖层自绘装饰）
     void renderFrame(const QPoint &hover, const QString &hoverHint, bool suppressIfAdjusting);
-    void renderDuringAdjust();
     // 秒级跨日检测：仅日期变化才重绘；正处显示月则跟随跳到新月
     void tickClock();
     // 把设置矩形钳回主屏内（宽高下限 520/420），screen 无效时跳过
@@ -98,6 +100,11 @@ private:
     int m_lastHeaderHover = -1;
     bool m_modal = false;
     bool m_adjusting = false;
+    QRect m_screenNative;  // 日历归属屏物理矩形（虚拟桌面坐标；中心落在哪屏归哪屏）
+    bool m_hiddenDuringAdjust = false; // 调整期间桌面层日历隐藏（槽置空，预览在覆盖层）
+    QImage m_adjustPreview;  // 调整预览帧（面板 + 四周 32px 阴影/发光余量）
+    qint64 m_previewMs = 0;  // 预览渲染节流：上次渲染时刻
+    bool m_previewPending = false; // 节流补帧定时器在飞
     QPointer<QWidget> m_modalWidget;
     QTimer *m_clock = nullptr;
     QTimer *m_wallpaperTimer = nullptr;

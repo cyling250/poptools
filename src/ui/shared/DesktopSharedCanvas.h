@@ -49,19 +49,27 @@ public:
     // 面板槽矩形（slot ∈ [0,kMaxSlots)；DLL 据此算脏矩形，空矩形跳过）
     void setSlotRect(int slot, const QRect &r);
     void markReady(); // seq++ + ready=1（DLL 端据此决定是否上屏）
-    // 原子发布：把绘制好的暂存帧拷入共享位图；dirty 非空时只拷该矩形
-    //（悬停这类高频小改动免整屏 memcpy）。共享位图是 explorer 随时可采样的，
-    // 不能在上面"清屏→重绘"——中间态被采到就是整面板消失一帧
+    // 原子发布（v4 双缓冲帧翻转）：整帧写入后台帧区后原子翻转 frameIndex——
+    // explorer 擦除侧按索引读前台帧，任何时刻采到的都是完整帧，memcpy 中间态
+    // 不可见（T-059 撕裂根治；dirty 参数仅保留签名兼容，实际整帧写后台）
     void publishFrame(const QImage &frame, const QRect &dirty = QRect());
+    // 当前前台帧（explorer 正在采样的缓冲），浅拷贝引用计数
+    QImage frontImage() const;
 
 private:
     void writeHeaderInt(int offsetInHeader, LONG value);
+    LONG readHeaderInt(int offsetInHeader) const;
     void *headerPtr() { return m_view; }
+    void *frameBits(int index) const
+    {
+        return static_cast<BYTE *>(m_view) + kShmOffset
+             + SIZE_T(m_width) * m_height * 4 * SIZE_T(index);
+    }
 
     HANDLE m_map = nullptr;
     void *m_view = nullptr;
-    HBITMAP m_dib = nullptr;
-    void *m_bits = nullptr;
+    HBITMAP m_dibA = nullptr;
+    HBITMAP m_dibB = nullptr;
     QImage m_image;
     int m_width = 0;
     int m_height = 0;

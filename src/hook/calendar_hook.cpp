@@ -35,6 +35,8 @@ struct SharedHeader {
     volatile LONG hostWnd;
     volatile LONG slotRect[POPTOOLS_DESKTOP_SHM_SLOTS][4]; // 每槽 L/T/R/B（空槽 0 尺寸，DLL 跳过）
     volatile LONG seq;
+    volatile LONG frameIndex; // v4 双缓冲前台帧索引（0/1）：应用整帧写后台后原子翻转，
+                              // 擦除侧按索引取帧——任何时刻读到的都是完整帧（撕裂归零）
 };
 #pragma pack(pop)
 
@@ -46,9 +48,10 @@ static_assert(offsetof(SharedHeader, ready) == POPTOOLS_HDR_READY, "SharedHeader
 static_assert(offsetof(SharedHeader, hostWnd) == POPTOOLS_HDR_HOSTWND, "SharedHeader layout drift: hostWnd");
 static_assert(offsetof(SharedHeader, slotRect) == POPTOOLS_HDR_SLOTRECT0, "SharedHeader layout drift: slotRect");
 static_assert(offsetof(SharedHeader, seq) == POPTOOLS_HDR_SEQ, "SharedHeader layout drift: seq");
-static_assert(sizeof(SharedHeader) == POPTOOLS_HDR_SEQ + 4, "SharedHeader layout drift: total size");
+static_assert(offsetof(SharedHeader, frameIndex) == POPTOOLS_HDR_FRAMEINDEX, "SharedHeader layout drift: frameIndex");
+static_assert(sizeof(SharedHeader) == POPTOOLS_HDR_FRAMEINDEX + 4, "SharedHeader layout drift: total size");
 
-static const LONG kMagic = POPTOOLS_DESKTOP_SHM_MAGIC; // CLK3（v3 槽位数组：结构不兼容，失配拒画）
+static const LONG kMagic = POPTOOLS_DESKTOP_SHM_MAGIC; // CLK4（v4 槽位+双缓冲帧翻转：结构不兼容，失配拒画）
 
 static HINSTANCE g_hInst = NULL;
 static HHOOK g_hook = NULL;
@@ -61,9 +64,11 @@ static HWND g_msgWnd = NULL;
 static HANDLE g_map = NULL;
 static SharedHeader* g_hdr = NULL;
 static void* g_bits = NULL;
-static HDC g_memDC = NULL;
-static HBITMAP g_dib = NULL;
-static HGDIOBJ g_oldDib = NULL;
+// v4 双缓冲：两块 DIB 绑共享段两块帧区，BlendCalendar 按 header.frameIndex 取前台帧
+static HDC g_memDC[2] = { NULL, NULL };
+static HBITMAP g_dib[2] = { NULL, NULL };
+static HGDIOBJ g_oldDib[2] = { NULL, NULL };
+static void* g_bitsArr[2] = { NULL, NULL };
 static int g_bmpW = 0, g_bmpH = 0;
 static HDC g_bgDC = NULL;      // 双缓冲：壁纸+日历先合成在这里，再一次上屏
 static HBITMAP g_bgBmp = NULL;
@@ -133,10 +138,16 @@ static void ReleaseBgDC()
 // 释放共享位图 DC（先还原旧位图再删），并级联释放 bg 合成缓冲
 static void ReleaseDib()
 {
-    if (g_memDC && g_oldDib) SelectObject(g_memDC, g_oldDib);
-    if (g_dib) DeleteObject(g_dib);
-    if (g_memDC) DeleteDC(g_memDC);
-    g_memDC = NULL; g_dib = NULL; g_oldDib = NULL; g_bits = NULL; g_bmpW = 0; g_bmpH = 0;
+    for (int i = 0; i < 2; ++i) {
+        if (g_memDC[i] && g_oldDib[i]) SelectObject(g_memDC[i], g_oldDib[i]);
+        if (g_dib[i]) DeleteObject(g_dib[i]);
+        if (g_memDC[i]) DeleteDC(g_memDC[i]);
+    }
+    g_memDC[0] = g_memDC[1] = NULL;
+    g_dib[0] = g_dib[1] = NULL;
+    g_oldDib[0] = g_oldDib[1] = NULL;
+    g_bits = NULL; g_bitsArr[0] = g_bitsArr[1] = NULL;
+    g_bmpW = 0; g_bmpH = 0;
     ReleaseBgDC();
 }
 
@@ -160,17 +171,24 @@ static bool EnsureDib(HDC dc)
     if (!g_hdr || !g_map) return false;
     int w = g_hdr->width, h = g_hdr->height;
     if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return false;
-    if (g_memDC && g_bmpW == w && g_bmpH == h) return true;
+    if (g_memDC[0] && g_bmpW == w && g_bmpH == h) return true;
     ReleaseDib();
     BITMAPINFO bi = MakeArgbTopDownInfo(w, h);
-    void* bits = NULL;
-    HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, g_map, POPTOOLS_DESKTOP_SHM_OFFSET);
-    if (!dib) { Log(L"CreateDIBSection failed %lu", GetLastError()); return false; }
-    HDC mem = CreateCompatibleDC(dc);
-    if (!mem) { DeleteObject(dib); return false; }
-    HGDIOBJ old = SelectObject(mem, dib);
-    g_memDC = mem; g_dib = dib; g_oldDib = old; g_bits = bits; g_bmpW = w; g_bmpH = h;
-    Log(L"dib created %d x %d bits=%p", w, h, bits);
+    const SIZE_T frameSize = SIZE_T(w) * h * 4;
+    for (int i = 0; i < 2; ++i) {
+        void* bits = NULL;
+        HBITMAP dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, g_map,
+                                       POPTOOLS_DESKTOP_SHM_OFFSET + frameSize * SIZE_T(i));
+        if (!dib) { Log(L"CreateDIBSection[%d] failed %lu", i, GetLastError()); ReleaseDib(); return false; }
+        HDC mem = CreateCompatibleDC(dc);
+        if (!mem) { DeleteObject(dib); ReleaseDib(); return false; }
+        g_oldDib[i] = SelectObject(mem, dib);
+        g_memDC[i] = mem; g_dib[i] = dib; g_bitsArr[i] = bits;
+    }
+    g_bits = g_bitsArr[0];
+    g_bmpW = w; g_bmpH = h;
+    Log(L"dib created x2 %d x %d bits0=%p bits1=%p (build 20261117d dblbuf+slots)",
+        w, h, g_bitsArr[0], g_bitsArr[1]);
     return true;
 }
 
@@ -193,10 +211,19 @@ static bool EnsureBgDC(HDC dc)
 
 // 整幅共享位图按 AC_SRC_ALPHA 预乘混合到目标 DC（依赖调用方已设裁剪）；
 // 失败只记一次日志防刷屏
-static void BlendCalendar(HDC dc)
+// 把指定槽矩形区域的画布内容 blend 到 dc 的同位置（dc 逻辑坐标=客户坐标，
+// 客户原点即虚拟桌面原点，槽矩形可直接使用）。画布像素 (slotL,slotT) 对应屏幕
+// (slotL,slotT)——画布是虚拟桌面并集位图，槽矩形即面板在桌面上的落点。
+// 多屏复制/花屏根治：只 blend 槽矩形，绝不整幅位图乱贴
+static void BlendSlot(HDC dc, LONG slotL, LONG slotT, LONG slotR, LONG slotB,
+                      LONG orgX, LONG orgY)
 {
+    const int fi = (g_hdr && g_hdr->magic == kMagic) ? (g_hdr->frameIndex & 1) : 0;
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    if (!AlphaBlend(dc, 0, 0, g_bmpW, g_bmpH, g_memDC, 0, 0, g_bmpW, g_bmpH, bf)) {
+    const int w = int(slotR - slotL), h = int(slotB - slotT);
+    // 源：画布位图槽区域（g_memDC 视区原点恒 0，逻辑=位图）；目标逻辑 = 设备 - org
+    if (!AlphaBlend(dc, int(slotL - orgX), int(slotT - orgY), w, h,
+                    g_memDC[fi], slotL, slotT, w, h, bf)) {
         static bool once = false;
         if (!once) { once = true; Log(L"AlphaBlend failed %lu", GetLastError()); }
     }
@@ -234,35 +261,90 @@ static LRESULT CALLBACK DefViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 {
     if (msg == WM_ERASEBKGND) {
         HDC dc = (HDC)wParam;
+        // 槽位并集（±24px：投影 ±18 与发光外扩 ±11 的溢出）——面板只存在于槽矩形内
+        RECT slotsUnion = { 0, 0, 0, 0 };
+        BOOL haveSlots = FALSE;
+        if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready) {
+            for (int s = 0; s < POPTOOLS_DESKTOP_SHM_SLOTS; ++s) {
+                const LONG l = g_hdr->slotRect[s][0], t = g_hdr->slotRect[s][1];
+                const LONG r = g_hdr->slotRect[s][2], b = g_hdr->slotRect[s][3];
+                if (r > l && b > t) {
+                    if (!haveSlots) {
+                        slotsUnion.left = l - 24; slotsUnion.top = t - 24;
+                        slotsUnion.right = r + 24; slotsUnion.bottom = b + 24;
+                        haveSlots = TRUE;
+                    } else {
+                        slotsUnion.left = min(slotsUnion.left, l - 24);
+                        slotsUnion.top = min(slotsUnion.top, t - 24);
+                        slotsUnion.right = max(slotsUnion.right, r + 24);
+                        slotsUnion.bottom = max(slotsUnion.bottom, b + 24);
+                    }
+                }
+            }
+        }
         bool atomic = false;
-        // magic/ready 双门：失配或未就绪一律走兜底直画——版本不符宁可看不见日历，不可花屏
-        if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc)) {
+        if (haveSlots && EnsureDib(dc)) {
             RECT box;
             const int cb = GetClipBox(dc, &box);
             if (cb != NULLREGION && cb != ERROR && EnsureBgDC(dc)) {
-                // 双缓冲擦除（修 hover 头部按钮时整面板闪一下）：壁纸由原擦除过程
-                // 改道画进内存 DC，日历叠加其上，最后 BitBlt 一次上屏——屏幕上只有
-                // 旧帧或完整新帧，DWM 任何时刻合成都不会看到"壁纸已刷、日历未贴"
-                // 的中间帧。原点/画刷原点对齐屏幕 DC，保证壁纸相位与直画一致
-                HRGN clip = CreateRectRgnIndirect(&box);
-                if (clip) {
-                    SelectClipRgn(g_bgDC, clip);
-                    DeleteObject(clip);
+                POINT org = { 0, 0 };
+                GetViewportOrgEx(dc, &org);
+                // explorer 按区域（带各自视区原点）分块擦除：clip（逻辑）→ 设备 = L+org。
+                // 槽位并集外区域与本次擦除不相交时，完全交还系统原生擦除——严禁把
+                // 画布位图整幅乱贴（多屏复制/花屏的根因）
+                const RECT clipDev = { box.left + org.x, box.top + org.y,
+                                       box.right + org.x, box.bottom + org.y };
+                RECT inter;
+                if (!IntersectRect(&inter, &clipDev, &slotsUnion)) {
+                    return DefSubclassProc(hwnd, msg, wParam, lParam);
                 }
-                POINT org;
-                if (GetViewportOrgEx(dc, &org)) SetViewportOrgEx(g_bgDC, org.x, org.y, NULL);
-                if (GetBrushOrgEx(dc, &org)) SetBrushOrgEx(g_bgDC, org.x, org.y, NULL);
-                DefSubclassProc(hwnd, msg, (WPARAM)g_bgDC, lParam); // 壁纸 → 内存
-                BlendCalendar(g_bgDC);                              // 日历 → 内存
-                BitBlt(dc, 0, 0, g_bmpW, g_bmpH, g_bgDC, 0, 0, SRCCOPY); // 一次上屏
+                HRGN rgnSlots = CreateRectRgnIndirect(&slotsUnion);
+                // 第一遍：槽位并集之外的原生擦除（壁纸正确、无面板）
+                const int saved = SaveDC(dc);
+                if (rgnSlots) {
+                    ExtSelectClipRgn(dc, rgnSlots, RGN_DIFF);
+                    DeleteObject(rgnSlots);
+                }
+                DefSubclassProc(hwnd, msg, (WPARAM)dc, lParam);
+                RestoreDC(dc, saved);
+                // 第二遍：槽位并集区域内双缓冲合成，一次 BitBlt 上屏。
+                // 坐标口径：dc 逻辑 L → 设备（客户）D = L + org；bg 位图像素 = 客户坐标；
+                // bg 视区原点复制 org 后壁纸按 dc 同款逻辑落位 → bg 位图 = 客户坐标 ✓
+                HRGN clipBg = CreateRectRgnIndirect(&inter); // SelectClipRgn 用设备坐标
+                if (clipBg) {
+                    SelectClipRgn(g_bgDC, clipBg);
+                    DeleteObject(clipBg);
+                }
+                SetViewportOrgEx(g_bgDC, org.x, org.y, NULL);
+                POINT brushOrg;
+                if (GetBrushOrgEx(dc, &brushOrg)) SetBrushOrgEx(g_bgDC, brushOrg.x, brushOrg.y, NULL);
+                DefSubclassProc(hwnd, msg, (WPARAM)g_bgDC, lParam); // 壁纸 → bg
+                for (int s = 0; s < POPTOOLS_DESKTOP_SHM_SLOTS; ++s) {
+                    const LONG l = g_hdr->slotRect[s][0], t = g_hdr->slotRect[s][1];
+                    const LONG r = g_hdr->slotRect[s][2], b = g_hdr->slotRect[s][3];
+                    if (r > l && b > t)
+                        BlendSlot(g_bgDC, l, t, r, b, org.x, org.y); // 画布槽区域 → bg
+                }
+                BitBlt(dc, inter.left - org.x, inter.top - org.y,
+                       inter.right - inter.left, inter.bottom - inter.top,
+                       g_bgDC, inter.left - org.x, inter.top - org.y, SRCCOPY);
+                SelectClipRgn(g_bgDC, NULL);
                 atomic = true;
             }
         }
         if (!atomic) {
-            // 兜底：双缓冲不可用（无裁剪区/内存位图失败）时维持旧直画路径
+            // 兜底：双缓冲不可用（无裁剪区/内存位图失败）时原生擦除 + 逐槽直贴
             DefSubclassProc(hwnd, msg, wParam, lParam);
-            if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc))
-                BlendCalendar(dc);
+            if (g_hdr && g_hdr->magic == kMagic && g_hdr->ready && EnsureDib(dc)) {
+                POINT org = { 0, 0 };
+                GetViewportOrgEx(dc, &org);
+                for (int s = 0; s < POPTOOLS_DESKTOP_SHM_SLOTS; ++s) {
+                    const LONG l = g_hdr->slotRect[s][0], t = g_hdr->slotRect[s][1];
+                    const LONG r = g_hdr->slotRect[s][2], b = g_hdr->slotRect[s][3];
+                    if (r > l && b > t)
+                        BlendSlot(dc, l, t, r, b, org.x, org.y);
+                }
+            }
         }
         return 1;
     }
@@ -422,6 +504,14 @@ static LRESULT CALLBACK MsgWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     switch (msg) {
         case POPTOOLS_MSG_CLONE_UPDATE:
         {
+            // wParam!=0：全失效兜底（确认恢复/槽位切换等场景，窄区域遗漏一次性补齐）
+            if (wParam != 0) {
+                if (g_defview && IsWindow(g_defview))
+                    InvalidateRect(g_defview, NULL, TRUE);
+                if (g_listview && IsWindow(g_listview))
+                    InvalidateRect(g_listview, NULL, TRUE);
+                return 0;
+            }
             // 脏矩形失效（红线 4）：按各面板槽矩形 + 24px 边距逐槽失效（覆盖
             // 投影 ±18px 与发光外扩 ±11px 的溢出）；全部槽皆空时兜底全失效。
             // 整桌面失效会让 hover 这类高频重绘连壁纸一起重刷，肉眼闪烁。

@@ -9,7 +9,8 @@ namespace poptools {
 
 // ============================================================
 // 桌面日历设置（照搬 rlqd CalendarClone/AppSettings.cs；JSON 持久化，
-// 字段逐一同构）。坐标为共享画布上的物理像素（主屏）。
+// 字段逐一同构）。x/y/width/height 为虚拟桌面物理像素（日历所在屏的原生
+// 坐标系，矩形整体归属其中心所落的屏幕）。
 // 数据落 %LOCALAPPDATA%\PopTools\calendar\（PopTools 数据目录约定）。
 // ============================================================
 class CalendarSettings

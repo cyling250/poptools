@@ -22,75 +22,101 @@ QRect mulRect(const QRect &r, qreal dpr)
 } // namespace
 
 DesktopAdjustOverlay::DesktopAdjustOverlay(const QRect &calendarRectPhysical,
-                                             const QRect &screenPhysical, qreal dpr,
-                                             std::function<void(const QRect &)> onChangedPhysical,
-                                             std::function<void(const QRect &)> onConfirmedPhysical,
-                                             std::function<void()> onCanceled, QWidget *parent)
+                                           const QRect &screenPhysical,
+                                           const QRect &screenLogical,
+                                           const QList<QRect> &screenRectsLogical, qreal dpr,
+                                           std::function<QImage()> previewProvider,
+                                           std::function<void(const QRect &)> onChangedPhysical,
+                                           std::function<void(const QRect &)> onConfirmedPhysical,
+                                           QWidget *parent)
     : QWidget(parent, Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool)
+    , m_preview(std::move(previewProvider))
+    , m_screenRects(screenRectsLogical)
     , m_changed(std::move(onChangedPhysical))
     , m_confirmed(std::move(onConfirmedPhysical))
-    , m_canceled(std::move(onCanceled))
     , m_dpr(dpr)
-    , m_screen(divRect(screenPhysical, dpr))
-    , m_inner(divRect(calendarRectPhysical, dpr))
+    , m_screenNative(screenPhysical)
+    , m_nativeOrigin(screenPhysical.topLeft())
+    , m_logicalOrigin(screenLogical.topLeft())
+    , m_screen(screenLogical)
+    , m_inner(nativeToLogical(calendarRectPhysical))
 {
-    // 物理→逻辑建坐标系（screen/inner ÷dpr），回调统一 mulRect 换回物理；
-    // WA_DeleteOnClose 保证 close 即销毁（CalendarPanel 靠 destroyed 复位 m_adjusting）
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setMouseTracking(true);
+    // 初始窗口覆盖 inner 中心所在的屏
+    m_windowRect = m_screen;
+    for (const QRect &r : m_screenRects)
+        if (r.contains(m_inner.center()))
+            m_windowRect = r;
     updateBoundsFromInner();
 }
 
-// ✓/× 按钮热区：锚定内框右上角实时推导（窗口局部坐标；与 BoxAdjustOverlay
-// 同族方案）。不存成员、paint 不回填——拖拽后 update() 异步重绘，paint 未跑
-// 前命中也能拿到最新位置（T-062 BUG-07）
-QRect DesktopAdjustOverlay::checkRectNow() const
+QRect DesktopAdjustOverlay::nativeToLogical(const QRect &physical) const
 {
-    return QRect(m_inner.right() - x() - 66, m_inner.top() - y() + 8, 24, 24);
+    // 虚拟桌面物理 → 所在屏 Qt 逻辑全局：本地物理 ÷ dpr 后平移到逻辑原点
+    return divRect(physical.translated(-m_nativeOrigin), m_dpr).translated(m_logicalOrigin);
 }
 
-QRect DesktopAdjustOverlay::cancelRectNow() const
+QRect DesktopAdjustOverlay::logicalToNative(const QRect &logical) const
 {
-    return QRect(m_inner.right() - x() - 34, m_inner.top() - y() + 8, 24, 24);
+    return mulRect(logical.translated(-m_logicalOrigin), m_dpr).translated(m_nativeOrigin);
+}
+
+// 窗口固定覆盖 inner 中心所在的屏：拖动中窗口零移动——半透明窗口每帧移动
+// 经过鼠标位置时 Windows 会合成新的 mouse 事件喂回队列，事件洪水随拖动时长
+// 累积（虚线框/预览一起滞后=不跟手、回放抖动=闪烁，越拖越明显）。虚线框/
+// 预览作为窗口内容以局部坐标绘制，仅跨屏瞬间切换一次窗口。
+void DesktopAdjustOverlay::updateBoundsFromInner()
+{
+    const QPoint center = m_inner.center();
+    if (!m_windowRect.contains(center)) {
+        for (const QRect &r : m_screenRects) {
+            if (r.contains(center)) {
+                m_windowRect = r;
+                break;
+            }
+        }
+    }
+    setGeometry(m_windowRect);
+    update(); // 预览日历与虚线框跟随 inner 重绘（窗口不动，纯内容重绘）
 }
 
 void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
 {
-    // 暗幕（CompositionMode_Source 保半透明正确叠加）+ 内框虚线 + ✓/× 按钮 +
-    // 操作提示；✓/× 热区经 checkRectNow/cancelRectNow 实时推导（不在此回填）
     QPainter g(this);
     g.setRenderHint(QPainter::Antialiasing);
     g.setCompositionMode(QPainter::CompositionMode_Source);
     g.fillRect(rect(), QColor(0, 0, 0, 120));
     g.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
-    const QRect inner(m_inner.left() - x(), m_inner.top() - y(), m_inner.width(), m_inner.height());
+    // 日历面板预览：与虚线框同帧同层，拖动零跨进程延迟（跟手根治）。
+    // 预览帧四周含 margin 余量（阴影/发光），对齐 inner 左上收进 margin 绘制
+    const QRect inner(m_inner.left() - x(), m_inner.top() - y(), m_inner.width(),
+                      m_inner.height());
+    if (m_preview) {
+        const QImage pv = m_preview();
+        if (!pv.isNull())
+            g.drawImage(QPoint(inner.left() - m_previewMargin, inner.top() - m_previewMargin), pv);
+    }
+
     QPen dashPen(QColor(255, 255, 255, 255), 1.3, Qt::DashLine);
     g.setPen(dashPen);
     g.setBrush(Qt::NoBrush);
     g.drawRect(QRectF(inner));
 
-    const QRect checkRect = checkRectNow();
-    const QRect cancelRect = cancelRectNow();
+    // 确认按钮（✓）居虚线框右上角；无取消语义——拖到哪里算哪里
+    m_checkRect = QRect(inner.right() - 34, inner.top() + 8, 24, 24);
     g.setPen(Qt::NoPen);
     g.setBrush(QColor(18, 20, 26, 255));
-    g.drawRect(checkRect);
-    g.drawRect(cancelRect);
+    g.drawRect(m_checkRect);
     QPen checkPen(QColor(240, 166, 72), 2);
     checkPen.setCapStyle(Qt::RoundCap);
     checkPen.setJoinStyle(Qt::RoundJoin);
     g.setPen(checkPen);
-    g.drawPolyline(QVector<QPoint>{ QPoint(checkRect.left() + 6, checkRect.top() + 12),
-                                    QPoint(checkRect.left() + 11, checkRect.top() + 17),
-                                    QPoint(checkRect.left() + 19, checkRect.top() + 7) });
-    QPen cancelPen(QColor(235, 235, 235), 2);
-    cancelPen.setCapStyle(Qt::RoundCap);
-    g.setPen(cancelPen);
-    g.drawLine(cancelRect.left() + 7, cancelRect.top() + 7, cancelRect.right() - 7,
-               cancelRect.bottom() - 7);
-    g.drawLine(cancelRect.right() - 7, cancelRect.top() + 7, cancelRect.left() + 7,
-               cancelRect.bottom() - 7);
+    g.drawPolyline(QVector<QPoint>{ QPoint(m_checkRect.left() + 6, m_checkRect.top() + 12),
+                                    QPoint(m_checkRect.left() + 11, m_checkRect.top() + 17),
+                                    QPoint(m_checkRect.left() + 19, m_checkRect.top() + 7) });
 
     QFont font;
     font.setFamilies({ QStringLiteral("Microsoft YaHei UI") });
@@ -101,24 +127,18 @@ void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
                QStringLiteral("拖动边缘调整大小，拖动内部移动位置"));
 }
 
-// Esc=取消（回调 + close）；Enter=确认 mulRect(m_inner)（与 ✓ 同源，拖动中
-// m_inner 即最新几何）
 void DesktopAdjustOverlay::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Escape) {
-        if (m_canceled)
-            m_canceled();
-        close();
-    } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+    // 无取消语义：✓/Enter/Esc 均为就地确认（拖到哪里算哪里）
+    if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Return
+        || event->key() == Qt::Key_Enter) {
         if (m_confirmed)
-            m_confirmed(mulRect(m_inner, m_dpr));
+            m_confirmed(logicalToNative(m_inner));
         close();
     }
     QWidget::keyPressEvent(event);
 }
 
-// 位掩码热区：1=左缘 2=右缘 4=顶缘 8=底缘（各 ±14px），0=内部（移动），
-// -1=框外（不响应）；组合位 5/6/9/10 命中对角光标
 int DesktopAdjustOverlay::hitZone(const QPoint &localPt) const
 {
     // rlqd 以屏幕坐标做边缘判定；此处等效为窗口局部坐标
@@ -139,26 +159,13 @@ int DesktopAdjustOverlay::hitZone(const QPoint &localPt) const
     return innerLocal.contains(localPt) ? 0 : -1;
 }
 
-// 逻辑 → 物理（mulRect 同义别名，保留只为调用点可读）
-QRect DesktopAdjustOverlay::toPhysical(const QRect &logical) const
-{
-    return mulRect(logical, m_dpr);
-}
-
-// ✓/× 热区优先于拖拽；其后按 hitZone 记拖拽起点并 grabMouse（拖出窗口仍续）
 void DesktopAdjustOverlay::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton)
         return;
-    if (checkRectNow().contains(event->pos())) {
+    if (m_checkRect.contains(event->pos())) {
         if (m_confirmed)
-            m_confirmed(mulRect(m_inner, m_dpr));
-        close();
-        return;
-    }
-    if (cancelRectNow().contains(event->pos())) {
-        if (m_canceled)
-            m_canceled();
+            m_confirmed(logicalToNative(m_inner));
         close();
         return;
     }
@@ -167,13 +174,11 @@ void DesktopAdjustOverlay::mousePressEvent(QMouseEvent *event)
         return;
     m_zone = z;
     m_startRect = m_inner;
-    m_startLocal = event->pos();
+    m_startGlobal = event->globalPosition().toPoint();
     m_dragging = true;
     grabMouse();
 }
 
-// 未拖拽按热区换光标（组合位 5/6/9/10=对角）；拖拽中 zone==0 整体平移、其余
-// 按位单/双边缩放：先 min 尺寸、再钳屏、最后补 min
 void DesktopAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
 {
     if (!m_dragging) {
@@ -204,27 +209,41 @@ void DesktopAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
         }
         return;
     }
-    const QPoint d = event->pos() - m_startLocal;
+    // 位移用全局坐标差值：窗口跨屏切换时局部坐标原点跳变（±1920px），若用
+    // 局部坐标算位移，面板会在边界处反向跳回并被钳回旧屏（跨屏拖动卡死根因）；
+    // 全局坐标与窗口位置解耦，跨屏连续
+    const QPoint d = event->globalPosition().toPoint() - m_startGlobal;
     int l = m_startRect.left();
     int t = m_startRect.top();
     int r = m_startRect.left() + m_startRect.width();
     int b = m_startRect.top() + m_startRect.height();
     if (m_zone == 0) {
-        l += d.x(); r += d.x(); t += d.y(); b += d.y();
+        l += d.x();
+        r += d.x();
+        t += d.y();
+        b += d.y();
     } else {
-        if (m_zone & 1) l += d.x();
-        if (m_zone & 2) r += d.x();
-        if (m_zone & 4) t += d.y();
-        if (m_zone & 8) b += d.y();
+        if (m_zone & 1)
+            l += d.x();
+        if (m_zone & 2)
+            r += d.x();
+        if (m_zone & 4)
+            t += d.y();
+        if (m_zone & 8)
+            b += d.y();
     }
     constexpr int minW = 520, minH = 420;
     if (r - l < minW) {
-        if (m_zone & 1) l = r - minW;
-        else r = l + minW;
+        if (m_zone & 1)
+            l = r - minW;
+        else
+            r = l + minW;
     }
     if (b - t < minH) {
-        if (m_zone & 4) t = b - minH;
-        else b = t + minH;
+        if (m_zone & 4)
+            t = b - minH;
+        else
+            b = t + minH;
     }
     l = std::max(m_screen.left(), l);
     t = std::max(m_screen.top(), t);
@@ -237,10 +256,9 @@ void DesktopAdjustOverlay::mouseMoveEvent(QMouseEvent *event)
     m_inner = QRect(l, t, r - l, b - t);
     updateBoundsFromInner();
     if (m_changed)
-        m_changed(toPhysical(m_inner));
+        m_changed(logicalToNative(m_inner));
 }
 
-// 结束拖拽并补发一次 changed（松手位置为终值）
 void DesktopAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
 {
     Q_UNUSED(event)
@@ -248,20 +266,9 @@ void DesktopAdjustOverlay::mouseReleaseEvent(QMouseEvent *event)
         m_dragging = false;
         releaseMouse();
         if (m_changed)
-            m_changed(toPhysical(m_inner));
+            m_changed(logicalToNative(m_inner));
     }
 }
 
-// 窗口几何 = 内框 ±26px 边距并钳到屏内（内框必须完整落在窗内，hitZone 的局部
-// 坐标换算才成立）
-void DesktopAdjustOverlay::updateBoundsFromInner()
-{
-    constexpr int margin = 26;
-    QRect bounds(m_inner.left() - margin, m_inner.top() - margin, m_inner.width() + margin * 2,
-                 m_inner.height() + margin * 2);
-    bounds = bounds.intersected(m_screen);
-    setGeometry(bounds);
-    update();
-}
 
 } // namespace poptools
