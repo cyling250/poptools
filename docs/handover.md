@@ -180,10 +180,9 @@
   （仅新版提示：前往下载/跳过此版本/关闭；跳过记 update/ignoredVersion；失败不打扰）；关于
   对话框加"检查更新"手动入口（标准按钮 setButtonText 判 exec 返回值）；版本 bump 0.4.0→0.5.0
   （CMake+iss，关于对话框文本随宏自动）
-- 已构建：dist/PopTools-Setup-0.5.0-20261117_1619.exe（53MB；**注意：该包不含 T-063 移植与
-  T-064——发布前需按合并后代码重打包**）
-- 待办：①push 合并结果 ②tag v0.5.0 ③Release 创建+上传安装包（gh CLI 缺失：需 token 走 curl
-  API，或用户网页手动）
+- 已发布：Release v0.5.0（id 448376550，git 凭据走 API 创建+上传），资产
+  PopTools-Setup-0.5.0-20261117_1708.exe（56MB，合并后代码重打包，含 T-063/T-064 全部内容；
+  旧包已删）
 
 **待用户真机验收：T-059/T-060/T-061 收纳盒（已提交 1a9c548）＋ T-062 全仓库代码卫生夜间批次（9 提交 e9a1232..8b41161，2026-11-17 凌晨自动完成）**：
 - 收纳盒（T-059/T-060/T-061）：core/box 四件 + ui/box 四件 + BoxModule；DesktopSurfaceHost 通用面板宿主（SHM v3 六槽位）；标签间距根修（QFontMetrics 定位 + kCellH 112）+ 悬停按语义目标重绘 + 脏矩形提交。需求单 requirements/20261116-desktop-box.md
