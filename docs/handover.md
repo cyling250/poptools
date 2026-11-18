@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
-> 最后更新：2026-11-18 13:55（T-066 调研收口：被动 TSF TIP 与三诉求结构性冲突实锤——未选中不加载/选中顶掉拼音/经典 EDIT 盲区；weasel 本机实证签名无门槛+HKCU 不可行+ctfmon 删键复活；细档 t066_tsf_research.md，路线待用户定） · Agent_20261118130500
+> 最后更新：2026-11-18 15:21（T-066 结算：UIA 文本镜像上线+字母流完全替换（KeyboardTextComposer/打码开关移除），真机验收达标（退格原文/拼音→汉字实证），续接修复防 RuntimeId 重建吞增量，ctest 95 绿；新增 P-067 落盘路径勘误坑） · Agent_20261118130500
 > 最后更新：2026-11-18 00:30（合并并行会话：本地「桌面日历单屏化+多屏花屏根修+拖动体验闭环」重编号 T-063（原本地草稿编号 T-059，与远端收纳盒 T-059 冲突）、「启动更新自查」T-064（原 T-060）、P-066（原 P-063）；特性已移植到远端槽位协议 CLK4 架构（虚拟桌面并集画布+双缓冲帧翻转+覆盖层预览拖动）） · Agent_20261117164000
 > 最后更新：2026-11-17 16:45（T-059：桌面日历单屏化+多屏花屏/复制根修——协议 v2 增所在屏矩形、DLL 擦除两遍法限定日历屏、宿主坐标体系升级虚拟桌面、跨屏拖动；用户实拍副屏初验通过） · Agent_20261117164000
 
@@ -12,7 +12,7 @@
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（RapidOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图 + 活动监控（键入/时间线/OCR 快照本地日志）+ Goody 大模型管家（T-045）+ 桌面日历（T-054 起，照搬 E:\rlqd 注入机制），持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
-- **当前版本**：0.4.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
+- **当前版本**：0.5.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
@@ -34,7 +34,7 @@
   - `src/main.cpp` — 程序入口
   - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施；CMake 目标：`poptools_app_infra`（基础设施，可执行与测试共链）+ `poptools_module_<id>`（每功能模块一个静态库，含其界面库）+ 聚合 `poptools_modules`（T-036 起「拔插=删一个目标」字面成立）
   - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译 / activitymonitor / goody / calendar 桌面日历），各自自包含
-  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、calendar 桌面日历域（农历/节气/节日、布局命中、任务与设置 JSON 存储，T-054）、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、monitor 活动监控（键盘钩子/文本组装/输入状态机/前台跟踪/OCR 快照管线/UIA 取文与剪贴板流/JSONL 存储，T-045/T-047）、ocr OCR 服务、settings 设置、translation 翻译与划词翻译、assistant Goody 助手域（LLM 流式客户端/工具注册表/权限/会话/每日记录/记忆/MCP，T-045））
+  - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、calendar 桌面日历域（农历/节气/节日、布局命中、任务与设置 JSON 存储，T-054）、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、monitor 活动监控（键盘钩子/文本镜像/输入状态机/前台跟踪/OCR 快照管线/UIA 取文与剪贴板流/JSONL 存储，T-045/T-047/T-066）、ocr OCR 服务、settings 设置、translation 翻译与划词翻译、assistant Goody 助手域（LLM 流式客户端/工具注册表/权限/会话/每日记录/记忆/MCP，T-045））
   - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框：左侧导航分页，跟随系统明暗主题），`poptools_ui_goody`（悬浮球+卡片聊天窗，T-045/T-050）/ `poptools_ui_calendar`（桌面日历：共享内存画布/渲染器/宿主控制器/五窗，T-054）/ `poptools_ui_shared`（DesktopStack 贴桌 Z 序协调器），聚合为 INTERFACE 目标 `poptools_ui`
   - `src/hook/` — 桌面日历 Explorer 注入 DLL 源码 `calendar_hook.cpp`（纯 Win32，CMake 目标 `poptools_calendar_hook` → `PopToolsCalendarHook.dll` 与 exe 同目录，T-054）
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
@@ -56,19 +56,28 @@
   - 安装依赖（新机器必做，需代理）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`（**代理端口实测已变：现监听 127.0.0.1:17890**（2026-11-16 实测，GitHub API 200；AGENTS.md 记的 7897 已失效，开机后先测端口再走代理））
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 RapidOCR-json.exe 两个进程**，见坑 P-008）
-  - 测试：`ctest -C Release --test-dir build --output-on-failure`（96 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控键入与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（95 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控镜像与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
   - 运行：`build/Release/PopTools.exe`
   - 性能基线：`python scripts/perf_baseline.py`（启动耗时+内存采样，追加 temp_scripts/out/perf_baseline.jsonl；发版前跑一次对照历史）
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.4.0 已发布**（2026-11-02，GitHub Release 直发）；**T-054 已结算**（日历/收纳盒痕迹清零 + 照搬 E:\rlqd 复刻移植 Qt 桌面日历，ctest 96 绿，**真机目测待用户**）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.5.0 已发布**（2026-11-18，GitHub Release id 448376550）；**T-066 已结算**（UIA 文本镜像替代字母键序流，真机验收达标，ctest 95 绿）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
 > 按任务组织（不是按对话），最新的在最上面。编号从 T-001 递增，永不复用。
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261117004800
+
+### T-066 UIA 文本镜像输入监听（字母键序流完全替换）
+- **执行智能体**：Agent_20261118130500
+- **结果**：✅ TextMirrorMonitor 上线——UIA 焦点控件影子差分（输入/退格/替换以最终文本
+  原文落盘 textlog.jsonl，拼音草稿→汉字 replace 全程可见）+ 同窗口续接防 RuntimeId 重建
+  吞增量 + 密码字段影子重置防泄漏；KeyboardTextComposer/打码开关移除（完全替换）；
+  真机验收达标（退格删"走"/"5→7"修正实证）；ctest 95 绿。路线史：TSF 被动 TIP 三诉求
+  结构性冲突实锤转 UIA（weasel 本机实证）
+- **相关坑**：P-067 ｜ 细档：[handover/t066_tsf_research.md](handover/t066_tsf_research.md)
 
 ### T-065 F1/F3 裸键热键全局最高优先级（LL 优先钩子 + RegisterHotKey 兜底）
 - **执行智能体**：Agent_20261118102200
@@ -170,26 +179,11 @@
 
 ## 当前任务
 
-**T-066 TSF 文本镜像输入监听（在途，2026-11-18 立项）**：
-- 目标：TSF TIP（输入处理器）DLL 被动镜像所有 TSF 应用输入框的**最终文本**——输入什么、
-  回退（退格删除）了什么都原样抄回，取代字母键序流。用户拍板：走 TSF 路线（自用+开源，
-  不怕系统层），字母流"完全替换"；微软拼音共存、不吞键是硬前提
-- 需求单：requirements/20261118-tsf-text-mirror.md（AI 代决假设五条：命名管道 IPC/影子快照
-  8KB×4 LRU/OCR 快照链先保留后议退役/时间线与热键不动/签名硬门槛则自建证书本地信任）
-- 本机侦察已完：SDK 10.0.26100（D:\Windows Kits\10，msctf.h 在，vcvars 里 SDK 变量空的、
-  按 Kits 路径硬找的）；活动 IME=微软拼音（ChsIME.exe）；HKCU/HKLM CTF 键空＝无第三方输入法
-  先例可抄
-- 调研已收口（2026-11-18 13:55，细档 [t066_tsf_research.md](handover/t066_tsf_research.md)＋weasel 本机实证
-  temp_scripts/weasel_probe/）：**被动 TSF TIP 三诉求结构性冲突实锤**——①未选中即不加载
-  （注册+启用未选中 → 全进程零加载，官方文档+26300 实证）②键盘类别每语言仅一个活动 TIP，
-  选中即顶掉微软拼音 ③经典 EDIT（TRANSITORY）对 TSF 盲、RichEdit 默认关 TSF；另：签名
-  无硬门槛（weasel 全程未签名可用）、注册必须 HKLM 管理员、卸载须先杀 ctfmon 再删键（回写复活）
-- **路线已定（2026-11-18 14:00 用户拍板）：转 UIA 文本镜像主体**——TSF 探针结论归档备查；
-  实现改形：core/monitor/TextMirrorMonitor（键入/粘贴/切焦触发→防抖读焦点控件→字段影子
-  双向差分→textlog.jsonl）+ UiaTextReader 增 RuntimeId 字段身份 + 密码字段影子重置防泄漏；
-  字母流移除仍排在镜像真机验证通过之后
-- 红线：DLL 静态 CRT（P-056 纪律）；回调零耗时只取文+入队，落盘全在主进程 worker；密码框
-  三流静默（PasswordFieldGuard 缓存沿用）；随时可开关可注销
+**T-066b 文本镜像收尾候修（非阻塞，2026-11-18 结算留档）**：
+- DailyAggregator/DailyRecordJob 的日总结仍按 keys 流摘录键入段——textlog 未接入，新日
+  总结的键入摘录段会空；按 textlog 行形（kind/removed）设计摘录语义后接入
+- 可选优化：镜像事件"会话聚合"视图（同字段连续事件折叠成可读段落）
+- 历史兼容已保：MonitorQueryTool 白名单保留 keys（旧日志可查），textlog 已入白名单
 
 **T-060 更新自查在途（已提交未推送，2026-11-17）**：
 - 已落地：core/update/UpdateChecker（releases/latest 异步 + 三段数值比较，版本宏 POPTOOLS_VERSION 由 CMake project VERSION 注入）；启动延迟 5s 静默检查（仅新版提示：前往下载/跳过此版本/关闭，跳过记 update/ignoredVersion）；关于对话框加"检查更新"；版本 bump 0.5.0（CMake+iss，关于对话框随宏自动）
@@ -251,6 +245,15 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-067 监控落盘路径交接记载少一层：实为 PopTools\PopTools 双层嵌套
+- **关联任务**：T-066 ｜ 记录智能体：Agent_20261118130500
+- **现象**：按交接文档 %LOCALAPPDATA%\PopTools\monitor 查验收日志空手而归（目录不存在），
+  监控实际一直在正常落盘
+- **原因**：T-045 起记载的路径漏算 AppLocalDataLocation 的 org/app 双层，本机实际为
+  %LOCALAPPDATA%\PopTools\PopTools\monitor
+- **解决**：ActivityStore.h 注释已按实际勘误。教训：**交接文档里的路径要么当场验证要么
+  标注"未复核"**，凭记忆转述的路径会带毒下一棒
 
 ### P-066 多屏截图 Pillow ImageGrab all_screens=False 时源 DC 仅主屏，越界读出黑块
 - **关联任务**：T-063 ｜ 记录智能体：Agent_20261117164000
@@ -464,3 +467,5 @@
 | 2026-11-18 10:55 | Agent_20261118102200 | 当前任务 / 修改台账 / temp_scripts | T-065 增补自证结果：探针双相位（抢键方赢→PopTools 链首吞键）+ 隔离实验（覆盖层真实弹出稳定不自关）+ F3 贴图链路全过；新坑候选：冻结画布截图肉眼不可辨，验覆盖层以窗口枚举为准 | 用户指令"拉起项目验证"，四项 PASS 全绿，PopTools 留运行待真机复验 |
 | 2026-11-18 13:12 | Agent_20261118130500 | 头部 / 历史任务 / 当前任务 / 修改台账 / 需求单 | T-065 结算（用户验收+提交 5287349 入历史任务）；T-066 立项（TSF 文本镜像输入监听，需求单 requirements/20261118-tsf-text-mirror.md）；本机 SDK/IME 侦察 | 用户批注拍板 TSF 路线+字母流完全替换+立即开工；调研子代理进行中 |
 | 2026-11-18 13:55 | Agent_20261118130500 | 头部 / 当前任务 / 需求单 / 细档 | T-066 调研收口：新增细档 t066_tsf_research.md（六问结论+设计启示）；需求单开放点回填（被动加载死刑/签名无门槛/HKLM 必须/宿主盲区）；当前任务改写为三选一路线待用户定；AGENTS.md 增「下载与逆向纪律（所有 Agent 通用）」+子代理传路径规则（用户三次批注校准） | weasel 本机实证（装→查→卸→基线比对一致，探针存 temp_scripts/weasel_probe/）；被动 TSF 三诉求结构性冲突实锤 |
+| 2026-11-18 15:21 | Agent_20261118130500 | 头部 / 历史任务 / 当前任务 / 项目快照 / 踩坑记录 / monitor+settings+模块源码 / 测试 | T-066 结算入历史任务（feat 提交：镜像上线+字母流完全替换）；当前任务留 T-066b 候修；快照勘误（版本 0.5.0/ctest 95/monitor 描述）；新增 P-067 落盘路径勘误坑 | 真机验收达标（退格原文/拼音→汉字 replace 实证）；诊断定位 RuntimeId 重建吞增量并以同窗口续接修复；KeyboardTextComposer+打码开关全链移除 |
+| 2026-11-18 14:12 | Agent_20261118130500 | 头部 / 当前任务 / monitor 源码 / 模块源码 / CMake / 测试 | T-066 UIA 文本镜像落码：新增 TextMirrorMonitor（影子差分+churn 护栏+密码影子重置）、UiaTextReader 增 RuntimeId、ClipboardListener 增 clipboardUpdated 信号、模块接线三触发源+textlog.jsonl；新用例入 domain_tests（97 用例全绿） | 未提交待真机验收（验收清单在当前任务块）；字母流移除排验收后 |

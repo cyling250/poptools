@@ -30,3 +30,13 @@
 - 密码静默：result.password 时跳过记录并**重置该字段影子**（防密码字符以差分形式泄漏）
 - 触发源：现有 GlobalKeyboardHook 键入活动（防抖 ~350ms）＋ ClipboardListener 粘贴＋ForegroundTracker 切窗
 - TSF 探针结论与 weasel 实证产物归档备查（temp_scripts/weasel_probe/）；TSF en-US/SPEECH 类别两活口不再 pursue，除非未来 UIA 覆盖被实测证明不足
+
+**验收结算（2026-11-18 15:21）**：
+- 真机验收达标：退格删除以 delete 行携带被删原文（"走"、"，"、"—"、"1" 实证）；拼音→汉字
+  以 replace 行全程可见（"ce"→"测量"、"yi'yin"→"意淫出来的。"）；修改轨迹（"是"→"在"、
+  "5"→"7"）逐条落盘
+- 验收期发现并以同窗口续接修复：Electron 输入框 UI 重建致 RuntimeId 变化（10+ 身份），
+  重建首拍原吞掉未记增量——现与同窗口最近旧影子续接（重叠 ≥8 字符采信），无关字段静默
+- 完全替换落地：KeyboardTextComposer/keys 流/密码打码开关全链移除（95 用例绿）；keys
+  白名单保留于 MonitorQueryTool 供历史日志查询
+- 遗留：T-066b（日总结按 textlog 行形接入 + 会话聚合视图，非阻塞）
