@@ -76,7 +76,6 @@ private:
 
     // 活动监控
     QCheckBox *m_monEnabledCheck = nullptr;
-    QCheckBox *m_monMaskCheck = nullptr;
     QCheckBox *m_monOcrCheck = nullptr;
     QSpinBox *m_monIdleSpin = nullptr;
     QSpinBox *m_monRetentionSpin = nullptr;

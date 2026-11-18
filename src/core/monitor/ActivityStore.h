@@ -16,8 +16,10 @@ class ActivityStoreWorker;
 // ============================================================
 // 活动日志存储：JSONL 追加写 + 按日轮转 + 保留期清理。
 //
-// 落盘布局（baseDir 注入，默认 %LOCALAPPDATA%\PopTools\monitor\）：
-//   baseDir/2026-11-09/keys.jsonl      键入文本事件
+// 落盘布局（baseDir 注入，默认 AppLocalDataLocation/monitor，本机即
+// %LOCALAPPDATA%\PopTools\PopTools\monitor\——org/app 双层嵌套）：
+//   baseDir/2026-11-09/textlog.jsonl   文本镜像事件（T-066；keys 字母流
+//                                      已移除，旧日 keys.jsonl 仍可查）
 //   baseDir/2026-11-09/timeline.jsonl  前台窗口活动段
 //   baseDir/2026-11-09/ocrtext.jsonl   OCR 增量文字
 //   baseDir/2026-11-09/meta.json       {version, summarized} —— DailyRecordJob 的补账索引

@@ -83,14 +83,14 @@ add_library(poptools_core STATIC
     monitor/ImeCommitDetector.h
     monitor/InputActivityMonitor.cpp
     monitor/InputActivityMonitor.h
-    monitor/KeyboardTextComposer.cpp
-    monitor/KeyboardTextComposer.h
     monitor/OwnWriteGuard.cpp
     monitor/OwnWriteGuard.h
     monitor/PasswordFieldGuard.cpp
     monitor/PasswordFieldGuard.h
     monitor/SnapshotOcrPipeline.cpp
     monitor/SnapshotOcrPipeline.h
+    monitor/TextMirrorMonitor.cpp
+    monitor/TextMirrorMonitor.h
     monitor/UiaTextReader.cpp
     monitor/UiaTextReader.h
     ocr/RapidOcrService.cpp

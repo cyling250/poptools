@@ -127,7 +127,6 @@ void SettingsDialog::applySettingsFromForm()
     s.setTranslateTerms(parseTerms());
     s.setPinSaveDir(m_dirEdit->text().trimmed());
     s.setMonitorEnabled(m_monEnabledCheck->isChecked());
-    s.setMonitorMaskPasswords(m_monMaskCheck->isChecked());
     s.setMonitorOcrSnapshot(m_monOcrCheck->isChecked());
     s.setMonitorIdleThresholdSec(m_monIdleSpin->value());
     s.setMonitorRetentionDays(m_monRetentionSpin->value());
@@ -411,13 +410,6 @@ QWidget *SettingsDialog::buildMonitorPage()
         "供 Goody 管家生成「本日工作记录」。数据只存本机，"
         "生成总结时当日摘要会发送给所配的大模型 API。"));
     lay->addWidget(m_monEnabledCheck);
-
-    m_monMaskCheck = new QCheckBox(QStringLiteral("密码框自动打码（推荐）"), page);
-    m_monMaskCheck->setChecked(Settings::instance().monitorMaskPasswords());
-    m_monMaskCheck->setToolTip(QStringLiteral(
-        "焦点在密码输入框时，键入内容记为 ●●● 占位符（保留长度、不记内容）。"
-        "部分浏览器/UWP 自绘密码框可能无法识别，重要密码建议仍避免在监控开启时输入。"));
-    lay->addWidget(m_monMaskCheck);
 
     m_monOcrCheck = new QCheckBox(QStringLiteral("中文上屏 OCR 快照（输入法上屏时截屏识别）"), page);
     m_monOcrCheck->setChecked(Settings::instance().monitorOcrSnapshot());

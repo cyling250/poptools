@@ -250,17 +250,6 @@ void Settings::setMonitorEnabled(bool on)
     syncChecked();
 }
 
-bool Settings::monitorMaskPasswords() const
-{
-    return m_s.value("monitor/maskPasswords", true).toBool();
-}
-
-void Settings::setMonitorMaskPasswords(bool on)
-{
-    m_s.setValue("monitor/maskPasswords", on);
-    syncChecked();
-}
-
 int Settings::monitorIdleThresholdSec() const
 {
     // 钳制 10-3600：过小把思考间隙算成离开，过大失去"离开"语义

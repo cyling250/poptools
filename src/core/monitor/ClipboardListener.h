@@ -50,6 +50,11 @@ public:
     // 消息窗口的静态 wndProc（自由函数）经 g_listener 调入；勿在别处使用
     void noteUpdate();
 
+signals:
+    // 外部剪贴板内容变化（自写排除后，每内容更新至多一次；T-066 文本镜像
+    // 的"粘贴"触发源）。GUI 线程发出
+    void clipboardUpdated();
+
 private slots:
     void onDebounce();
 

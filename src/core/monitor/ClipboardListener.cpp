@@ -330,6 +330,7 @@ void ClipboardListener::handlePayload(const ClipboardCodec::ClipboardPayload &p,
         return; // PopTools 自身写入：整条跳过（防抖结束时 noteSelfWrite 必已执行）
     if (p.kind == ClipboardCodec::ClipboardPayload::Kind::Empty)
         return; // 清空/不可读格式：跳过且不动去重状态
+    emit clipboardUpdated(); // 外部内容变化（T-066：文本镜像的粘贴触发源）
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const auto o = m_deduper.observe(p.hash);

@@ -45,17 +45,20 @@ ToolDef makeMonitorQueryTool(const QString &monitorBaseDir, QObject *ctx)
         // 片段）一律拒绝——否则该 readOnly 工具可读盘上任意 .jsonl 文件
         QStringList streams;
         if (stream == QLatin1String("all"))
-            // T-047-CLIP：clipboard 流入白名单（含 "all" 全量列表）
+            // T-066：textlog（文本镜像）流入白名单；keys 为字母流移除后的
+            // 历史遗留流，仅旧日志可查
             streams << QStringLiteral("timeline") << QStringLiteral("keys")
+                    << QStringLiteral("textlog")
                     << QStringLiteral("ocrtext") << QStringLiteral("clipboard");
         else if (stream == QLatin1String("timeline") || stream == QLatin1String("keys")
+                 || stream == QLatin1String("textlog")
                  || stream == QLatin1String("ocrtext")
                  || stream == QLatin1String("clipboard"))
             streams << stream;
         else {
             done(QJsonObject{{"ok", false},
                              {"error",
-                              QStringLiteral("stream 仅支持 timeline/keys/ocrtext/clipboard/all")}});
+                              QStringLiteral("stream 仅支持 timeline/keys/textlog/ocrtext/clipboard/all")}});
             return;
         }
         const int maxLines = qBound(1, args.value(QStringLiteral("max_lines")).toInt(200), 500);

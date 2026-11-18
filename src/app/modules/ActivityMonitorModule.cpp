@@ -14,9 +14,8 @@
 #include "core/monitor/GlobalKeyboardHook.h"
 #include "core/monitor/ImeCommitDetector.h"
 #include "core/monitor/InputActivityMonitor.h"
-#include "core/monitor/KeyboardTextComposer.h"
-#include "core/monitor/PasswordFieldGuard.h"
 #include "core/monitor/SnapshotOcrPipeline.h"
+#include "core/monitor/TextMirrorMonitor.h"
 #include "core/settings/Settings.h"
 
 namespace poptools {
@@ -114,9 +113,6 @@ void ActivityMonitorModule::startMonitor()
     m_store->setRetentionDays(m_appliedRetentionDays);
     m_store->start();
 
-    m_composer = new KeyboardTextComposer(this);
-    m_composer->setMaskPasswords(s.monitorMaskPasswords());
-
     m_activity = new InputActivityMonitor(this);
     m_appliedIdleThresholdSec = s.monitorIdleThresholdSec();
     m_activity->setIdleThresholdSec(m_appliedIdleThresholdSec);
@@ -125,31 +121,33 @@ void ActivityMonitorModule::startMonitor()
     m_tracker = new ForegroundTracker(this);
     m_mouseHook = new GlobalMouseHook(this);
 
-    // 键盘事件：down 才记键入；打码判定按捕获时刻（钩子回调入队时）的
-    // 焦点窗口做样式探测——按处理时刻查前台会漏掉"输完密码立刻切窗"
-    // 的场景（密码明文落盘）
+    // 键盘事件：down 记活跃度并触发文本镜像（T-066 起，字母键序流已移除，
+    // 击键内容经 UIA 焦点控件镜像以最终文本形态落盘 textlog.jsonl）
     connect(m_kbHook, &GlobalKeyboardHook::keyEvent, this,
             [this](int vk, int scan, bool ext, bool down, quintptr focusHwnd) {
                 if (down) {
-                    m_composer->setMasked(Settings::instance().monitorMaskPasswords()
-                                              && PasswordFieldGuard::isPasswordWindow(focusHwnd));
-                    m_composer->onKeyEvent(vk, scan, ext, down);
                     m_activity->noteKeydown();
+                    m_mirror->onTypingActivity(); // 文本镜像触发（零耗时入防抖）
                     if (m_imeDetector)
                         m_imeDetector->onKeyEvent(vk, down);
-                } else {
-                    m_composer->onKeyEvent(vk, scan, ext, down); // 修饰键松开也要喂状态机
                 }
             });
 
-    // 键入文本 → keys.jsonl
-    connect(m_composer, &KeyboardTextComposer::textReady, this,
-            [this](const QString &app, const QString &title, const QString &text, bool masked) {
+    // ---- T-066 UIA 文本镜像：输入与回退的原文抄录 → textlog.jsonl ----
+    // 触发源：键盘 down（上方接线）/ 剪贴板外部变化（粘贴）/ 切窗；
+    // 防抖、UIA 读、字段影子差分全在 TextMirrorMonitor 内部，此处只落盘
+    m_mirror = new TextMirrorMonitor(this);
+    connect(m_mirror, &TextMirrorMonitor::changeReady, this,
+            [this](const QString &app, const QString &title,
+                   const TextMirrorStore::MirrorEvent &ev) {
                 QJsonObject o = baseEvent(app, title);
-                o.insert("text", text);
-                if (masked)
-                    o.insert("masked", true);
-                m_store->append(QStringLiteral("keys"), o);
+                o.insert("kind", ev.kind);
+                if (!ev.text.isEmpty())
+                    o.insert("text", ev.text);
+                if (!ev.removed.isEmpty())
+                    o.insert("removed", ev.removed);
+                o.insert("field", ev.field);
+                m_store->append(QStringLiteral("textlog"), o);
             });
 
     // 时间线段 → timeline.jsonl
@@ -168,12 +166,13 @@ void ActivityMonitorModule::startMonitor()
                 m_store->append(QStringLiteral("timeline"), o);
             });
 
-    // 前台窗口变化 → 全链换上下文（状态机 / 文本 / 上屏检测 / OCR 基线 /
-    // 剪贴板事件归属）
+    // 前台窗口变化 → 全链换上下文（状态机 / 文本 / 镜像 / 上屏检测 / OCR
+    // 基线 / 剪贴板事件归属）
     connect(m_tracker, &ForegroundTracker::foregroundChanged, this,
             [this](quintptr hwnd, const QString &app, const QString &title) {
                 m_activity->setWindowContext(hwnd, app, title);
-                m_composer->setWindowContext(app, title);
+                m_mirror->setWindowContext(app, title);
+                m_mirror->onWindowChanged(); // 新字段当前内容尽快上镜建影子
                 if (m_imeDetector)
                     m_imeDetector->reset();
                 if (m_ocrPipeline)
@@ -204,18 +203,19 @@ void ActivityMonitorModule::startMonitor()
     m_clipboard = new ClipboardListener(m_store, this);
     if (!m_clipboard->start())
         qWarning("ActivityMonitorModule: 剪贴板监听启动失败（本流缺失）");
+    // 外部剪贴板变化 → 文本镜像补一拍（粘贴进输入框无键入事件，靠此触发）
+    connect(m_clipboard, &ClipboardListener::clipboardUpdated, m_mirror,
+            &TextMirrorMonitor::onTypingActivity);
 
     // 鼠标按下 → 活跃度信号
     connect(m_mouseHook, &GlobalMouseHook::mousePressed, this, [this] {
         m_activity->noteClick();
     });
 
-    // 1s 心跳：状态机活跃计数 + 文本空闲冲刷
+    // 1s 心跳：状态机活跃计数
     m_tick = new QTimer(this);
     connect(m_tick, &QTimer::timeout, this, [this] {
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
         m_activity->tick();
-        m_composer->onIdleTick(now);
     });
     m_tick->start(1000);
 
@@ -241,23 +241,21 @@ void ActivityMonitorModule::stopMonitor()
         m_tracker->stop();
     if (m_mouseHook)
         m_mouseHook->stop();
-    if (m_composer)
-        m_composer->flush(); // 残余键入文本落盘
     if (m_activity)
         m_activity->flush(); // 残余时间线段落盘
     delete m_kbHook;
     delete m_tracker;
     delete m_mouseHook;
-    delete m_composer;
     delete m_activity;
+    delete m_mirror;
     delete m_imeDetector;
     delete m_ocrPipeline;
     delete m_clipboard; // stop 内冲账挂起 repeat——须在 store 停止之前
     m_kbHook = nullptr;
     m_tracker = nullptr;
     m_mouseHook = nullptr;
-    m_composer = nullptr;
     m_activity = nullptr;
+    m_mirror = nullptr;
     m_imeDetector = nullptr;
     m_ocrPipeline = nullptr;
     m_clipboard = nullptr;

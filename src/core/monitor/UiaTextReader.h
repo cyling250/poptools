@@ -42,6 +42,9 @@ public:
         quintptr elPid = 0;     // T-047-FIX(P3-1)：焦点元素进程号（进程对号
                                 // 通过后带回；浏览器/Electron 场景 topHwnd
                                 // 不可知时的权威防串窗校验依据）
+        QString runtimeId;      // UIA RuntimeId 点分十进制串（T-066 文本镜像的
+                                // 字段身份键）：同一提供方会话内稳定，跨 UIA
+                                // 重连不保证——镜像影子本就内存短存，够用
     };
 
     explicit UiaTextReader(QObject *parent = nullptr);

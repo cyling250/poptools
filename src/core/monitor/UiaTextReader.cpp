@@ -1,6 +1,7 @@
 #include "UiaTextReader.h"
 
 #include <QCoreApplication>
+#include <QStringList>
 #include <QThread>
 
 #ifdef Q_OS_WIN
@@ -253,6 +254,25 @@ private:
         res.topHwnd = h ? reinterpret_cast<quintptr>(GetAncestor(
                               reinterpret_cast<HWND>(h), GA_ROOT))
                         : 0;
+
+        // T-066 文本镜像：RuntimeId（SAFEARRAY of LONG，调用方负责销毁）
+        // 转点分十进制串——字段身份键；密码结果同样带回（调用方重置影子
+        // 需要同一把键）
+        SAFEARRAY *psa = nullptr;
+        if (SUCCEEDED(el->GetRuntimeId(&psa)) && psa) {
+            LONG lb = 0, ub = 0;
+            if (SUCCEEDED(SafeArrayGetLBound(psa, 1, &lb))
+                && SUCCEEDED(SafeArrayGetUBound(psa, 1, &ub))) {
+                QStringList parts;
+                for (LONG i = lb; i <= ub; ++i) {
+                    LONG v = 0;
+                    if (SUCCEEDED(SafeArrayGetElement(psa, &i, &v)))
+                        parts << QString::number(v);
+                }
+                res.runtimeId = parts.join(QLatin1Char('.'));
+            }
+            SafeArrayDestroy(psa);
+        }
 
         if (res.password) {
             el->Release();

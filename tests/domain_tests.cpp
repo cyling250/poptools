@@ -45,9 +45,9 @@
 #include "core/monitor/ClipboardCodec.h"
 #include "core/monitor/ImeCommitDetector.h"
 #include "core/monitor/InputActivityMonitor.h"
-#include "core/monitor/KeyboardTextComposer.h"
 #include "core/monitor/OwnWriteGuard.h"
 #include "core/monitor/SnapshotOcrPipeline.h"
+#include "core/monitor/TextMirrorMonitor.h"
 #include "core/monitor/UiaTextReader.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
@@ -524,68 +524,6 @@ private slots:
         QVERIFY(!QDir(oldDay).exists());
     }
 
-    // ---- KeyboardTextComposer：文本组装 / 退格 / 打码 / 快捷键不记 ----
-    void keyboard_composer_text_and_masking()
-    {
-        // Win32 虚拟键码（与 <windows.h> 同值；测试进程不引系统头）
-        constexpr int kVkBack = 0x08, kVkReturn = 0x0D, kVkControl = 0x11;
-
-        KeyboardTextComposer c;
-        QString gotApp, gotTitle, gotText;
-        bool gotMasked = false;
-        connect(&c, &KeyboardTextComposer::textReady,
-                [&](const QString &a, const QString &t, const QString &x, bool m) {
-                    gotApp = a;
-                    gotTitle = t;
-                    gotText = x;
-                    gotMasked = m;
-                });
-        c.setWindowContext(QStringLiteral("notepad.exe"), QStringLiteral("无标题"));
-
-        auto key = [&c](int vk, bool down = true) { c.onKeyEvent(vk, 0, false, down); };
-
-        // 小写键入 + 空闲冲刷（VK_A 在常见拉丁布局下 → 'a'）
-        key(0x41); // A
-        key(0x54); // T
-        c.onIdleTick(QDateTime::currentMSecsSinceEpoch() + 10000);
-        QCOMPARE(gotText, QStringLiteral("at"));
-        QCOMPARE(gotApp, QStringLiteral("notepad.exe"));
-        QVERIFY(!gotMasked);
-
-        // 退格从缓冲删字
-        gotText.clear();
-        c.setWindowContext(QStringLiteral("a.exe"), QStringLiteral("t")); // 换窗冲刷（空缓冲无信号）
-        key(0x41);
-        key(0x42);
-        key(kVkBack);
-        c.flush();
-        QCOMPARE(gotText, QStringLiteral("a"));
-
-        // 回车：追加换行并立即冲刷
-        gotText.clear();
-        key(0x41);
-        key(kVkReturn);
-        QCOMPARE(gotText, QStringLiteral("a\n"));
-
-        // 密码打码：等长占位符 + masked 标记
-        gotText.clear();
-        c.setMasked(true);
-        key(0x41);
-        key(0x41);
-        c.flush();
-        QCOMPARE(gotText, QString(QChar(0x25CF)) + QChar(0x25CF));
-        QVERIFY(gotMasked);
-        c.setMasked(false);
-
-        // Ctrl 组合键（快捷键）不记录
-        gotText.clear();
-        key(kVkControl);
-        key(0x43);
-        key(kVkControl, false);
-        c.flush();
-        QVERIFY(gotText.isEmpty());
-    }
-
     // ---- InputActivityMonitor：时间线状态机 ----
     void input_monitor_segments()
     {
@@ -663,14 +601,12 @@ private slots:
             Settings s(ini);
             QVERIFY(!s.monitorEnabled()); // 默认关闭
             s.setMonitorEnabled(true);
-            s.setMonitorMaskPasswords(false);
             s.setMonitorIdleThresholdSec(5);  // 低于下限 → 钳到 10
             s.setMonitorRetentionDays(99999); // 超上限 → 钳到 3650
             s.setMonitorOcrSnapshot(true);
         }
         Settings s(ini);
         QVERIFY(s.monitorEnabled());
-        QVERIFY(!s.monitorMaskPasswords());
         QCOMPARE(s.monitorIdleThresholdSec(), 10);
         QCOMPARE(s.monitorRetentionDays(), 3650);
         QVERIFY(s.monitorOcrSnapshot());
@@ -1530,65 +1466,6 @@ private slots:
         QVERIFY(QFileInfo::exists(dir.filePath("a.txt"))); // 源未被动过
     }
 
-    // ---- KeyboardTextComposer 回归（P2-6/P2-7）：AltGr（Ctrl+Alt 同按）
-    //      不再整体吞掉（masked 路径记占位符，不依赖布局翻译，可确定性
-    //      断言）；setMasked 值变化时先冲刷旧段，● 段与明文不同段 ----
-    void keyboard_composer_altgr_and_masked_transition()
-    {
-        constexpr int kVkControl = 0x11, kVkMenu = 0x12;
-        KeyboardTextComposer c;
-        struct Seg
-        {
-            QString text;
-            bool masked = false;
-        };
-        QList<Seg> segs;
-        connect(&c, &KeyboardTextComposer::textReady,
-                [&](const QString &, const QString &, const QString &text, bool masked) {
-                    segs.append({text, masked});
-                });
-        c.setWindowContext(QStringLiteral("a.exe"), QStringLiteral("t"));
-        auto key = [&c](int vk, bool down = true) { c.onKeyEvent(vk, 0, false, down); };
-        const QString bullet = QString(QChar(0x25CF));
-
-        // masked → unmasked：值变化先 flush，旧 ●● 段先行发出
-        c.setMasked(true);
-        key(0x41);
-        key(0x41);
-        c.setMasked(false);
-        QCOMPARE(segs.size(), 1);
-        QCOMPARE(segs.at(0).text, bullet + bullet);
-        QVERIFY(segs.at(0).masked);
-        key(0x41);
-        c.flush();
-        QCOMPARE(segs.size(), 2);
-        QCOMPARE(segs.at(1).text, QStringLiteral("a"));
-        QVERIFY(!segs.at(1).masked);
-
-        // AltGr 组合期：masked 路径照记占位符（P2-6 修复前被 m_ctrl||m_alt
-        // 守卫吞掉）
-        segs.clear();
-        c.setMasked(true);
-        key(kVkControl);
-        key(kVkMenu);
-        key(0x41);
-        key(kVkMenu, false);
-        key(kVkControl, false);
-        c.flush();
-        QCOMPARE(segs.size(), 1);
-        QCOMPARE(segs.at(0).text, bullet);
-        QVERIFY(segs.at(0).masked);
-        c.setMasked(false);
-
-        // 纯 Ctrl 快捷键仍不记录（守卫保留）
-        segs.clear();
-        key(kVkControl);
-        key(0x43);
-        key(kVkControl, false);
-        c.flush();
-        QCOMPARE(segs.size(), 0);
-    }
-
     // ---- WorkingMemory 回归（B-9②）：promptBlock 多参单次 arg——标题/
     //      目标里的 %N 保持字面，笔记数不再注入标题段 ----
     void working_memory_promptblock_no_arg_injection()
@@ -2229,37 +2106,6 @@ private slots:
         QVERIFY(!pPlain.assistantMessage().contains(QStringLiteral("tool_calls")));
     }
 
-    // ---- KeyboardTextComposer：满 512 字自动成段（masked 路径，不依赖布局） ----
-    void keyboard_composer_max_run_chars_batch_flush()
-    {
-        KeyboardTextComposer c;
-        struct Seg
-        {
-            QString text;
-            bool masked = false;
-        };
-        QList<Seg> segs;
-        connect(&c, &KeyboardTextComposer::textReady,
-                [&](const QString &, const QString &, const QString &text, bool masked) {
-                    segs.append({text, masked});
-                });
-        c.setWindowContext(QStringLiteral("a.exe"), QStringLiteral("t"));
-        c.setMasked(true); // 每键记 ●：断言确定性不依赖键盘布局
-
-        for (int i = 0; i < 512; ++i)
-            c.onKeyEvent(0x41, 0, false, true); // 连按 512 键
-        QCOMPARE(segs.size(), 1); // 第 512 键即触发成段，不等多拍
-        QCOMPARE(segs.at(0).text, QString(512, QChar(0x25CF)));
-        QVERIFY(segs.at(0).masked);
-
-        c.onKeyEvent(0x41, 0, false, true); // 上限后重新积累
-        c.flush();
-        QCOMPARE(segs.size(), 2);
-        QCOMPARE(segs.at(1).text.size(), 1);
-        QVERIFY(segs.at(1).masked);
-        c.setMasked(false);
-    }
-
     // ---- McpStdioClient：未启动即调用 → 同步快速失败（不拉子进程） ----
     void mcp_client_not_ready_fast_fail()
     {
@@ -2842,6 +2688,131 @@ private slots:
                      uiaBase, 9, QStringLiteral("uiafulltext+more"),
                      &SnapshotOcrPipeline::diffUiaAdded),
                  QStringLiteral("+more"));
+    }
+
+    // ---- TextMirrorStore：双向差分 + 字段影子（T-066 文本镜像） ----
+    void text_mirror_store_diff_and_shadows()
+    {
+        using TM = TextMirrorStore;
+        // 纯差分：打字增长 / 回退 / 中段替换 / 无变化 / 空基线
+        auto c = TM::diffChange(QStringLiteral("hello"), QStringLiteral("hello world"));
+        QVERIFY(c.removed.isEmpty());
+        QCOMPARE(c.added, QStringLiteral(" world"));
+        c = TM::diffChange(QStringLiteral("hello world"), QStringLiteral("hello"));
+        QCOMPARE(c.removed, QStringLiteral(" world"));
+        QVERIFY(c.added.isEmpty());
+        c = TM::diffChange(QStringLiteral("hello world"), QStringLiteral("hello World"));
+        QCOMPARE(c.removed, QStringLiteral("w"));
+        QCOMPARE(c.added, QStringLiteral("W"));
+        c = TM::diffChange(QStringLiteral("同"), QStringLiteral("同"));
+        QVERIFY(c.removed.isEmpty() && c.added.isEmpty());
+        c = TM::diffChange(QString(), QStringLiteral("你好"));
+        QVERIFY(c.removed.isEmpty());
+        QCOMPARE(c.added, QStringLiteral("你好"));
+
+        // 字段身份键退化链：RuntimeId → 元素句柄 → 顶层窗口；窗口身份键：
+        // 顶层窗口 → 元素进程号 → 空
+        UiaTextReader::Result r;
+        r.runtimeId = QStringLiteral("42.7");
+        r.elHwnd = 0xAB;
+        r.topHwnd = 0x10;
+        r.elPid = 7;
+        QCOMPARE(TextMirrorMonitor::fieldKeyOf(r), QStringLiteral("r:42.7"));
+        QCOMPARE(TextMirrorMonitor::windowKeyOf(r), QStringLiteral("w:10"));
+        r.runtimeId.clear();
+        QCOMPARE(TextMirrorMonitor::fieldKeyOf(r), QStringLiteral("h:ab"));
+        r.elHwnd = 0;
+        QCOMPARE(TextMirrorMonitor::fieldKeyOf(r), QStringLiteral("t:10"));
+        r.topHwnd = 0;
+        QCOMPARE(TextMirrorMonitor::windowKeyOf(r), QStringLiteral("p:7"));
+        r.elPid = 0;
+        QVERIFY(TextMirrorMonitor::windowKeyOf(r).isEmpty());
+
+        // 影子消费（既有身份）：首拍只建影子，二拍起产增删事件（delete
+        // 携带被删原文）
+        TM s;
+        const QString field = QStringLiteral("r:1.2.3");
+        QVERIFY(s.applyRead(field, QStringLiteral("w:1"), QStringLiteral("hello")).isEmpty());
+        const auto evs = s.applyRead(field, QStringLiteral("w:1"),
+                                     QStringLiteral("hello world"));
+        QCOMPARE(evs.size(), 1);
+        QCOMPARE(evs.front().kind, QStringLiteral("insert"));
+        QCOMPARE(evs.front().text, QStringLiteral(" world"));
+        QVERIFY(evs.front().removed.isEmpty());
+        QCOMPARE(evs.front().field, field);
+        const auto evs2 = s.applyRead(field, QStringLiteral("w:1"), QStringLiteral("hello"));
+        QCOMPARE(evs2.size(), 1);
+        QCOMPARE(evs2.front().kind, QStringLiteral("delete"));
+        QCOMPARE(evs2.front().removed, QStringLiteral(" world"));
+
+        // churn 护栏：两侧齐变合计超阈值判为窗口滑动伪变化（宁缺毋滥丢事件、
+        // 基线照常推进）；纯增长不受护栏限制（大段粘贴必须抄全）。f2 与 field
+        // 同窗口但内容毫无重叠（重叠 0 < 8），续接不采信 → 静默建影子
+        const QString big1 = QString(400, QLatin1Char('a'));
+        const QString big2 = QString(400, QLatin1Char('b'));
+        QVERIFY(s.applyRead(QStringLiteral("f2"), QStringLiteral("w:1"), big1).isEmpty());
+        QVERIFY(s.applyRead(QStringLiteral("f2"), QStringLiteral("w:1"), big2).isEmpty()); // 400+400 > 600 丢弃
+        QVERIFY(s.applyRead(QStringLiteral("f2"), QStringLiteral("w:1"), big2).isEmpty()); // 稳态无事件
+        const auto evs3 = s.applyRead(field, QStringLiteral("w:1"),
+                                      QStringLiteral("hello world")
+                                          + QString(800, QLatin1Char('p')));
+        QCOMPARE(evs3.size(), 1);
+        QCOMPARE(evs3.front().kind, QStringLiteral("insert"));
+
+        // 密码字段影子重置（独立窗口免续接干扰）：dropShadow 后再读按首拍
+        // 处理，密码框现状不会以增量形式带出
+        s.applyRead(QStringLiteral("pwd"), QStringLiteral("w:2"), QStringLiteral("secret-1"));
+        s.dropShadow(QStringLiteral("pwd"));
+        QVERIFY(s.applyRead(QStringLiteral("pwd"), QStringLiteral("w:2"), QStringLiteral("secret-2")).isEmpty());
+
+        // LRU 上限：影子数恒 ≤ kMaxFieldShadows；k 系列同窗口但重叠 1 < 8
+        // 不续接，全部静默
+        for (int i = 0; i < 6; ++i)
+            QVERIFY(s.applyRead(QStringLiteral("k%1").arg(i), QStringLiteral("w:9"),
+                                QStringLiteral("x")).isEmpty());
+        QVERIFY(s.shadowCount() <= TM::kMaxFieldShadows);
+    }
+
+    // ---- TextMirrorStore：同窗口续接（UI 重建不吞增量，T-066 验收期修复） ----
+    void text_mirror_store_continuation()
+    {
+        using TM = TextMirrorStore;
+        TM s;
+        const QString old = QStringLiteral("今天讨论第五章的内容安排");
+        QVERIFY(s.applyRead(QStringLiteral("a1"), QStringLiteral("w:c"), old).isEmpty()); // 首拍
+
+        // UI 重建：同窗口新身份、内容小步前进 → 续接补记，field=新身份
+        const auto evs = s.applyRead(QStringLiteral("a2"), QStringLiteral("w:c"),
+                                     old + QStringLiteral("补充"));
+        QCOMPARE(evs.size(), 1);
+        QCOMPARE(evs.front().kind, QStringLiteral("insert"));
+        QCOMPARE(evs.front().text, QStringLiteral("补充"));
+        QCOMPARE(evs.front().field, QStringLiteral("a2"));
+
+        // 重建后内容未变：迁基线不产事件
+        QVERIFY(s.applyRead(QStringLiteral("a3"), QStringLiteral("w:c"),
+                            old + QStringLiteral("补充")).isEmpty());
+
+        // 重建 + 编辑：续接差分产 replace（改字）
+        const auto evs2 = s.applyRead(QStringLiteral("a4"), QStringLiteral("w:c"),
+                                      QString(old + QStringLiteral("补充"))
+                                          .replace(QStringLiteral("五章"),
+                                                   QStringLiteral("四章")));
+        QCOMPARE(evs2.size(), 1);
+        QCOMPARE(evs2.front().kind, QStringLiteral("replace"));
+        QCOMPARE(evs2.front().removed, QStringLiteral("五"));
+        QCOMPARE(evs2.front().text, QStringLiteral("四"));
+
+        // 跨窗口不续接：陌生窗口静默建影子
+        QVERIFY(s.applyRead(QStringLiteral("b1"), QStringLiteral("w:other"),
+                            QStringLiteral("完全不同的一段文字内容")).isEmpty());
+
+        // 重叠不足（2 < 8）不续接：短内容静默
+        QVERIFY(s.applyRead(QStringLiteral("c1"), QStringLiteral("w:c"),
+                            QStringLiteral("补充")).isEmpty());
+
+        // 窗口身份缺失不续接
+        QVERIFY(s.applyRead(QStringLiteral("d1"), QString(), old).isEmpty());
     }
 
     // ---- OwnWriteGuard：自身写入 seq 记录与排除 ----

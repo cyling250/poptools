@@ -74,13 +74,10 @@ public:
     void setSelectionTranslateHotKey(quint32 vk, quint32 modifiers);
 
     // ---- 活动监控 ----
-    // 总开关（默认关闭；开启即授权键盘键入记录 + 窗口时间线 + OCR 快照，
+    // 总开关（默认关闭；开启即授权文本镜像 + 窗口时间线 + OCR 快照，
     // 钩子常驻，红线2豁免条款见 docs/handover.md）
     bool monitorEnabled() const;
     void setMonitorEnabled(bool on);
-    // 密码框自动打码（焦点在密码框时记 ● 占位，不落明文）
-    bool monitorMaskPasswords() const;
-    void setMonitorMaskPasswords(bool on);
     // 输入空闲阈值（秒）：超过即判定离开，时间线段以最后输入时刻收尾
     int monitorIdleThresholdSec() const;
     void setMonitorIdleThresholdSec(int sec);
