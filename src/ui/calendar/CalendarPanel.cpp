@@ -15,8 +15,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QPainter>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <algorithm>
@@ -132,6 +135,78 @@ void CalendarPanel::render(bool force)
     renderFrame(m_hover, m_hoverHint, false);
 }
 
+// ---- Goody 工作摘要（T-067） ----
+
+// 注入查询槽即强制刷新（CalendarModule init 时 Goody 槽位已就绪）
+void CalendarPanel::setDigestQuery(std::function<QString(int, int, int)> daily,
+                                   std::function<QString(int, int)> monthly)
+{
+    m_digestQuery = std::move(daily);
+    m_monthlyQuery = std::move(monthly);
+    refreshSummaries(true);
+}
+
+// 重建显示月摘要缓存（同月且非强制直接跳过——render 热路径去重）；查询为
+// 逐日文件存在性 stat（≤31 次，月/信号驱动频率，非热路径）
+void CalendarPanel::refreshSummaries(bool force)
+{
+    const QString key = QStringLiteral("%1-%2")
+                            .arg(m_year)
+                            .arg(m_month, 2, 10, QLatin1Char('0'));
+    if (!force && m_digestViewMonth == key)
+        return;
+    m_digestViewMonth = key;
+    m_digestView = CalendarDigestView();
+    m_digestView.armedDate = m_modalDate;
+    if (m_digestQuery) {
+        const QDate first(m_year, m_month, 1);
+        const int days = first.daysInMonth();
+        for (int d = 1; d <= days; ++d) {
+            const QString p = m_digestQuery(m_year, m_month, d);
+            if (!p.isEmpty())
+                m_digestView.daily.insert(QDate(m_year, m_month, d), p);
+        }
+    }
+    if (m_monthlyQuery)
+        m_digestView.monthly = m_monthlyQuery(m_year, m_month);
+    render();
+}
+
+// 摘要以 txt 弹出（系统 notepad，用户指定形态）：md 原文即纯文本，写
+// %TEMP% 副本后 startDetached（副本归 notepad 所有，PopTools 不清理）
+void CalendarPanel::openDigestInNotepad(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+    const QString base = QFileInfo(path).completeBaseName(); // 2026-11-18 / 2026-11
+    const QString txt = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                        + QStringLiteral("/PopTools工作摘要_") + base
+                        + QStringLiteral(".txt");
+    QFile out(txt);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    out.write(f.readAll());
+    out.close();
+    QProcess::startDetached(QStringLiteral("notepad.exe"), {txt});
+}
+
+// 编辑器面板开启期间的摘要链接分发：仅激活日期（双击打开面板的那天）的
+// 链接热区生效；未命中返回 false（事件按模态抑制丢弃）
+bool CalendarPanel::handleSummaryLinkClick(const QPoint &p)
+{
+    if (!m_layout.has_value() || !m_modalDate.isValid())
+        return false;
+    QDate date;
+    if (!m_layout->hitCellSummaryLink(p, &date) || date != m_modalDate)
+        return false;
+    const QString path = m_digestView.daily.value(date);
+    if (path.isEmpty())
+        return false;
+    openDigestInNotepad(path);
+    return true;
+}
+
 // S-04：render()/renderDuringAdjust() 的公共体（原两函数除 m_adjusting 守卫与
 // hover/hint 实参外逐行相同）。先画进私有暂存帧再整帧发布：直接在共享位图上
 // "清屏→重绘"的 10~30ms 窗口内，explorer 的擦除流程可能采到近全透明的中间态
@@ -143,12 +218,13 @@ void CalendarPanel::renderFrame(const QPoint &hover, const QString &hoverHint,
         return;
     if (!m_renderer || !m_surface || !m_surface->canvas().isValid())
         return;
+    refreshSummaries(false); // 跨月自动重建缓存（同月键直接跳过，无开销）
     QImage &canvasImage = m_surface->canvas().image();
     if (m_staging.size() != canvasImage.size() || m_staging.format() != canvasImage.format())
         m_staging = QImage(canvasImage.size(), canvasImage.format());
     QPainter g(&m_staging);
     m_layout = m_renderer->render(&g, m_surface->canvas(), m_settings, m_store, m_today, m_year,
-                                  m_month, hover, hoverHint, false);
+                                  m_month, hover, hoverHint, false, m_digestView);
     g.end();
     m_surface->commitSurface();
 }
@@ -196,6 +272,10 @@ void CalendarPanel::onLeave()
 
 void CalendarPanel::onClick(const QPoint &p)
 {
+    // 编辑器面板开启期间：当日摘要链接热区仍可点（T-067"双击开面板后才可
+    // 点"）；其余事件维持模态抑制
+    if (m_modal && handleSummaryLinkClick(p))
+        return;
     if (!eventsAccepted())
         return;
     handleSingleClick(p);
@@ -217,15 +297,23 @@ void CalendarPanel::updateHover(const QPoint &p)
     }
     m_hover = p;
     // 头部按钮只做悬停底色，不弹文字气泡（气泡压住星期表头，被用户否掉）；
-    // 仅首次使用引导气泡保留
+    // 仅首次使用引导气泡保留。月报链接/激活摘要链接悬停同走"变化才重绘"
     QString hint;
     const int hh = m_layout->hitHeader(p);
-    if (hh < 0 && m_settings.showGuide && m_layout->guidePill.contains(p)) {
+    const bool monthHov = !m_digestView.monthly.isEmpty() && m_layout->monthLink.contains(p);
+    QDate linkDate;
+    const bool armedHov = m_digestView.armedDate.isValid()
+                          && m_layout->hitCellSummaryLink(p, &linkDate)
+                          && linkDate == m_digestView.armedDate;
+    if (hh < 0 && !monthHov && m_settings.showGuide && m_layout->guidePill.contains(p)) {
         hint = QStringLiteral("调整日历清单的位置和大小");
     }
-    if (hh != m_lastHeaderHover || hint != m_hoverHint) {
+    if (hh != m_lastHeaderHover || hint != m_hoverHint || monthHov != m_lastMonthLinkHov
+        || armedHov != m_lastArmedLinkHov) {
         m_lastHeaderHover = hh;
         m_hoverHint = hint;
+        m_lastMonthLinkHov = monthHov;
+        m_lastArmedLinkHov = armedHov;
         render();
     }
 }
@@ -274,6 +362,11 @@ void CalendarPanel::handleSingleClick(const QPoint &p)
         m_settings.showGuide = false;
         m_settings.save();
         render();
+        return;
+    }
+    // 月报链接（头部左上角，T-067）：有月报才可点，点击 notepad 弹 txt
+    if (!m_digestView.monthly.isEmpty() && m_layout->monthLink.contains(p)) {
+        openDigestInNotepad(m_digestView.monthly);
         return;
     }
     QDate date;
@@ -328,23 +421,44 @@ void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
     y = std::max(screen.top() + 10, y);
     auto *editor = new CalendarEventEditor(date, &m_store, logicalPos(QPoint(x, y)), nullptr);
     trackModal(editor); // m_modal/m_modalWidget 唯一权威置位处（S-08 删去开头重复裸置位）
+    m_modalDate = date; // 该日摘要链接随面板开启而激活（T-067）
     // 外点关闭兜底：编辑器靠 WindowDeactivate 关闭，但双击源自桌面（前台进程是
     // explorer），activateWindow 作为后台进程常被 Windows 前台锁拒绝——编辑器
     // 从未激活过，外点就永远不会"失焦"，表现即"有时点外面关不掉、且无规律"
     //（实为激活是否成功无规律）。共享 WH_MOUSE_LL 按需装卸（划词卡片先例，
-    // 红线 2）：点编辑器外即保存关闭，编辑器销毁即卸钩
+    // 红线 2）：点编辑器外即保存关闭，编辑器销毁即卸钩。T-067 豁免：点在激活
+    // 日期的摘要链接热区上不关面板（链接可点的前提），notepad 弹出由面板
+    // onClick 路径处理（UP 事件），此处只放行不重复弹
     if (!m_editorHook) {
         m_editorHook = new GlobalMouseHook(this);
         connect(m_editorHook, &GlobalMouseHook::mousePressed, this,
                 [this](const QPoint &nativePos) {
                     auto *ed = qobject_cast<CalendarEventEditor *>(m_modalWidget.data());
-                    if (ed && !ed->frameGeometry().contains(logicalPos(nativePos)))
+                    if (!ed)
+                        return;
+                    if (m_modalDate.isValid() && m_layout.has_value()) {
+                        QDate linkDate;
+                        if (m_layout->hitCellSummaryLink(nativePos, &linkDate)
+                            && linkDate == m_modalDate
+                            && m_digestView.daily.contains(linkDate))
+                            return; // 链接热区：不关面板，UP 事件走面板路径
+                    }
+                    if (!ed->frameGeometry().contains(logicalPos(nativePos)))
                         ed->saveAndClose();
                 });
     }
     m_editorHook->start();
-    connect(editor, &QObject::destroyed, this,
-            [this] { if (m_editorHook) m_editorHook->stop(); });
+    connect(editor, &QObject::destroyed, this, [this] {
+        if (m_editorHook)
+            m_editorHook->stop();
+        if (m_modalDate.isValid()) {
+            m_modalDate = QDate();
+            if (m_digestView.armedDate.isValid()) {
+                m_digestView.armedDate = QDate();
+                render(); // 链接去激活态
+            }
+        }
+    });
     editor->show();
     editor->raise();
     editor->activateWindow();

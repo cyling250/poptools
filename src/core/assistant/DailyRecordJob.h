@@ -35,6 +35,11 @@ public:
     void runForDate(const QString &date,
                     const std::function<void(bool ok, const QString &error)> &done);
 
+    // 起居注刷新（T-067）：Goody 自主判断今天是否值得重写日摘要——全程
+    // 静默（绝不弹窗/气泡），节流防 LLM 滥调。今天未总结且有数据则不受
+    // 节流（首次成文优先）；done(hasRegenerated) 可空
+    void maybeRefreshToday(const std::function<void(bool)> &done = {});
+
     // 该日是否有日志数据且未总结（processPending 的扫描口径）
     static bool isPendingDay(const QString &monitorDir, const QString &date);
 
@@ -51,6 +56,8 @@ private:
     int m_processed = 0;
     QString m_lastError;
     bool m_busy = false;      // 重入闸门：processPending/runForDate 全入口统一拒绝并发轮次
+    qint64 m_lastRefreshMs = 0;  // 起居注：上次今日摘要成文时刻（节流用）
+    qint64 m_lastFingerprint = -1; // 起居注：当日五流字节数指纹（-1=未建立）
 };
 
 } // namespace poptools

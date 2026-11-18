@@ -5,6 +5,7 @@
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QStandardPaths>
@@ -15,6 +16,7 @@
 #include "core/assistant/DailyRecordJob.h"
 #include "core/assistant/McpStdioClient.h"
 #include "core/assistant/MemoryStore.h"
+#include "core/assistant/MonthlyRecordJob.h"
 #include "core/assistant/Scheduler.h"
 #include "core/assistant/WorkingMemory.h"
 #include "core/monitor/ActivityStore.h"
@@ -87,15 +89,49 @@ void GoodyModule::init(AppServices &services)
     registerBuiltinTools();
     setupMcp();
 
-    // ---- 本日工作记录：启动补账 + 每日到点 + 工具手动触发 ----
+    // ---- 本日工作记录 + 月度摘要（T-067）：启动补账 + 每日到点 + 静默
+    // 起居注刷新 + 开机滚动月报 + 工具手动触发 ----
     m_recordJob = new DailyRecordJob(monitorDir(), goodyDir(), this);
+    m_monthlyJob = new MonthlyRecordJob(goodyDir(), this);
     m_scheduler = new Scheduler(this);
+    m_refreshTimer = new QTimer(this);
+    m_refreshTimer->setInterval(20 * 60 * 1000); // 起居注心跳：20min 一判
+    connect(m_refreshTimer, &QTimer::timeout, this, [this] {
+        m_recordJob->maybeRefreshToday([this](bool changed) {
+            if (changed && m_services)
+                emit m_services->goodySummariesChanged(); // 静默：只发数据变更
+        });
+    });
+    // T-067：工作摘要查询槽（桌面日历消费）——路径即存在性，内容由消费方读
+    services.goodyDailyDigestPath = [this](int y, int m, int d) {
+        const QDate date(y, m, d);
+        if (!date.isValid())
+            return QString();
+        const QString p = goodyDir() + QStringLiteral("/daily/")
+                          + date.toString(QStringLiteral("yyyy-MM-dd"))
+                          + QStringLiteral(".md");
+        return QFile::exists(p) ? p : QString();
+    };
+    services.goodyMonthlyDigestPath = [this](int y, int m) {
+        const QString p = MonthlyRecordJob::monthPath(goodyDir(), y, m);
+        return QFile::exists(p) ? p : QString();
+    };
     applySummarySchedule();
-    // 启动补账（延迟 5s：等事件循环与网络就绪；只补历史日，今天留给定时点）
+    // 启动（延迟 5s：等事件循环与网络就绪）：历史日补账 + 当月滚动月报
+    //（【月报更新】；无日摘要不烧 LLM；往月冻结不自动重算）
     if (Settings::instance().assistantAutoSummarize()) {
         QTimer::singleShot(5000, this, [this] {
-            if (Settings::instance().assistantAutoSummarize())
-                m_recordJob->processPending(false, [](int, const QString &) {});
+            if (!Settings::instance().assistantAutoSummarize())
+                return;
+            m_recordJob->processPending(false, [](int, const QString &) {});
+            const QDate today = QDate::currentDate();
+            if (MonthlyRecordJob::monthHasDailyData(goodyDir(), today.year(),
+                                                    today.month()))
+                m_monthlyJob->runForMonth(today.year(), today.month(),
+                                          [this](bool ok, const QString &) {
+                                              if (ok && m_services)
+                                                  emit m_services->goodySummariesChanged();
+                                          });
         });
     }
 
@@ -177,7 +213,8 @@ void GoodyModule::applyPermissionSettings()
     m_perm->setShellAllowPrefixes(s.assistantShellAllowPrefixes());
 }
 
-// 总结调度接线（init 与设置变更共用）：按当前设置注册/启停每日任务
+// 总结调度接线（init 与设置变更共用）：按当前设置注册/启停每日任务与
+// 起居注心跳（T-067）
 void GoodyModule::applySummarySchedule()
 {
     if (!m_scheduler || !m_recordJob)
@@ -185,19 +222,21 @@ void GoodyModule::applySummarySchedule()
     const Settings &s = Settings::instance();
     if (!s.assistantAutoSummarize()) {
         m_scheduler->stop();
+        if (m_refreshTimer)
+            m_refreshTimer->stop();
         return;
     }
     m_scheduler->setDailyTask(
         QStringLiteral("dailySummary"),
         QTime::fromString(s.assistantSummaryTime(), QStringLiteral("HH:mm")),
-        [this] { m_recordJob->processPending(true, [this](int n, const QString &err) {
-                     if (n > 0 && m_services && m_services->notify)
-                         m_services->notify(QStringLiteral("Goody 管家"),
-                                            QStringLiteral("已生成 %1 份本日工作记录")
-                                                .arg(n));
+        [this] { m_recordJob->processPending(true, [](int n, const QString &err) {
+                     // 起居注纪律（T-067）：静默成文，不弹气泡不通知
+                     Q_UNUSED(n);
                      Q_UNUSED(err);
                  }); });
     m_scheduler->start();
+    if (m_refreshTimer)
+        m_refreshTimer->start();
 }
 
 // 内置工具注册：time.now 有 has() 防重（其余 registerTool 覆盖语义天然幂等）；
@@ -257,6 +296,43 @@ void GoodyModule::registerBuiltinTools()
             });
         };
         m_registry->registerTool(gen);
+
+        // 重算指定月份的滚动月报（用户："把 10 月的月报重新生成一下"）。
+        // 当月开机自动重算；往月冻结，仅经本工具（对话）触发——无任何按钮
+        ToolDef genM;
+        genM.name = QStringLiteral("app.generate_monthly_record");
+        genM.readOnly = true; // 只读日摘要 + 写 goody 自己的 monthly 目录
+        genM.description = QStringLiteral(
+            "生成或重算指定月份的工作月报（汇总该月每日工作记录 + 大模型归纳，"
+            "写入 goody/monthly/<年-月>.md）。year/month 省略时取当前月。");
+        genM.parameters = QJsonObject{
+            {"type", QStringLiteral("object")},
+            {"properties",
+             QJsonObject{{"year", QJsonObject{{"type", QStringLiteral("integer")},
+                                              {"description", QStringLiteral("四位年份，默认当前年")}}},
+                         {"month", QJsonObject{{"type", QStringLiteral("integer")},
+                                               {"description", QStringLiteral("1-12，默认当前月")}}}}}};
+        genM.fn = [this](const QJsonObject &args,
+                         const std::function<void(QJsonObject)> &done) {
+            const QDate today = QDate::currentDate();
+            const int year = args.value(QStringLiteral("year")).toInt(today.year());
+            const int month = args.value(QStringLiteral("month")).toInt(today.month());
+            m_monthlyJob->runForMonth(year, month,
+                                      [this, year, month, done](bool ok, const QString &error) {
+                                          if (ok) {
+                                              if (m_services)
+                                                  emit m_services->goodySummariesChanged();
+                                              done(QJsonObject{
+                                                  {"ok", true},
+                                                  {"note", QStringLiteral("已生成 %1 月报（goody/monthly）")
+                                                               .arg(MonthlyRecordJob::monthKey(
+                                                                   year, month))}});
+                                          } else {
+                                              done(QJsonObject{{"ok", false}, {"error", error}});
+                                          }
+                                      });
+        };
+        m_registry->registerTool(genM);
     }
 }
 

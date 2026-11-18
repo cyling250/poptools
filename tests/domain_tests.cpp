@@ -24,6 +24,7 @@
 #include "core/assistant/LlmClient.h"
 #include "core/assistant/McpStdioClient.h"
 #include "core/assistant/MemoryStore.h"
+#include "core/assistant/MonthlyRecordJob.h"
 #include "core/assistant/MonitorQueryTool.h"
 #include "core/assistant/PermissionManager.h"
 #include "core/assistant/Scheduler.h"
@@ -2813,6 +2814,62 @@ private slots:
 
         // 窗口身份缺失不续接
         QVERIFY(s.applyRead(QStringLiteral("d1"), QString(), old).isEmpty());
+    }
+
+    // ---- DailyAggregator：textlog 文本镜像摘录段（T-067 起居注数据链） ----
+    void daily_aggregator_textlog_section()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString dayDir = dir.filePath(QStringLiteral("2026-11-18"));
+        QDir().mkpath(dayDir);
+        {
+            QFile f(dayDir + QStringLiteral("/textlog.jsonl"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            const auto row = [](const char *kind, const char *text, const char *removed) {
+                return QStringLiteral(
+                           R"({"app":"zcode","kind":"%1","removed":"%2","text":"%3","title":"聊天","ts":1})")
+                    .arg(kind, removed, text);
+            };
+            f.write(row("insert", "你好世界", "").toUtf8() + QByteArrayLiteral("\n"));
+            f.write(row("replace", "测量", "ce").toUtf8() + QByteArrayLiteral("\n"));
+            f.write(row("delete", "", "旧段落").toUtf8() + QByteArrayLiteral("\n"));
+        }
+        bool done = false;
+        bool ok = false;
+        QString digest;
+        DailyAggregator::buildDigestAsync(dayDir, 12000, this,
+                                          [&](bool o, const QString &d) {
+                                              done = true;
+                                              ok = o;
+                                              digest = d;
+                                          });
+        QTRY_VERIFY_WITH_TIMEOUT(done, 5000);
+        QVERIFY(ok);
+        QVERIFY(digest.contains(QStringLiteral("【输入原文摘录】")));
+        QVERIFY(digest.contains(QStringLiteral("你好世界 测量")));
+        QVERIFY(digest.contains(QStringLiteral("删5字"))); // "ce"(2) + "旧段落"(3)
+    }
+
+    // ---- MonthlyRecordJob：月份键/路径/数据存在性（T-067 月报） ----
+    void monthly_record_job_paths_and_presence()
+    {
+        using MRJ = MonthlyRecordJob;
+        QCOMPARE(MRJ::monthKey(2026, 11), QStringLiteral("2026-11"));
+        QCOMPARE(MRJ::monthKey(2026, 3), QStringLiteral("2026-03"));
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString goody = dir.path();
+        QVERIFY(!MRJ::monthHasDailyData(goody, 2026, 11));
+        QDir().mkpath(goody + QStringLiteral("/daily"));
+        QFile f(goody + QStringLiteral("/daily/2026-11-05.md"));
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("# 本日工作记录（2026-11-05）\n测试\n");
+        f.close();
+        QVERIFY(MRJ::monthHasDailyData(goody, 2026, 11));
+        QVERIFY(!MRJ::monthHasDailyData(goody, 2026, 10)); // 往月无数据
+        QCOMPARE(MRJ::monthPath(goody, 2026, 11),
+                 goody + QStringLiteral("/monthly/2026-11.md"));
     }
 
     // ---- OwnWriteGuard：自身写入 seq 记录与排除 ----

@@ -1,11 +1,14 @@
 #include "DailyRecordJob.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QSaveFile>
+#include <QThreadPool>
 
 #include "../monitor/ActivityStore.h" // meta.json 的 version 常量口径
 #include "DailyAggregator.h"
@@ -16,6 +19,7 @@ namespace poptools {
 
 namespace {
 constexpr int kDigestBudget = 12000; // 摘要字符预算
+constexpr qint64 kRefreshThrottleMs = 60 * 60 * 1000; // 起居注重写节流：≥1h
 
 // 每日总结系统提示词：四节式工作记录
 const char *kSummarySystemPrompt =
@@ -62,7 +66,8 @@ bool DailyRecordJob::isPendingDay(const QString &monitorDir, const QString &date
     const QString dayDir = monitorDir + QLatin1Char('/') + date;
     bool hasData = false;
     for (const QString &stream : {QStringLiteral("timeline"), QStringLiteral("keys"),
-                                  QStringLiteral("ocrtext")}) {
+                                  QStringLiteral("ocrtext"),
+                                  QStringLiteral("textlog")}) {
         QFile f(dayDir + QLatin1Char('/') + stream + QStringLiteral(".jsonl"));
         if (f.exists() && f.size() > 0) {
             hasData = true;
@@ -140,6 +145,68 @@ void DailyRecordJob::runForDate(const QString &date,
                                           m_currentDate = date;
                                           summarizeDay(date, digest);
                                       });
+}
+
+// 起居注刷新（T-067）：活动指纹（当日五流字节数和，worker 线程 stat，
+// 微秒级元数据读）变化且距上次成文 ≥kRefreshThrottleMs 才重生成；今天
+// 未总结且有数据则不受节流（首次成文优先）。全程静默，回调只报结果
+void DailyRecordJob::maybeRefreshToday(const std::function<void(bool)> &done)
+{
+    const QString today = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+    const QString dayDir = m_monitorDir + QLatin1Char('/') + today;
+    const QPointer<QObject> anchor(this);
+    QThreadPool::globalInstance()->start([this, anchor, today, dayDir, done] {
+        qint64 fp = 0;
+        for (const QString &stream : {QStringLiteral("timeline"),
+                                      QStringLiteral("keys"),
+                                      QStringLiteral("ocrtext"),
+                                      QStringLiteral("textlog"),
+                                      QStringLiteral("clipboard")}) {
+            const QFileInfo f(dayDir + QLatin1Char('/') + stream +
+                              QStringLiteral(".jsonl"));
+            fp += f.size();
+        }
+        if (!anchor) {
+            if (done)
+                done(false);
+            return;
+        }
+        QMetaObject::invokeMethod(
+            anchor,
+            [this, today, fp, done] {
+                // 与 processPending/runForDate 同款闸门；无 Key 静默跳过
+                if (m_busy || m_client->busy()
+                    || Settings::instance().assistantApiKey().trimmed().isEmpty()) {
+                    if (done)
+                        done(false);
+                    return;
+                }
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                const bool pending = isPendingDay(m_monitorDir, today);
+                if (!pending
+                    && (fp == m_lastFingerprint
+                        || now - m_lastRefreshMs < kRefreshThrottleMs)) {
+                    m_lastFingerprint = fp; // 无增量/节流中：只推进指纹基线
+                    if (done)
+                        done(false);
+                    return;
+                }
+                if (fp == 0) {
+                    if (done)
+                        done(false); // 当日零数据：连首次成文都不值得
+                    return;
+                }
+                m_lastFingerprint = fp;
+                m_lastRefreshMs = now;
+                runForDate(today, [this, done](bool ok, const QString &) {
+                    if (ok)
+                        m_lastRefreshMs = QDateTime::currentMSecsSinceEpoch();
+                    if (done)
+                        done(ok);
+                });
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void DailyRecordJob::runNext()
@@ -230,6 +297,10 @@ void DailyRecordJob::finishDay(bool ok, const QString &error)
     ++m_processed;
     if (!ok)
         m_lastError = error;
+    // 定时/补账路径的今日成文也推进起居注节流（今天 22:00 总结后，心跳
+    // 不再因同指纹反复重写）
+    if (ok && m_currentDate == QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")))
+        m_lastRefreshMs = QDateTime::currentMSecsSinceEpoch();
     runNext();
 }
 

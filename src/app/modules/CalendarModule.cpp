@@ -26,6 +26,16 @@ void CalendarModule::init(AppServices &services)
             if (panel && panel->surface())
                 panel->surface()->startDuty();
         });
+        // T-067：Goody 工作摘要查询槽注入（组合根装配序保证 Goody 先于日历
+        // init，槽位已发布）+ 数据变更信号 → 刷新缓存重绘（摘要静默生成后
+        // 日历链接自动出现/更新）
+        m_panel->setDigestQuery(services.goodyDailyDigestPath,
+                                services.goodyMonthlyDigestPath);
+        QObject::connect(&services, &AppServices::goodySummariesChanged, m_panel,
+                         [panel = m_panel] {
+                             if (panel)
+                                 panel->refreshSummaries(true);
+                         });
     }
 
     // 能力槽发布：日历设置入口已并入应用设置对话框「桌面日历」页（组合根发布

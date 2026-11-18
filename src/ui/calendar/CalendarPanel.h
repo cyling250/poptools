@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDate>
+#include <functional>
 #include <QObject>
 #include <QPointer>
 #include <QPoint>
@@ -60,6 +61,14 @@ public:
     void exportTasks();
     void importTasks();
 
+    // ---- Goody 工作摘要（T-067；CalendarModule 注入 GoodyModule 查询槽） ----
+    // 注入摘要查询槽（GoodyModule 发布；注入即强制刷新一次缓存）
+    void setDigestQuery(std::function<QString(int year, int month, int day)> daily,
+                        std::function<QString(int year, int month)> monthly);
+    // 重建显示月的摘要缓存并重绘。force=false 时同月直接跳过（render 热路径
+    // 去重）；翻月/goodySummariesChanged 信号走 force=true
+    void refreshSummaries(bool force);
+
 private:
     // 调整预览帧渲染（T-063 移植）：仅面板尺寸变化才重渲染（节流），移动模式
     // overlay 平移既有帧——桌面擦除链路退出拖动感知路径（跟手天花板）
@@ -77,10 +86,15 @@ private:
     void showInfo(const QString &title, const QString &text);
     // 悬停按语义目标重绘（P-063）：仅头部按钮下标/胶囊文案变化才 render
     void updateHover(const QPoint &p);
-    // 单击分发：头部翻页/调整 → 胶囊消失 → 格子（仅消引导，不开编辑器）
+    // 单击分发：头部翻页/调整 → 月报链接（T-067）→ 胶囊消失 → 格子（仅消引导）
     void handleSingleClick(const QPoint &p);
     // 双击显示月格子 → 打开当日日程编辑器
     void handleDoubleClick(const QPoint &p);
+    // 编辑器面板开启期间的摘要链接分发（T-067"双击开面板后才可点"）：仅
+    // 激活日期的链接热区生效，命中即 notepad 弹 txt；未命中返回 false
+    bool handleSummaryLinkClick(const QPoint &p);
+    // 摘要以 txt 弹出（系统 notepad，用户指定）：md 原文写 %TEMP% 副本
+    void openDigestInNotepad(const QString &path);
     void trackModal(QWidget *w);
     void centerOnPanel(QWidget *w);
     // explorer 转发事件是否放行。m_modal 管 trackModal 弹窗；原生文件对话框
@@ -106,9 +120,16 @@ private:
     qint64 m_previewMs = 0;  // 预览渲染节流：上次渲染时刻
     bool m_previewPending = false; // 节流补帧定时器在飞
     QPointer<QWidget> m_modalWidget;
+    QDate m_modalDate;         // 编辑器打开中的日期（该日摘要链接激活，T-067）
     QTimer *m_clock = nullptr;
     QTimer *m_wallpaperTimer = nullptr;
     GlobalMouseHook *m_editorHook = nullptr; // 日程编辑器外点关闭兜底（随编辑器装卸）
+    std::function<QString(int, int, int)> m_digestQuery; // Goody 查询槽转发（可空）
+    std::function<QString(int, int)> m_monthlyQuery;
+    CalendarDigestView m_digestView; // 显示月的摘要缓存（渲染唯一数据源）
+    QString m_digestViewMonth;       // 缓存对应月份键（热路径去重）
+    bool m_lastMonthLinkHov = false; // 月报链接悬停态（变化才重绘）
+    bool m_lastArmedLinkHov = false; // 激活摘要链接悬停态（变化才重绘）
 };
 
 } // namespace poptools

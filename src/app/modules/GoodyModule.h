@@ -8,6 +8,7 @@
 #include <QObject>
 
 class QAction;
+class QTimer;
 
 namespace poptools {
 
@@ -19,6 +20,7 @@ class GoodyWindow;
 class LlmClient;
 class McpStdioClient;
 class MemoryStore;
+class MonthlyRecordJob;
 class PermissionManager;
 class Scheduler;
 class ToolRegistry;
@@ -90,7 +92,9 @@ private:
     GoodyFloatingBall *m_ball = nullptr; // T-050
     bool m_working = false;              // T-050：工作态缓存（去重广播用）
     DailyRecordJob *m_recordJob = nullptr; // 本日工作记录任务（P4）
+    MonthlyRecordJob *m_monthlyJob = nullptr; // 月度滚动月报任务（T-067）
     Scheduler *m_scheduler = nullptr;      // 每日到点调度（P4）
+    QTimer *m_refreshTimer = nullptr;      // 起居注心跳：静默判断今日摘要重写（T-067）
     MemoryStore *m_memory = nullptr;       // 长期记忆（P5）
     WorkingMemory *m_work = nullptr;       // 瞬时工作记忆（P5）
     QList<McpStdioClient *> m_mcpClients;  // MCP 服务器连接（P6；start 幂等，

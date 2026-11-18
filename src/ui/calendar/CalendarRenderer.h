@@ -16,6 +16,15 @@ namespace poptools {
 
 class DesktopSharedCanvas;
 
+// Goody 工作摘要视图（T-067）：日历链接绘制的唯一数据源，由面板按显示月
+// 缓存（GoodyModule 查询槽构建，goodySummariesChanged/翻月时刷新）
+struct CalendarDigestView
+{
+    QHash<QDate, QString> daily; // 有摘要的日期 → md 路径
+    QString monthly;             // 当月月报 md 路径（空=未生成，链接不画）
+    QDate armedDate;             // 编辑器打开中的日期：该日链接激活高亮（可点击）
+};
+
 // ============================================================
 // 日历渲染器（照搬 rlqd CalendarClone/CalendarRenderer.cs，GDI+ → QPainter）：
 // 毛玻璃壁纸底 + 深色玻璃 + 月份格子（九宫格皮肤贴图）+ 农历/节气/节日/
@@ -31,10 +40,12 @@ public:
     ~CalendarRenderer();
     Q_DISABLE_COPY(CalendarRenderer)
 
-    // 绘制整幅画面并返回本次布局（供命中测试使用）
+    // 绘制整幅画面并返回本次布局（供命中测试使用）；digests 为摘要链接视图
+    //（空视图 = 不画链接，调整预览路径用默认值）
     CalendarLayout render(QPainter *g, DesktopSharedCanvas &canvas, const CalendarSettings &settings,
                           const CalendarTaskStore &store, const QDate &today, int year, int month,
-                          const QPoint &hover, const QString &hoverHint, bool adjusting);
+                          const QPoint &hover, const QString &hoverHint, bool adjusting,
+                          const CalendarDigestView &digests = CalendarDigestView());
 
     void refreshWallpaper() { m_wallpaper.refresh(); }
 

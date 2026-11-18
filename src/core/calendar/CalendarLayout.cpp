@@ -40,6 +40,10 @@ CalendarLayout::CalendarLayout(const QRect &panelRect, int year_, int month_)
         bx -= 32;
     }
 
+    // 月报链接热区（头部左上角留白区，T-067）；与居中标题重叠时 renderer
+    // 按矩形省略，命中矩形保持定宽
+    monthLink = QRect(panel.left() + 12, panel.top() + 12, 140, 26);
+
     nextMonthPill = QRect(panel.left() + 40, bottomBar.top() + 6, 92, 22);
     guidePill = QRect(panel.right() - 236, panel.top() + 34, 224, 34);
 }
@@ -69,6 +73,27 @@ bool CalendarLayout::tryGetCell(const QPoint &p, int *row, int *col, QDate *date
     if (row) *row = r;
     if (date) *date = cellDate(r, c);
     if (rect) *rect = cellRect(r, c);
+    return true;
+}
+
+QRect CalendarLayout::cellSummaryLinkRect(const QRect &cell) const
+{
+    const int w = std::min(cell.width() - 8, 74);
+    return QRect(cell.right() - 4 - w, cell.top() + 25, w, 15);
+}
+
+bool CalendarLayout::hitCellSummaryLink(const QPoint &p, QDate *date) const
+{
+    QRect cell;
+    QDate d;
+    int row = 0;
+    int col = 0;
+    if (!tryGetCell(p, &row, &col, &d, &cell))
+        return false;
+    if (!cellSummaryLinkRect(cell).contains(p))
+        return false;
+    if (date)
+        *date = d;
     return true;
 }
 

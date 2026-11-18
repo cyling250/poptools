@@ -27,6 +27,7 @@ struct TextGroup
     QString app, title;
     QStringList chunks; // 各次事件文本
     int totalChars = 0;
+    int deletedChars = 0; // 仅文本镜像组使用（T-066：退格删除的原文统计）
 };
 
 QString groupExcerpt(const TextGroup &g)
@@ -34,10 +35,14 @@ QString groupExcerpt(const TextGroup &g)
     QString joined = g.chunks.join(QStringLiteral(" "));
     if (joined.size() > kExcerptChars)
         joined = joined.left(kExcerptChars) + QStringLiteral("…");
-    // 多参单次 arg：一次替换 %1-%4，键入/OCR 文本里的 %N 不被后续 arg
+    // 删除统计仅文本镜像组非零（keys/OCR 组恒 0，格式退化为原样）
+    const QString del = g.deletedChars > 0
+                            ? QStringLiteral("，删%1字").arg(g.deletedChars)
+                            : QString();
+    // 多参单次 arg：一次替换 %1-%5，键入/OCR 文本里的 %N 不被后续 arg
     // 二次展开（链式 arg 曾把字数注入含 %3 的标题段）
-    return QStringLiteral("[%1 — %2] 共%3字：%4")
-        .arg(g.app, g.title.left(60), QString::number(g.totalChars),
+    return QStringLiteral("[%1 — %2] 共%3字%4：%5")
+        .arg(g.app, g.title.left(60), QString::number(g.totalChars), del,
              joined.replace(QLatin1Char('\n'), QStringLiteral("⏎")));
 }
 } // namespace
@@ -115,6 +120,41 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
         readGroups(QStringLiteral("keys"), keyGroups);
         readGroups(QStringLiteral("ocrtext"), ocrGroups);
 
+        // ---- textlog.jsonl：文本镜像摘录（T-066，按窗口分组） ----
+        // insert/replace 的 text 是最终落进输入框的文本（含 IME 上屏后的
+        // 中文），是日志里最接近"用户写了什么"的信号；delete 只知被删原文
+        // （removed），计入删除字数、不进正文摘录
+        QVector<TextGroup> mirrorGroups;
+        {
+            QFile mf(dayDir + QStringLiteral("/textlog.jsonl"));
+            if (mf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                while (!mf.atEnd()) {
+                    const QJsonObject o =
+                        QJsonDocument::fromJson(mf.readLine()).object();
+                    const QString text = o.value(QStringLiteral("text")).toString();
+                    const QString removed =
+                        o.value(QStringLiteral("removed")).toString();
+                    if (text.isEmpty() && removed.isEmpty())
+                        continue;
+                    const QString app = o.value(QStringLiteral("app")).toString();
+                    const QString title = o.value(QStringLiteral("title")).toString();
+                    if (mirrorGroups.isEmpty() || mirrorGroups.last().app != app
+                        || mirrorGroups.last().title != title) {
+                        if (mirrorGroups.size() > 200)
+                            break;
+                        mirrorGroups.append(TextGroup{app, title, QStringList{}, 0, 0});
+                    }
+                    TextGroup &g = mirrorGroups.last();
+                    if (!text.isEmpty()) {
+                        g.chunks << text;
+                        g.totalChars += text.size();
+                    }
+                    if (!removed.isEmpty())
+                        g.deletedChars += removed.size();
+                }
+            }
+        }
+
         // ---- clipboard.jsonl：复制文本预览按窗口分组（T-047-CLIP） ----
         // 只取 kind=="text" 的条目（files/image 无摘要价值）；head/tail
         // 拼为预览；repeat 行不计（count 已隐含在复制行为里）
@@ -156,7 +196,7 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
         // ---- 组装摘要 ----
         QString digest;
         if (rows.isEmpty() && keyGroups.isEmpty() && ocrGroups.isEmpty()
-            && clipGroups.isEmpty()) {
+            && clipGroups.isEmpty() && mirrorGroups.isEmpty()) {
             if (anchor) {
                 QMetaObject::invokeMethod(anchor, [done] { done(false, QString()); },
                                           Qt::QueuedConnection);
@@ -192,6 +232,12 @@ void DailyAggregator::buildDigestAsync(const QString &dayDir, int maxChars, QObj
             digest += QStringLiteral("\n【中文上屏摘录】（OCR 识别的输入法上屏文字）\n");
             for (int i = 0; i < ocrGroups.size() && i < kMaxGroupRows; ++i)
                 digest += groupExcerpt(ocrGroups.at(i)) + QLatin1Char('\n');
+        }
+        if (!mirrorGroups.isEmpty()) {
+            digest += QStringLiteral(
+                "\n【输入原文摘录】（文本镜像：各输入框最终输入的原文，含删除统计）\n");
+            for (int i = 0; i < mirrorGroups.size() && i < kMaxGroupRows; ++i)
+                digest += groupExcerpt(mirrorGroups.at(i)) + QLatin1Char('\n');
         }
         if (!clipGroups.isEmpty()) {
             digest += QStringLiteral("\n【剪贴板摘录】（复制的文本预览，按窗口）\n");

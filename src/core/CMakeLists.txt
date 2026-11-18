@@ -23,6 +23,8 @@ add_library(poptools_core STATIC
     assistant/McpStdioClient.h
     assistant/MemoryStore.cpp
     assistant/MemoryStore.h
+    assistant/MonthlyRecordJob.cpp
+    assistant/MonthlyRecordJob.h
     assistant/MonitorQueryTool.cpp
     assistant/MonitorQueryTool.h
     assistant/PermissionManager.cpp
