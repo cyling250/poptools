@@ -21,4 +21,12 @@
 2. **签名——无硬门槛**：weasel 全程未签名照常安装注册运行；自签+本地信任仅惠及 SecureMode/UWP/SmartAppControl 边缘（代决假设 5 由此不再触发）。
 3. **注册——必须机器级**：HKCU 不生效（官方 API 无 per-user 注册），需管理员写 HKLM/HKCR；卸载须先杀 ctfmon 再删键（ctfmon 会回写复活）。
 4. **新增宿主盲区事实**：经典 EDIT 控件（TRANSITORY）对 TSF 完全不可见；RichEdit 默认关 TSF；可观察宿主仅 TSF-aware（Chromium 系/新版记事本/Word/SES_USECTF）。
-**判定：被动 TSF TIP 与"中文上屏＋全部应用＋零干扰"三诉求结构性冲突 → 路线待用户定（UIA 主体 / SPEECH 类别一次性探针 / en-US 收窄版）。**
+**判定：被动 TSF TIP 与"中文上屏＋全部应用＋零干扰"三诉求结构性冲突 → 路线已定（2026-11-18 14:00 用户拍板）：①转 UIA 文本镜像主体。**
+
+**路线修订（UIA 主体）**：
+- 交付物改形：不做 TIP DLL/注册器；新增 `core/monitor/TextMirrorMonitor`（UIA 焦点控件文本镜像编排：键入/粘贴/切焦触发 → 防抖读焦点控件全文 → 按字段影子快照双向差分 → 增/删/替换事件 → ActivityStore 新流 `<日期>/textlog.jsonl`）
+- `UiaTextReader` 扩展：Result 增 UIA RuntimeId（浏览器/Electron 无句柄控件也要有稳定的"字段身份"）
+- 字段身份：RuntimeId（取不到退 elHwnd→topHwnd）；影子快照按字段键缓存（LRU ≤4 个，≤2KB/字段由 kMaxChars 上限保证）
+- 密码静默：result.password 时跳过记录并**重置该字段影子**（防密码字符以差分形式泄漏）
+- 触发源：现有 GlobalKeyboardHook 键入活动（防抖 ~350ms）＋ ClipboardListener 粘贴＋ForegroundTracker 切窗
+- TSF 探针结论与 weasel 实证产物归档备查（temp_scripts/weasel_probe/）；TSF en-US/SPEECH 类别两活口不再 pursue，除非未来 UIA 覆盖被实测证明不足

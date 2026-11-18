@@ -184,10 +184,10 @@
   （注册+启用未选中 → 全进程零加载，官方文档+26300 实证）②键盘类别每语言仅一个活动 TIP，
   选中即顶掉微软拼音 ③经典 EDIT（TRANSITORY）对 TSF 盲、RichEdit 默认关 TSF；另：签名
   无硬门槛（weasel 全程未签名可用）、注册必须 HKLM 管理员、卸载须先杀 ctfmon 再删键（回写复活）
-- **待用户定路线（三选一）**：①转 UIA 文本镜像主体（三大诉求在主流应用全满足，UiaTextReader/
-  PasswordFieldGuard/ActivityStore 基础已有八成）②SPEECH/HANDWRITING 类别并存一次性探针
-  （TSF 最后假设，成了走 TSF、败了转 UIA）③双栈：UIA 主体＋en-US 键盘 TIP 收窄增强
-  （仅覆盖英文输入态，输入法列表常驻一个 PopTools 条目）
+- **路线已定（2026-11-18 14:00 用户拍板）：转 UIA 文本镜像主体**——TSF 探针结论归档备查；
+  实现改形：core/monitor/TextMirrorMonitor（键入/粘贴/切焦触发→防抖读焦点控件→字段影子
+  双向差分→textlog.jsonl）+ UiaTextReader 增 RuntimeId 字段身份 + 密码字段影子重置防泄漏；
+  字母流移除仍排在镜像真机验证通过之后
 - 红线：DLL 静态 CRT（P-056 纪律）；回调零耗时只取文+入队，落盘全在主进程 worker；密码框
   三流静默（PasswordFieldGuard 缓存沿用）；随时可开关可注销
 
