@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
-> 最后更新：2026-11-18 15:21（T-066 结算：UIA 文本镜像上线+字母流完全替换（KeyboardTextComposer/打码开关移除），真机验收达标（退格原文/拼音→汉字实证），续接修复防 RuntimeId 重建吞增量，ctest 95 绿；新增 P-067 落盘路径勘误坑） · Agent_20261118130500
+> 最后更新：2026-11-18 16:00（T-067 落码完成：Goody 起居注式日摘要（静默自主）+ 月度滚动月报（开机重写【月报更新】）+ 桌面日历摘要链接展示（双击面板后可点/notepad），textlog 接入日总结（T-066b 收口），ctest 97 绿，未提交待真机验收） · Agent_20261118130500
 > 最后更新：2026-11-18 00:30（合并并行会话：本地「桌面日历单屏化+多屏花屏根修+拖动体验闭环」重编号 T-063（原本地草稿编号 T-059，与远端收纳盒 T-059 冲突）、「启动更新自查」T-064（原 T-060）、P-066（原 P-063）；特性已移植到远端槽位协议 CLK4 架构（虚拟桌面并集画布+双缓冲帧翻转+覆盖层预览拖动）） · Agent_20261117164000
 > 最后更新：2026-11-17 16:45（T-059：桌面日历单屏化+多屏花屏/复制根修——协议 v2 增所在屏矩形、DLL 擦除两遍法限定日历屏、宿主坐标体系升级虚拟桌面、跨屏拖动；用户实拍副屏初验通过） · Agent_20261117164000
 
@@ -179,11 +179,28 @@
 
 ## 当前任务
 
-**T-066b 文本镜像收尾候修（非阻塞，2026-11-18 结算留档）**：
-- DailyAggregator/DailyRecordJob 的日总结仍按 keys 流摘录键入段——textlog 未接入，新日
-  总结的键入摘录段会空；按 textlog 行形（kind/removed）设计摘录语义后接入
-- 可选优化：镜像事件"会话聚合"视图（同字段连续事件折叠成可读段落）
-- 历史兼容已保：MonitorQueryTool 白名单保留 keys（旧日志可查），textlog 已入白名单
+**T-067 Goody 起居注 + 日历摘要展示（已落码未提交待真机验收，2026-11-18）**：
+- 需求单 requirements/20261118-goody-calendar-summary.md（用户四拍板：起居注静默自主、
+  日链接双击开面板后才可点、月报开机滚动重算【月报更新】往月冻结仅对话触发、notepad）
+  范围界定：起居注只是 Goody 一项职责，其对话/工具/记忆/权限/MCP 角色不变
+- 已落码：①DailyAggregator 新增【输入原文摘录】段（textlog 按窗分组：insert/replace 进
+  正文、delete 计删字"删N字"）+ isPendingDay 扩 textlog（T-066b 就此收口）；②
+  DailyRecordJob::maybeRefreshToday（当日五流字节指纹 + 60min 节流 + 首次成文优先，
+  GoodyModule 20min 心跳驱动，全程静默）；③MonthlyRecordJob（开机重写当月滚动月报，
+  提示词含【月报更新】，goody/monthly/<yyyy-MM>.md，整月 MD 拼接 24k 预算）+ 对话工具
+  app.generate_monthly_record（重算任意月，无按钮）；④AppServices goodyDailyDigestPath/
+  goodyMonthlyDigestPath 查询槽 + goodySummariesChanged 信号；⑤日历：CalendarLayout
+  月报链接(monthLink)/格内摘要条带(cellSummaryLinkRect) 热区、Renderer 链接绘制（激活
+  高亮/悬停底色/日程行让位一行）、CalendarPanel 编辑器开启期间链接分发（eventsAccepted
+  前置 pre-gate）+ 外点钩子豁免（点链接不关面板，UP 走面板路径防双弹）+ notepad 弹出
+  （md 原文写 %TEMP%）+ CalendarModule 槽注入与信号接线；⑥22:00 成文的托盘气泡移除
+  （起居注纪律）
+- 待真机验收（PopTools 拉起新构建）：①打字后等心跳/重启 → textlog 进日摘要；②有摘要
+  日期格显示「»摘要」链接；③双击开面板 → 点该日链接 → notepad 弹当日摘要；④未双击时
+  点链接无效；⑤左上角「MM月工作摘要»」点击弹月报；⑥对 Goody 说"重新生成 10 月月报"→
+  goody/monthly/2026-10.md 更新
+- 诚实边界：格内链接条带固定像素不随 fontScale（对齐 headerButtons 先例）；notepad 抢
+  焦点会使编辑器失焦关闭（WindowDeactivate 既有链路，交互可接受）
 
 **T-060 更新自查在途（已提交未推送，2026-11-17）**：
 - 已落地：core/update/UpdateChecker（releases/latest 异步 + 三段数值比较，版本宏 POPTOOLS_VERSION 由 CMake project VERSION 注入）；启动延迟 5s 静默检查（仅新版提示：前往下载/跳过此版本/关闭，跳过记 update/ignoredVersion）；关于对话框加"检查更新"；版本 bump 0.5.0（CMake+iss，关于对话框随宏自动）
@@ -468,4 +485,5 @@
 | 2026-11-18 13:12 | Agent_20261118130500 | 头部 / 历史任务 / 当前任务 / 修改台账 / 需求单 | T-065 结算（用户验收+提交 5287349 入历史任务）；T-066 立项（TSF 文本镜像输入监听，需求单 requirements/20261118-tsf-text-mirror.md）；本机 SDK/IME 侦察 | 用户批注拍板 TSF 路线+字母流完全替换+立即开工；调研子代理进行中 |
 | 2026-11-18 13:55 | Agent_20261118130500 | 头部 / 当前任务 / 需求单 / 细档 | T-066 调研收口：新增细档 t066_tsf_research.md（六问结论+设计启示）；需求单开放点回填（被动加载死刑/签名无门槛/HKLM 必须/宿主盲区）；当前任务改写为三选一路线待用户定；AGENTS.md 增「下载与逆向纪律（所有 Agent 通用）」+子代理传路径规则（用户三次批注校准） | weasel 本机实证（装→查→卸→基线比对一致，探针存 temp_scripts/weasel_probe/）；被动 TSF 三诉求结构性冲突实锤 |
 | 2026-11-18 15:21 | Agent_20261118130500 | 头部 / 历史任务 / 当前任务 / 项目快照 / 踩坑记录 / monitor+settings+模块源码 / 测试 | T-066 结算入历史任务（feat 提交：镜像上线+字母流完全替换）；当前任务留 T-066b 候修；快照勘误（版本 0.5.0/ctest 95/monitor 描述）；新增 P-067 落盘路径勘误坑 | 真机验收达标（退格原文/拼音→汉字 replace 实证）；诊断定位 RuntimeId 重建吞增量并以同窗口续接修复；KeyboardTextComposer+打码开关全链移除 |
+| 2026-11-18 16:00 | Agent_20261118130500 | 头部 / 当前任务 / assistant+calendar+ui+模块源码 / AppServices / CMake / 测试 / 需求单 | T-067 三阶段落码：聚合器【输入原文摘录】段（T-066b 收口）+ DailyRecordJob 起居注刷新 + MonthlyRecordJob 新建 + GoodyModule 接线（静默化移除成文气泡）+ AppServices 双槽/信号 + 日历链接全链（布局热区/渲染/面板分发/钩子豁免/notepad）；探查代理绘接入点地图（后台） | 需求单四拍板（起居注静默/双击面板后可点/月报开机滚动/系统 notepad）；ctest 97 绿（+2 用例），未提交待真机验收 |
 | 2026-11-18 14:12 | Agent_20261118130500 | 头部 / 当前任务 / monitor 源码 / 模块源码 / CMake / 测试 | T-066 UIA 文本镜像落码：新增 TextMirrorMonitor（影子差分+churn 护栏+密码影子重置）、UiaTextReader 增 RuntimeId、ClipboardListener 增 clipboardUpdated 信号、模块接线三触发源+textlog.jsonl；新用例入 domain_tests（97 用例全绿） | 未提交待真机验收（验收清单在当前任务块）；字母流移除排验收后 |
