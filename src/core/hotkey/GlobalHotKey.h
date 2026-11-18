@@ -15,6 +15,13 @@ namespace poptools {
 //   connect(&hotkey, &GlobalHotKey::activated, this, [](int id){ ... });
 //
 // 基于 RegisterHotKey / UnregisterHotKey（user32.lib）。
+//
+// 优先级：裸键热键（modifiers == 0，如 F1/F3）额外挂一层本进程
+// WH_KEYBOARD_LL 低级钩子——命中即吞键并排队触发，压过其他软件的
+// 低级钩子/加速键（如把 F1 绑成"帮助"的软件），达到用户态最高优先级；
+// 钩子被系统摘除或安装失败时自动退回纯 RegisterHotKey 语义。注册成功
+// 判定以"任一机制可用"为准。机理与红线2豁免说明见 GlobalHotKey.cpp
+// 文件头注释块。
 // ============================================================
 class GlobalHotKey : public QObject, public QAbstractNativeEventFilter
 {
