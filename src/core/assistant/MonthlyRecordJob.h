@@ -41,9 +41,14 @@ public:
     static QString monthPath(const QString &goodyDir, int year, int month);
 
 private:
+    // 线程池聚合整月日摘要后的主线程续段：拼提示词 → 发 LLM → 落盘（T-068
+    // 起 31 天文件拼接在池线程做，本函数只在主线程跑网络与 KB 级写盘）
+    void sendMonthlyRequest(int year, int month, const QString &key, const QString &digest,
+                            const std::function<void(bool ok, const QString &error)> &done);
+
     QString m_goodyDir;
     LlmClient *m_client = nullptr; // 自建实例：与 DailyRecordJob 的单飞互不干扰
-    bool m_busy = false;           // 重入闸门（开机触发与工具触发共用）
+    bool m_busy = false;           // 重入闸门（开机触发与工具触发共用，含聚合窗口）
 };
 
 } // namespace poptools

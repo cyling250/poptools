@@ -2,6 +2,8 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QPair>
 
 #ifdef Q_OS_WIN
@@ -17,7 +19,10 @@ namespace {
 
 constexpr qint64 kCacheTtlMs = 500;
 
-// hwnd → (是否密码框, 探测时刻)：同控件连打时跳过重复探测
+// hwnd → (是否密码框, 探测时刻)：同控件连打时跳过重复探测。
+// T-068 起截屏挪线程池后 isPasswordWindow 会从池线程调用（密码复查紧贴
+// 截屏的时序不变式随迁），缓存加锁防跨线程读写竞争
+QMutex g_cacheMutex;
 QHash<quintptr, QPair<bool, qint64>> g_cache;
 
 // Win32 启发式探测（样式+类名），结果按 hwnd 缓存于调用方
@@ -66,12 +71,14 @@ bool isPasswordFocused()
 bool isPasswordWindow(quintptr hwnd)
 {
     // 针对捕获时刻记录的焦点窗口判定（打码判定挪回捕获点：钩子回调
-    // 随事件带焦点 HWND，样式探测仍在主线程处理时刻做——控件密码样式
-    // 极少变化，迟到的探测不改变结论）
+    // 随事件带焦点 HWND，样式探测在处理时刻做——控件密码样式
+    // 极少变化，迟到的探测不改变结论）。T-068 起主线程与线程池双侧调用，
+    // 缓存读写全程持锁
     if (!hwnd)
         return false;
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QMutexLocker lock(&g_cacheMutex);
     const auto it = g_cache.constFind(hwnd);
     if (it != g_cache.cend() && now - it->second < kCacheTtlMs)
         return it->first;
@@ -91,6 +98,7 @@ void cacheUiaPassword(quintptr hwnd, bool pwd)
     if (!hwnd)
         return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QMutexLocker lock(&g_cacheMutex);
     evictIfNeeded();
     g_cache.insert(hwnd, qMakePair(pwd, now));
 }

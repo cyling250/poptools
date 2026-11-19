@@ -9,6 +9,7 @@
 
 #include "AppServices.h"
 #include "core/assistant/ToolRegistry.h"
+#include "core/monitor/MainThreadProbe.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/update/UpdateChecker.h"
@@ -29,6 +30,10 @@ namespace poptools {
 MainWindow::MainWindow(QObject *parent)
     : QObject(parent)
 {
+    // T-068 主线程输入探针：必须在任何模块装钩子之前建好（探针的心跳与
+    // 钩子打点都在主线程，见 MainThreadProbe 头注释）；根因定案后随探针
+    // 一并移除
+    MainThreadProbe::instance();
     // 托盘（使用资源图标：Material Design 相机图标，Apache 2.0 许可）
     m_tray = new QSystemTrayIcon(QIcon(":/app_icon.svg"), this);
     m_tray->setToolTip("PopTools\n按 F1 截图");

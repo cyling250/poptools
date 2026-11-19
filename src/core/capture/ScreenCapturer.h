@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QImage>
 #include <QPixmap>
 #include <QRect>
 #include <QPoint>
@@ -30,6 +31,12 @@ class ScreenCapturer
 public:
     // 拼接所有屏幕为一张物理分辨率画面（多显示器扩展屏无黑屏）
     static CaptureResult capture();
+
+    // 线程池可用的纯 GDI 虚拟桌面截屏（BitBlt 直出 QImage，不经任何 Qt GUI
+    // 对象，任意线程可调）。成功时 *out 为 ARGB32 物理整图、*physDesktopOut
+    // 为虚拟桌面物理几何。T-068：监控 OCR 兜底截屏挪线程池用（主线程挂
+    // 低级钩子，大桌面 BitBlt 数十 ms 即全系统鼠标排队）
+    static bool captureVirtualDesktop(QImage *out, QRect *physDesktopOut);
 
     // 屏幕逻辑几何 → 物理像素几何（Qt 6.8 的 QScreen 无 nativeGeometry()，
     // 按每显示器 DPI 映射；QRect 右/下边界含端点，换算用 (right+1, bottom+1) 避免丢像素）

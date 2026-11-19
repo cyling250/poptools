@@ -4,7 +4,68 @@
 #include <QScreen>
 #include <QPainter>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+#include <cstring>
+
 namespace poptools {
+
+// 线程池可用的纯 GDI 虚拟桌面截屏。SM_*VIRTUAL* 系列本就物理像素（进程为
+// per-monitor DPI aware）；BitBlt 带 CAPTUREBLT 把分层窗口一并收进来，视觉
+// 语义与 QScreen::grabWindow 对齐。DIB 32bpp 的字节序（BGRA）与 QImage ARGB32
+// 在小端机内存布局一致，整块 memcpy 即得
+bool ScreenCapturer::captureVirtualDesktop(QImage *out, QRect *physDesktopOut)
+{
+#ifdef Q_OS_WIN
+    if (!out || !physDesktopOut)
+        return false;
+    const QRect phys(QPoint(GetSystemMetrics(SM_XVIRTUALSCREEN),
+                            GetSystemMetrics(SM_YVIRTUALSCREEN)),
+                     QSize(GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                           GetSystemMetrics(SM_CYVIRTUALSCREEN)));
+    if (phys.isEmpty())
+        return false;
+    const HDC screenDc = GetDC(nullptr);
+    const HDC memDc = screenDc ? CreateCompatibleDC(screenDc) : nullptr;
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = phys.width();
+    bmi.bmiHeader.biHeight = -phys.height(); // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void *bits = nullptr;
+    const HBITMAP bmp = memDc ? CreateDIBSection(memDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0)
+                              : nullptr;
+    bool ok = false;
+    if (screenDc && memDc && bmp && bits) {
+        const HGDIOBJ old = SelectObject(memDc, bmp);
+        if (BitBlt(memDc, 0, 0, phys.width(), phys.height(), screenDc,
+                   phys.left(), phys.top(), SRCCOPY | CAPTUREBLT)) {
+            QImage img(phys.width(), phys.height(), QImage::Format_ARGB32);
+            memcpy(img.bits(), bits,
+                   size_t(phys.width()) * size_t(phys.height()) * 4);
+            *out = img;
+            *physDesktopOut = phys;
+            ok = true;
+        }
+        SelectObject(memDc, old);
+    }
+    if (bmp)
+        DeleteObject(bmp);
+    if (memDc)
+        DeleteDC(memDc);
+    if (screenDc)
+        ReleaseDC(nullptr, screenDc);
+    return ok;
+#else
+    Q_UNUSED(out)
+    Q_UNUSED(physDesktopOut)
+    return false;
+#endif
+}
 
 QRect ScreenCapturer::screenPhysicalRect(const QScreen *s)
 {

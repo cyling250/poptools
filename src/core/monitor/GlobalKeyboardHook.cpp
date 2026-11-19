@@ -1,5 +1,7 @@
 #include "GlobalKeyboardHook.h"
 
+#include "core/monitor/MainThreadProbe.h"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -15,6 +17,12 @@ HHOOK g_hook = nullptr;
 
 LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
+    // T-068 取证打点：机理同 GlobalMouseHook（见 MainThreadProbe 头注释）
+    const KBDLLHOOKSTRUCT *probeInfo =
+        (nCode >= 0) ? reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam) : nullptr;
+    const MainThreadProbe::HookCall probeCall(
+        MainThreadProbe::SrcKeyboard, probeInfo ? probeInfo->time : 0,
+        probeInfo && (probeInfo->flags & LLKHF_INJECTED) != 0);
     // 回调内只做入队转发（低级钩子回调有严格超时，耗时会被系统静默摘钩）；
     // 修饰键 down/up 也要转发（接收方维护 Shift/Ctrl/Alt 状态机才能
     // 正确翻译 Shift+a → 'A'）

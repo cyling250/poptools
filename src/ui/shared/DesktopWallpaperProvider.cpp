@@ -27,27 +27,64 @@ QImage DesktopWallpaperProvider::blurredWallpaper()
     return m_blurred;
 }
 
-// 强制刷新（绕过 20s 缓存）：磁盘读图 + 1/4 降采样 + 两遍模糊 + 放大，全程调用
-// 线程同步执行——宿主 30s 定时器触发，勿挪进交互关键路径
+// 强制刷新（绕过 20s 缓存）。T-068：壁纸未变（签名一致）时只续时基零重算——
+// 此前每轮全量"磁盘整图解码 + 降采样 + 两遍盒模糊 + 放大"在主线程执行
+// ~160ms，与 30s 定时器叠加即"拖动卡顿瞬移"根因；真变了才全量重算
 void DesktopWallpaperProvider::refresh()
 {
+    const QString sig = wallpaperSignature();
+    if (!m_blurred.isNull() && sig == m_lastSignature) {
+        m_lastRefresh = QDateTime::currentDateTimeUtc();
+        return;
+    }
+    adoptFrom(computeBlurred(m_w, m_h));
+}
+
+// 是否需要重算：缓存新鲜或签名未变都只续时基返回 false。签名探测零解码
+//（stat 级开销），主线程可安全调用
+bool DesktopWallpaperProvider::refreshNeeded()
+{
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    if (!m_blurred.isNull() && m_lastRefresh.msecsTo(now) < 20000)
+        return false;
+    const QString sig = wallpaperSignature();
+    if (!m_blurred.isNull() && sig == m_lastSignature) {
+        m_lastRefresh = now;
+        return false;
+    }
+    return true;
+}
+
+// 完整重算（磁盘解码 → 铺排 → 1/4 降采样 → 两遍盒模糊 → 放大）。无共享
+// 状态，线程池可调——宿主 30s 定时器经线程池调用本函数，成品回主线程
+// adoptFrom 安装（T-068 停摆根治）
+QImage DesktopWallpaperProvider::computeBlurred(int width, int height, QString *pathOut)
+{
     const QString path = wallpaperPath();
+    if (pathOut)
+        *pathOut = path;
     QImage src;
     if (!path.isEmpty() && QFile::exists(path)) {
         src = QImage(path);
         if (src.format() == QImage::Format_Invalid)
             src = QImage();
     }
-    QImage composed = renderWallpaper(src);
-    const int sw = std::max(1, m_w / 4);
-    const int sh = std::max(1, m_h / 4);
+    QImage composed = renderWallpaper(src, width, height);
+    const int sw = std::max(1, width / 4);
+    const int sh = std::max(1, height / 4);
     QImage small = composed.scaled(sw, sh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     composed = QImage();
     QImage blurred = boxBlur(small.convertToFormat(QImage::Format_ARGB32), 10, 2);
-    m_blurred = blurred.scaled(m_w, m_h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                    .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    return blurred.scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                  .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+}
+
+// 主线程收成品：装缓存 + 续时基 + 记签名（签名廉价重探，不解码）
+void DesktopWallpaperProvider::adoptFrom(const QImage &img)
+{
+    m_blurred = img;
     m_lastRefresh = QDateTime::currentDateTimeUtc();
-    m_lastPath = path;
+    m_lastSignature = wallpaperSignature();
 }
 
 // 壁纸路径探测：注册表 WallPaper / TranscodedWallpaper / CachedFiles 最新一张 /
@@ -56,7 +93,59 @@ void DesktopWallpaperProvider::refresh()
 // 截断"的图 size() 仍返回有效尺寸，不实际解码就无法识别，候选语义与基线出现
 // 行为分歧（收进坏候选 vs 基线取次新有效候选）；严格等价做不到，按行为等价红线
 // 回退为整图解码（T-062 R3 G-01 方案 A）
-QString DesktopWallpaperProvider::wallpaperPath() const
+// 候选文件签名：壁纸注册表路径 + 风格键 + 各候选文件的路径/修改时间/大小。
+// 零图片解码（stat 级开销）。与 wallpaperPath() 的取舍口径刻意不同——签名
+// 只判断"变没变"，不判断"收不收"（Spotlight 候选的首个文件直接比对，不做
+// 解码验收）：假阳性（判定变了实际同图）至多多算一次，不会漏算
+QString DesktopWallpaperProvider::wallpaperSignature()
+{
+    QString sig;
+    const QSettings reg(QStringLiteral("HKEY_CURRENT_USER\\Control Panel\\Desktop"),
+                        QSettings::NativeFormat);
+    sig += reg.value(QStringLiteral("WallPaper")).toString();
+    sig += QLatin1Char('|');
+    sig += reg.value(QStringLiteral("WallpaperStyle")).toString();
+    sig += QLatin1Char('|');
+    sig += reg.value(QStringLiteral("TileWallpaper")).toString();
+    const QString appData = qEnvironmentVariable("APPDATA");
+    if (!appData.isEmpty()) {
+        const QFileInfo trans(appData + QStringLiteral("/Microsoft/Windows/Themes")
+                                        + QStringLiteral("/TranscodedWallpaper"));
+        sig += QLatin1Char('|')
+               + QStringLiteral("%1@%2@%3").arg(trans.absoluteFilePath(),
+                                                QString::number(trans.lastModified().toMSecsSinceEpoch()),
+                                                QString::number(trans.size()));
+        const QDir cachedDir(appData + QStringLiteral("/Microsoft/Windows/Themes/CachedFiles"));
+        const QFileInfoList files = cachedDir.entryInfoList(QDir::Files, QDir::Time);
+        if (!files.isEmpty()) {
+            const QFileInfo &fi = files.first();
+            sig += QStringLiteral("|cached:%1@%2@%3").arg(fi.absoluteFilePath(),
+                                                          QString::number(fi.lastModified().toMSecsSinceEpoch()),
+                                                          QString::number(fi.size()));
+        }
+    }
+    const QSettings cdm(
+        QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion"
+                       "\\ContentDeliveryManager"),
+        QSettings::NativeFormat);
+    if (cdm.value(QStringLiteral("SubscribedContent-338389Enabled"), 0).toInt() == 1) {
+        const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+        const QDir assetsDir(localAppData
+                             + QStringLiteral("/Packages/Microsoft.Windows."
+                                              "ContentDeliveryManager_cw5n1h2txyewy/"
+                                              "LocalState/Assets"));
+        const QFileInfoList files = assetsDir.entryInfoList(QDir::Files, QDir::Time);
+        if (!files.isEmpty()) {
+            const QFileInfo &fi = files.first();
+            sig += QStringLiteral("|spot:%1@%2@%3").arg(fi.absoluteFilePath(),
+                                                        QString::number(fi.lastModified().toMSecsSinceEpoch()),
+                                                        QString::number(fi.size()));
+        }
+    }
+    return sig;
+}
+
+QString DesktopWallpaperProvider::wallpaperPath()
 {
     struct Candidate
     {
@@ -134,18 +223,18 @@ QString DesktopWallpaperProvider::wallpaperPath() const
 // 其余=适应(min 比例)；无图时暗色渐变兜底。style0（系统居中=1:1 原尺寸）按
 // 适应缩放处理与真实壁纸形变有偏差——登记 BUG-09（保真修复需改视觉输出，
 // 超出行为等价范畴，本轮不修）
-QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src) const
+QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src, int width, int height)
 {
-    QImage bmp(m_w, m_h, QImage::Format_ARGB32);
+    QImage bmp(width, height, QImage::Format_ARGB32);
     bmp.fill(QColor(10, 12, 20));
     QPainter g(&bmp);
     g.setRenderHint(QPainter::SmoothPixmapTransform);
     if (src.isNull()) {
-        QLinearGradient grad(0, 0, m_w, m_h);
+        QLinearGradient grad(0, 0, width, height);
         grad.setCoordinateMode(QGradient::ObjectMode);
         grad.setColorAt(0.0, QColor(24, 28, 52));
         grad.setColorAt(1.0, QColor(8, 10, 20));
-        g.fillRect(0, 0, m_w, m_h, grad);
+        g.fillRect(0, 0, width, height, grad);
         return bmp;
     }
     int style = 10;
@@ -159,19 +248,19 @@ QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src) const
     tile = reg.value(QStringLiteral("TileWallpaper")).toString() == QStringLiteral("1");
 
     if (tile && style == 0) {
-        g.drawTiledPixmap(0, 0, m_w, m_h, QPixmap::fromImage(src));
+        g.drawTiledPixmap(0, 0, width, height, QPixmap::fromImage(src));
         return bmp;
     }
     QRect dst;
     if (style == 2) {
-        dst = QRect(0, 0, m_w, m_h); // 拉伸
+        dst = QRect(0, 0, width, height); // 拉伸
     } else if (style == 10) {
-        const double scale = std::max(double(m_w) / src.width(), double(m_h) / src.height()); // 填充
-        dst = QRect((m_w - int(src.width() * scale)) / 2, (m_h - int(src.height() * scale)) / 2,
+        const double scale = std::max(double(width) / src.width(), double(height) / src.height()); // 填充
+        dst = QRect((width - int(src.width() * scale)) / 2, (height - int(src.height() * scale)) / 2,
                     std::max(1, int(src.width() * scale)), std::max(1, int(src.height() * scale)));
     } else {
-        const double scale = std::min(double(m_w) / src.width(), double(m_h) / src.height()); // 适应/居中
-        dst = QRect((m_w - int(src.width() * scale)) / 2, (m_h - int(src.height() * scale)) / 2,
+        const double scale = std::min(double(width) / src.width(), double(height) / src.height()); // 适应/居中
+        dst = QRect((width - int(src.width() * scale)) / 2, (height - int(src.height() * scale)) / 2,
                     std::max(1, int(src.width() * scale)), std::max(1, int(src.height() * scale)));
     }
     g.drawImage(dst, src);

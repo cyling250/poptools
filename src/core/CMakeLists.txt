@@ -85,6 +85,8 @@ add_library(poptools_core STATIC
     monitor/ImeCommitDetector.h
     monitor/InputActivityMonitor.cpp
     monitor/InputActivityMonitor.h
+    monitor/MainThreadProbe.cpp
+    monitor/MainThreadProbe.h
     monitor/OwnWriteGuard.cpp
     monitor/OwnWriteGuard.h
     monitor/PasswordFieldGuard.cpp

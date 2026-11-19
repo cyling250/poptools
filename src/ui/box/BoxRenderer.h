@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QImage>
 #include <QPainterPath>
+#include <QSize>
 #include <QVector>
 
 #include "core/box/BoxLayout.h"
@@ -42,6 +43,11 @@ public:
                      const QHash<QString, QImage> &icons);
 
     void refreshWallpaper() { m_wallpaper.refresh(); }
+
+    // T-068 异步壁纸三件套（与 CalendarRenderer 同款，见彼处注释）
+    QSize wallpaperSize() const { return m_wallpaper.canvasSize(); }
+    bool wallpaperRefreshNeeded() { return m_wallpaper.refreshNeeded(); }
+    void adoptWallpaper(const QImage &img) { m_wallpaper.adoptFrom(img); }
 
 private:
     QFont font(qreal pointSize, bool bold = false) const;

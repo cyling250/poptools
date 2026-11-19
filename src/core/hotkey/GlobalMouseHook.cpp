@@ -2,6 +2,8 @@
 
 #include <QSet>
 
+#include "core/monitor/MainThreadProbe.h"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -18,6 +20,13 @@ HHOOK g_hook = nullptr;
 
 LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
+    // T-068 取证打点：事件戳→回调的延迟即主线程没泵消息的时长（机理见
+    // MainThreadProbe 头注释）。RAII 兜住所有退出路径，回调体零改动
+    const MSLLHOOKSTRUCT *probeInfo =
+        (nCode >= 0) ? reinterpret_cast<const MSLLHOOKSTRUCT *>(lParam) : nullptr;
+    const MainThreadProbe::HookCall probeCall(
+        MainThreadProbe::SrcMouse, probeInfo ? probeInfo->time : 0,
+        probeInfo && (probeInfo->flags & LLMHF_INJECTED) != 0);
     if (nCode >= 0) {
         const UINT msg = static_cast<UINT>(wParam);
         const auto *info = reinterpret_cast<const MSLLHOOKSTRUCT *>(lParam);

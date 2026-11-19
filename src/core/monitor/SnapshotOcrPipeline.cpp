@@ -144,48 +144,48 @@ void SnapshotOcrPipeline::onUiaFinished(const UiaTextReader::Result &result)
 
 void SnapshotOcrPipeline::startOcrCapture()
 {
-    // T-047-FIX(P2-1)：OCR 回落路径补密码复查（隐私关键）。UIA-first 之前
-    // captureNow 的密码预检与截图同栈执行（微秒级间隙），现在回落点与预检
-    // 被 UIA COM 往返隔开（防抖+读取可达数百 ms）——间隙内焦点切进"已开
-    // 显示密码"的密码框时，OCR 结果可能带出密码明文落盘。UIA 路径的密码
-    // 拦截已有，这里补回落路径的兜底复查
-    if (PasswordFieldGuard::isPasswordFocused())
-        return;
-
 #ifdef Q_OS_WIN
-    const HWND fg = GetForegroundWindow();
-    if (!fg || reinterpret_cast<quintptr>(fg) != m_reqHwnd)
-        return; // 已换窗：本次取文作废（基线不能串窗口）
-    // 前台窗口物理矩形：DWM 扩展边界（不含阴影；返回物理像素）
-    RECT r{};
-    if (FAILED(DwmGetWindowAttribute(fg, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
-        GetWindowRect(fg, &r);
-    const QRect winPhys(r.left, r.top, r.right - r.left, r.bottom - r.top);
-    if (winPhys.isEmpty())
-        return;
-
-    const CaptureResult cap = ScreenCapturer::capture();
-    const QRect crop = winPhys.intersected(cap.physDesktop);
-    if (crop.isEmpty())
-        return;
-    // R6-B2: m_pending 不在此置位（原此处过早置 true）——从 captureNow 到
-    // 真正 recognizeBoxes 隔着线程池任务 + 一次排队投递两跳，期间的窗口里
-    // 外来 OCR 消费者（贴图/截图）的回包会经 onOcrFinished 的 m_pending
-    // 门卫被误认作自己的回包：做 diff、写 ocrtext.jsonl 隐私日志并污染
-    // m_lastText 基线。置位挪到排队 lambda 内 busy 检查通过之后、
-    // recognizeBoxes 之前（对齐 OcrController.cpp 先例时序）；期间新请求
-    // 由 kMinCaptureGapMs 限流兜底。req* 上下文留在 captureNow 赋值
-    //（只在 m_pending 门卫通过后被读）
-
-    // QPixmap→QImage 必须在 GUI 线程；裁剪与缩放（大图操作）挪线程池。
-    // 外层 lambda 以 QPointer 捕获：stopMonitor 直接 delete 管线时在途
-    // 任务不得访问悬垂对象（内层排队调用以 self 为接收者，销毁后自动
-    // 丢弃投递）
-    QImage full = cap.screen.toImage();
-    const QRect rel = crop.translated(-cap.physDesktop.topLeft());
+    // T-068：截屏整段（密码复查 → 对号复查 → 矩形 → GDI 截屏 → 裁剪缩放）
+    // 挪线程池——本进程主线程挂着 WH_MOUSE_LL/WH_KEYBOARD_LL 低级钩子，主
+    // 线程停摆即全系统鼠标排队（用户感知"拖动卡一下再瞬移"），大桌面
+    // BitBlt 数十 ms 属顶格违例。captureVirtualDesktop 纯 GDI 不经 Qt GUI
+    // 对象，任意线程可调。
+    // T-047-FIX(P2-1) 时序不变式随迁：密码复查仍紧贴截屏（微秒级间隙），
+    // 只是执行栈从主线程换成池线程；窗口对号复查同样在池内做。req* 上下
+    // 文按值捕获（池任务不得读成员——stopMonitor 直接 delete 管线时在途
+    // 任务不得访问悬垂对象，内层排队调用以 self 为接收者，销毁后自动丢弃）
+    const quintptr reqHwnd = m_reqHwnd;
     QPointer<SnapshotOcrPipeline> self(this);
-    QThreadPool::globalInstance()->start([self, full, rel] {
-        QImage part = full.copy(rel); // 隐式共享深拷贝，主线程已不再写它
+    QThreadPool::globalInstance()->start([self, reqHwnd] {
+        // 密码复查（隐私关键，T-047-FIX(P2-1)：UIA COM 往返可达数百 ms，
+        // 间隙内焦点切进"已开显示密码"的密码框时 OCR 会带出密码明文）
+        if (PasswordFieldGuard::isPasswordFocused())
+            return;
+        const HWND fg = GetForegroundWindow();
+        if (!fg || reinterpret_cast<quintptr>(fg) != reqHwnd)
+            return; // 已换窗：本次取文作废（基线不能串窗口）
+        // 前台窗口物理矩形：DWM 扩展边界（不含阴影；返回物理像素）
+        RECT r{};
+        if (FAILED(DwmGetWindowAttribute(fg, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
+            GetWindowRect(fg, &r);
+        const QRect winPhys(r.left, r.top, r.right - r.left, r.bottom - r.top);
+        if (winPhys.isEmpty())
+            return;
+        QImage full;
+        QRect physDesktop;
+        if (!ScreenCapturer::captureVirtualDesktop(&full, &physDesktop))
+            return;
+        const QRect crop = winPhys.intersected(physDesktop);
+        if (crop.isEmpty())
+            return;
+        // R6-B2: m_pending 不在此置位——从 captureNow 到真正 recognizeBoxes
+        // 隔着线程池任务 + 一次排队投递两跳，期间的窗口里外来 OCR 消费者
+        //（贴图/截图）的回包会经 onOcrFinished 的 m_pending 门卫被误认作
+        // 自己的回包：做 diff、写 ocrtext.jsonl 隐私日志并污染 m_lastText
+        // 基线。置位挪到排队 lambda 内 busy 检查通过之后、recognizeBoxes
+        // 之前（对齐 OcrController.cpp 先例时序）；期间新请求由
+        // kMinCaptureGapMs 限流兜底
+        QImage part = full.copy(crop.translated(-physDesktop.topLeft()));
         if (part.width() > kMaxScaleWidth)
             part = part.scaledToWidth(kMaxScaleWidth, Qt::FastTransformation);
         if (!self)

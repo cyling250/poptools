@@ -57,6 +57,8 @@ public:
 private:
     const BoxDef def() const;
     void refreshEntries(); // 重列绑定目录 → 自动定尺寸 → 重绘
+    // 线程池壁纸成品回主线程（30s 定时器异步路径尾段）：装缓存 + 重绘（T-068）
+    void onWallpaperComputed(const QImage &img);
     void ensureVisibleIcons(const BoxLayout &layout); // 对当前页可见条目补发图标请求
     void renderFrame(const QRect &commitDirty); // 实绘 + 按提交脏矩形合成发布（空=整帧）
     void renderDuringAdjust();
@@ -94,6 +96,7 @@ private:
     QFileSystemWatcher *m_watcher = nullptr;
     QTimer m_refreshDebounce; // 目录变化防抖（批量文件操作合并为一次重列）
     QTimer *m_wallpaperTimer = nullptr;
+    bool m_wallpaperBusy = false; // 壁纸线程池重算在飞（30s 定时器重入护栏，T-068）
 };
 
 } // namespace poptools

@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QImage>
 #include <QPainterPath>
+#include <QSize>
 
 #include "core/calendar/CalendarLayout.h"
 #include "core/calendar/CalendarSettings.h"
@@ -48,6 +49,13 @@ public:
                           const CalendarDigestView &digests = CalendarDigestView());
 
     void refreshWallpaper() { m_wallpaper.refresh(); }
+
+    // T-068 异步壁纸三件套：尺寸查询（线程池任务入参）/ 是否需重算（签名未变
+    // 免算）/ 主线程收成品。重算本体 DesktopWallpaperProvider::computeBlurred
+    // 是静态函数，由面板的 30s 定时器经线程池调度
+    QSize wallpaperSize() const { return m_wallpaper.canvasSize(); }
+    bool wallpaperRefreshNeeded() { return m_wallpaper.refreshNeeded(); }
+    void adoptWallpaper(const QImage &img) { m_wallpaper.adoptFrom(img); }
 
 private:
     // C# 字号是磅值（96dpi 下 px = pt*4/3），画布为物理像素，再乘 DPR 折算（缓存）

@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QVector>
 
+#include "core/monitor/MainThreadProbe.h"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #ifndef MOD_NOREPEAT
@@ -81,6 +83,12 @@ bool modifiersMatch(quint32 required)
 
 LRESULT CALLBACK priorityKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
+    // T-068 取证打点：机理同 GlobalMouseHook（见 MainThreadProbe 头注释）
+    const KBDLLHOOKSTRUCT *probeInfo =
+        (nCode >= 0) ? reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam) : nullptr;
+    const MainThreadProbe::HookCall probeCall(
+        MainThreadProbe::SrcPriorityKey, probeInfo ? probeInfo->time : 0,
+        probeInfo && (probeInfo->flags & LLKHF_INJECTED) != 0);
     if (nCode >= 0 && g_owner && !g_pri.isEmpty()) {
         const UINT msg = static_cast<UINT>(wParam);
         const bool down = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);

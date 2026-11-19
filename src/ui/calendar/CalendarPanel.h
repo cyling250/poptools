@@ -81,6 +81,8 @@ private:
     // 把设置矩形钳回主屏内（宽高下限 520/420），screen 无效时跳过
     void clampSettings();
     QPoint logicalPos(const QPoint &physical) const; // 物理 → Qt 逻辑
+    // 线程池壁纸成品回主线程（30s 定时器异步路径尾段）：装缓存 + 重绘（T-068）
+    void onWallpaperComputed(const QImage &img);
     void openEditor(const QDate &date, const QRect &cell);
     // 模态信息框（trackModal 托管，show 后再居中）
     void showInfo(const QString &title, const QString &text);
@@ -123,6 +125,7 @@ private:
     QDate m_modalDate;         // 编辑器打开中的日期（该日摘要链接激活，T-067）
     QTimer *m_clock = nullptr;
     QTimer *m_wallpaperTimer = nullptr;
+    bool m_wallpaperBusy = false; // 壁纸线程池重算在飞（30s 定时器重入护栏，T-068）
     GlobalMouseHook *m_editorHook = nullptr; // 日程编辑器外点关闭兜底（随编辑器装卸）
     std::function<QString(int, int, int)> m_digestQuery; // Goody 查询槽转发（可空）
     std::function<QString(int, int)> m_monthlyQuery;

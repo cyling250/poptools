@@ -1,12 +1,15 @@
 #include "MonthlyRecordJob.h"
 
+#include <QCoreApplication>
 #include <QDate>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QPointer>
 #include <QSaveFile>
+#include <QThreadPool>
 
 #include "LlmClient.h"
 #include "../settings/Settings.h"
@@ -26,6 +29,34 @@ const char *kMonthlySystemPrompt =
     "2. 固定四节：## 本月概览 / ## 关键工作与进展 / ## 值得注意 / ## 下月线索；\n"
     "3. 总长控制在 600 字以内，信息密度优先。\n"
     "直接输出月报本身，不要开场白。";
+
+// 整月逐日原文拼接（保序保头：截断优先舍尾部日子）。纯读盘无共享状态，
+// 线程池可调——T-068：开机冷缓存下 31 次文件开读曾在主线程 ~380ms（探针
+// 实录），顶成低级钩子停摆
+QString buildMonthDigest(const QString &goodyDir, int year, int month)
+{
+    QString digest;
+    const QDate first(year, month, 1);
+    if (!first.isValid())
+        return digest;
+    const int days = first.daysInMonth();
+    for (int d = 1; d <= days; ++d) {
+        const QString date = MonthlyRecordJob::monthKey(year, month) + QLatin1Char('-')
+                             + QString::number(d).rightJustified(2, QLatin1Char('0'));
+        QFile f(goodyDir + QStringLiteral("/daily/") + date + QStringLiteral(".md"));
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        QString day = QString::fromUtf8(f.readAll());
+        if (day.size() > kPerDayChars)
+            day = day.left(kPerDayChars) + QStringLiteral("\n…（截断）");
+        digest += QStringLiteral("\n---- %1 ----\n").arg(date) + day + QLatin1Char('\n');
+        if (digest.size() > kTotalBudget) {
+            digest += QStringLiteral("\n…（超出预算已截断）");
+            break;
+        }
+    }
+    return digest;
+}
 } // namespace
 
 MonthlyRecordJob::MonthlyRecordJob(const QString &goodyDir, QObject *parent)
@@ -67,7 +98,8 @@ bool MonthlyRecordJob::monthHasDailyData(const QString &goodyDir, int year, int 
 void MonthlyRecordJob::runForMonth(int year, int month,
                                    const std::function<void(bool, const QString &)> &done)
 {
-    // 重入闸门（开机触发与对话工具触发共用一个 m_busy）
+    // 重入闸门（开机触发与对话工具触发共用一个 m_busy；T-068 起置位提前到
+    // 聚合期——聚合也在飞行窗口内，防重入堆叠）
     if (m_busy || m_client->busy()) {
         done(false, QStringLiteral("上一次月报还在生成中"));
         return;
@@ -82,31 +114,35 @@ void MonthlyRecordJob::runForMonth(int year, int month,
         return;
     }
 
-    // 整月逐日原文拼接（保序保头：截断优先舍尾部日子）
-    QString digest;
-    const int days = first.daysInMonth();
-    for (int d = 1; d <= days; ++d) {
-        const QString date = monthKey(year, month) + QLatin1Char('-')
-                             + QString::number(d).rightJustified(2, QLatin1Char('0'));
-        QFile f(m_goodyDir + QStringLiteral("/daily/") + date + QStringLiteral(".md"));
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-            continue;
-        QString day = QString::fromUtf8(f.readAll());
-        if (day.size() > kPerDayChars)
-            day = day.left(kPerDayChars) + QStringLiteral("\n…（截断）");
-        digest += QStringLiteral("\n---- %1 ----\n").arg(date) + day + QLatin1Char('\n');
-        if (digest.size() > kTotalBudget) {
-            digest += QStringLiteral("\n…（超出预算已截断）");
-            break;
-        }
-    }
+    // T-068：31 天文件拼接挪线程池（开机冷缓存下主线程 ~380ms，探针实录，
+    // 顶成低级钩子停摆）；聚合完回主线程续发 LLM 请求。done 随链路带回主
+    // 线程回调（池线程只拷贝不调用）
+    m_busy = true;
+    const QString key = monthKey(year, month);
+    const QString goodyDir = m_goodyDir;
+    QPointer<MonthlyRecordJob> self(this);
+    QThreadPool::globalInstance()->start([self, goodyDir, year, month, key, done] {
+        const QString digest = buildMonthDigest(goodyDir, year, month);
+        QMetaObject::invokeMethod(QCoreApplication::instance(),
+                                  [self, digest, key, year, month, done] {
+                                      if (self)
+                                          self->sendMonthlyRequest(year, month, key, digest, done);
+                                  },
+                                  Qt::QueuedConnection);
+    });
+}
+
+// 主线程续段（聚合完成回投）：空摘要/发失败即回 done；发送成功后 LLM 回包
+// 里写盘收尾。done 由本函数链路在主线程回调
+void MonthlyRecordJob::sendMonthlyRequest(int year, int month, const QString &key,
+                                          const QString &digest,
+                                          const std::function<void(bool, const QString &)> &done)
+{
     if (digest.trimmed().isEmpty()) {
+        m_busy = false;
         done(false, QStringLiteral("该月无日摘要可汇总"));
         return;
     }
-
-    m_busy = true;
-    const QString key = monthKey(year, month);
     QJsonArray messages;
     messages.append(QJsonObject{{"role", QStringLiteral("system")},
                                 {"content", QString::fromUtf8(kMonthlySystemPrompt)}});

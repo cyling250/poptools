@@ -2,11 +2,13 @@
 
 #include "BoxAdjustOverlay.h"
 
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QPainter>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 
@@ -83,13 +85,36 @@ void BoxPanel::onDutyStarted()
         m_wallpaperTimer = new QTimer(this);
         m_wallpaperTimer->setInterval(30000);
         connect(m_wallpaperTimer, &QTimer::timeout, this, [this] {
-            if (m_renderer)
-                m_renderer->refreshWallpaper();
-            render();
+            // T-068：壁纸重算挪线程池（与 CalendarPanel 同款——主线程挂低级钩子，
+            // 重算 ~160ms 即全系统鼠标排队）；签名未变时免算零开销
+            if (!m_renderer || m_wallpaperBusy)
+                return;
+            if (!m_renderer->wallpaperRefreshNeeded())
+                return;
+            m_wallpaperBusy = true;
+            const QSize sz = m_renderer->wallpaperSize();
+            QPointer<BoxPanel> self(this);
+            QThreadPool::globalInstance()->start([self, sz] {
+                const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
+                    if (self)
+                        self->onWallpaperComputed(img);
+                }, Qt::QueuedConnection);
+            });
         });
     }
     m_wallpaperTimer->start();
     refreshEntries();
+}
+
+// 线程池壁纸成品回主线程：装缓存并整帧重绘（30s 定时器异步路径的尾段）
+void BoxPanel::onWallpaperComputed(const QImage &img)
+{
+    m_wallpaperBusy = false;
+    if (img.isNull() || !m_renderer)
+        return;
+    m_renderer->adoptWallpaper(img);
+    render();
 }
 
 // 值守停止：仅停壁纸定时器。stopDuty 不销毁画布/renderer，commitSurface 也不检查

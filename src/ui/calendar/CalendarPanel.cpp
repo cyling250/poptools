@@ -18,8 +18,10 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPointer>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QThreadPool>
 #include <QTimer>
 
 #include <algorithm>
@@ -73,13 +75,37 @@ void CalendarPanel::onDutyStarted()
         m_wallpaperTimer = new QTimer(this);
         m_wallpaperTimer->setInterval(30000);
         connect(m_wallpaperTimer, &QTimer::timeout, this, [this] {
-            if (!m_renderer)
+            // T-068：壁纸重算（磁盘整图解码 + 两遍盒模糊，100~200ms 级）挪线程
+            // 池——主线程挂着 WH_MOUSE_LL/WH_KEYBOARD_LL 低级钩子，主线程停摆
+            // =全系统鼠标排队（用户感知"拖动卡一下再瞬移"）；签名未变时
+            // refreshNeeded 内部已续时基免算，只有真换壁纸才进线程池
+            if (!m_renderer || m_wallpaperBusy)
                 return;
-            m_renderer->refreshWallpaper();
-            render();
+            if (!m_renderer->wallpaperRefreshNeeded())
+                return;
+            m_wallpaperBusy = true;
+            const QSize sz = m_renderer->wallpaperSize();
+            QPointer<CalendarPanel> self(this);
+            QThreadPool::globalInstance()->start([self, sz] {
+                const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
+                    if (self)
+                        self->onWallpaperComputed(img);
+                }, Qt::QueuedConnection);
+            });
         });
     }
     m_wallpaperTimer->start();
+}
+
+// 线程池壁纸成品回主线程：装缓存并整帧重绘（30s 定时器异步路径的尾段）
+void CalendarPanel::onWallpaperComputed(const QImage &img)
+{
+    m_wallpaperBusy = false;
+    if (img.isNull() || !m_renderer)
+        return;
+    m_renderer->adoptWallpaper(img);
+    render();
 }
 
 void CalendarPanel::onDutyStopped()
