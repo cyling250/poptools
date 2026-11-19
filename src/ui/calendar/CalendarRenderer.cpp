@@ -2,6 +2,7 @@
 
 #include "CalendarPaintUtils.h" // 圆角矩形路径（S-03 模块内收敛）
 #include "ui/shared/DesktopSharedCanvas.h"
+#include "ui/ThemeColors.h" // overlay::warmAccent（T-071 橙收敛）
 #include "core/calendar/ChineseCalendar.h"
 
 #include <QFontMetrics>
@@ -180,7 +181,10 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                 QColor lc(188, 188, 188, 255);
                 switch (label.kind) {
                     case DayLabelKind::SolarTerm: lc = QColor(112, 214, 138, 255); break;
-                    case DayLabelKind::Holiday: lc = QColor(240, 166, 72, 255); break;
+                    case DayLabelKind::Holiday:
+                        lc = overlay::warmAccent(); // T-071 收编（日历家族暖强调，见 ThemeColors.h）
+                        lc.setAlpha(255);
+                        break;
                     case DayLabelKind::LunarMonth: lc = QColor(214, 214, 214, 255); break;
                     default: lc = QColor(188, 188, 188, 255); break;
                 }

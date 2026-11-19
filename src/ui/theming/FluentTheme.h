@@ -25,7 +25,13 @@ namespace poptools {
 //   * 样式一律从 fluentTheme() 取值，禁止在窗口代码里写十六进制字面量
 //     （贴桌面玻璃家族的半透明描边除外——alpha 语义色，注释声明）；
 //   * 常暗语境（截图覆盖层/贴桌面面板上的浮层）取 fluentTheme(true) 固定
-//     深色套，不随系统明暗切换（先例：capture ToolBar 常暗玻璃面板）。
+//     深色套，不随系统明暗切换（先例：capture ToolBar 常暗玻璃面板）；
+//   * **已定案豁免**：① ui/goody/GoodyTheme.h 是 Goody 窗的第二 token 表
+//     （T-070 按 dsh WebUI 视觉拍板，两表互不引用）——Goody 窗内配色取
+//     goody_theme，不入本表口径；② 内容惯例色（ToolBar 16 色绘图调色盘、
+//     CodeHighlighter 语法配色、取色卡白底信息区）是用户内容/功能语义，
+//     非 UI 配色；③ 无壁纸时的回退渐变底（DesktopWallpaperProvider）是
+//     内容画面兜底。以上均注释声明，不视为违反本纪律。
 // ============================================================
 
 // ---- 结构刻度（Win11 Geometry / Content layout 官方规范） ----

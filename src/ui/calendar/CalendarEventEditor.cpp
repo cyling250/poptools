@@ -3,6 +3,7 @@
 #include "CalendarPaintUtils.h" // 圆角矩形路径（S-03 模块内收敛，原 editorRoundPath）
 #include "core/calendar/CalendarTaskStore.h"
 #include "core/calendar/ChineseCalendar.h"
+#include "ui/ThemeColors.h" // overlay::warmAccent（T-071 橙收敛）
 #include "ui/theming/FluentTheme.h"
 
 #include <QKeyEvent>
@@ -74,8 +75,9 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
     titleFont.setPixelSize(15);
     titleFont.setBold(true);
     g.setFont(titleFont);
-    g.setPen(QColor(245, 245, 245));
-    g.drawText(QPointF(16, 15 + 14),
+    g.setPen(QColor(t.textPrimary)); // T-071 收编：字面量 (245,245,245) → 深套 token
+    // 基线经 ascent 锚定（P-064 口径：禁"字号+手算偏移"，DPR 下会漂）
+    g.drawText(QPoint(16, 15 + QFontMetrics(titleFont).ascent()),
                QStringLiteral("%1年%2月%3日 %4")
                    .arg(m_date.year())
                    .arg(m_date.month())
@@ -83,8 +85,8 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
                    .arg(ChineseCalendar::weekdayName(m_date)));
 
     m_checkRect = QRect(width() - 42, 10, 28, 28);
-    g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60));
-    QPen checkPen(QColor(240, 166, 72), 2);
+    g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60)); // 玻璃按压底
+    QPen checkPen(overlay::warmAccent(), 2); // T-071 收编：散写橙 → 具名语义色
     checkPen.setCapStyle(Qt::RoundCap);
     checkPen.setJoinStyle(Qt::RoundJoin);
     g.setPen(checkPen);
@@ -108,8 +110,10 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
     smallFont.setFamilies({ QStringLiteral("Microsoft YaHei UI") });
     smallFont.setPixelSize(11);
     g.setFont(smallFont);
-    g.setPen(QColor(150, 150, 150));
-    g.drawText(QPoint(16, height() - 58 + 11), QStringLiteral("数据保存在本机"));
+    g.setPen(QColor(t.textTertiary)); // T-071 收编：字面量 (150,150,150) → 深套 token
+    // 基线经 ascent 锚定（P-064 口径，禁手算偏移）
+    g.drawText(QPoint(16, height() - 58 + QFontMetrics(smallFont).ascent()),
+               QStringLiteral("数据保存在本机"));
 }
 
 int CalendarEventEditor::hitTool(const QPoint &p) const
@@ -166,7 +170,8 @@ void CalendarEventEditor::insertTime()
 
 void CalendarEventEditor::drawToolIcon(QPainter *g, int index, const QRect &r)
 {
-    QPen pen(QColor(220, 220, 220), 1.4);
+    // T-071 收编：字面量 (220,220,220) → 深套 token（常暗语境自取深套）
+    QPen pen(QColor(fluentTheme(true).textSecondary), 1.4);
     pen.setCapStyle(Qt::RoundCap);
     pen.setJoinStyle(Qt::RoundJoin);
     g->setPen(pen);
@@ -197,7 +202,7 @@ void CalendarEventEditor::drawToolIcon(QPainter *g, int index, const QRect &r)
             break;
         case 4: { // 颜色
             g->drawEllipse(QPointF(cx, cy), 7, 7);
-            g->setBrush(QColor(220, 220, 220));
+            g->setBrush(QColor(fluentTheme(true).textSecondary));
             g->drawEllipse(QPointF(cx - 2.8, cy - 2.8), 1.2, 1.2);
             g->drawEllipse(QPointF(cx + 2.6, cy - 2.8), 1.2, 1.2);
             g->drawEllipse(QPointF(cx - 2.8, cy + 2.6), 1.2, 1.2);

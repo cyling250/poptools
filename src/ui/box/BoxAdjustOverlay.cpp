@@ -127,8 +127,10 @@ void BoxAdjustOverlay::paintEvent(QPaintEvent *event)
         QFont f;
         f.setPixelSize(12);
         g.setFont(f);
+        // T-071：补 AlignVCenter——24px 高条带内文字原按条带顶绘制（Qt 矩形
+        // drawText 缺省顶对齐），"bottom-34" 的视觉垂直居中是巧合不是计算
         g.drawText(QRect(0, m_screen.bottom() - 34, m_screen.width(), 24),
-                   Qt::AlignHCenter,
+                   Qt::AlignHCenter | Qt::AlignVCenter,
                    QStringLiteral("内部拖动移动位置；拖右缘改列数（当前 %1 列）").arg(cols));
     }
 }

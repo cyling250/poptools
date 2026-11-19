@@ -159,7 +159,8 @@ namespace poptools
         return nullptr;
     }
 
-    // 行内竖分隔线（两行各自持有，视觉上与行高等高）
+    // 行内竖分隔线（两行各自持有，视觉上与行高等高）。白 alpha 为玻璃家族
+    // 半透明语义（FluentTheme.h 纪律注已定案豁免，此处注释声明）
     QFrame *ToolBar::makeSeparator()
     {
         auto *sep = new QFrame(this);
@@ -199,7 +200,8 @@ namespace poptools
                           "QToolButton:checked { background: %3; }")
                           .arg(tb.bgBase, tb.ctrlHover, tb.accent));
 
-        // 浮起阴影（大模糊低透明度，近似双层观感）
+        // 浮起阴影（大模糊低透明度，近似双层观感；纯黑 alpha 属投影语义，
+        // 非 UI 配色，FluentTheme.h 纪律注已定案豁免）
         auto *shadow = new QGraphicsDropShadowEffect(this);
         shadow->setBlurRadius(28);
         shadow->setOffset(0, 6);

@@ -1,5 +1,8 @@
 #include "DesktopAdjustOverlay.h"
 
+#include "ui/ThemeColors.h" // overlay::warmAccent（T-071 橙收敛）
+
+#include <QFontMetrics>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -110,7 +113,7 @@ void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
     g.setPen(Qt::NoPen);
     g.setBrush(QColor(18, 20, 26, 255));
     g.drawRect(m_checkRect);
-    QPen checkPen(QColor(240, 166, 72), 2);
+    QPen checkPen(overlay::warmAccent(), 2); // T-071 收编：散写橙 → 具名语义色
     checkPen.setCapStyle(Qt::RoundCap);
     checkPen.setJoinStyle(Qt::RoundJoin);
     g.setPen(checkPen);
@@ -123,7 +126,8 @@ void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
     font.setPixelSize(12);
     g.setFont(font);
     g.setPen(QColor(240, 240, 240));
-    g.drawText(QPoint(inner.left() + 4, inner.top() + 22),
+    // 基线经 ascent 锚定（P-064 口径：+22 手算偏移在 DPR 下会漂）
+    g.drawText(QPoint(inner.left() + 4, inner.top() + 10 + QFontMetrics(font).ascent()),
                QStringLiteral("拖动边缘调整大小，拖动内部移动位置"));
 }
 

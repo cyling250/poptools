@@ -25,6 +25,9 @@ inline QColor accentBadge() { QColor c = accent(); c.setAlpha(235); return c; }
 inline QColor smartOrange() { return QColor(255, 140, 0); }      // 智能框选预高亮
 inline QColor itemGreen()   { return QColor(0, 200, 120); }      // 标注选中态
 inline QColor mask()        { return QColor(0, 0, 0, 105); }     // 压暗蒙版
+// 日历家族共用暖强调色（恒暗语境，不随主题切换）：节日/完成勾/调整确认钮。
+// 此前 (240,166,72) 三处散写无出处（T-071 收敛为具名单一来源）
+inline QColor warmAccent()  { return QColor(240, 166, 72); }
 } // namespace overlay
 
 inline bool systemSchemeDark()

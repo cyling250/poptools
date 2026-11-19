@@ -18,6 +18,7 @@
 #include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 
 #include "ToolBar.h"
+#include "ui/theming/FluentTheme.h" // T-071：escToast 配色收编深套 token
 #include "CaptureContext.h"
 #include "SelectionController.h"
 #include "AnnotationEditor.h"
@@ -1074,16 +1075,26 @@ namespace poptools
             // 胶囊提示：深色底白字在任何截图内容上都可读；不拦鼠标不挡操作
             // （P-022/P-023：样式写在控件自身，objectName ID 选择器）
             m_escToast = new QLabel(this);
-            m_escToast->setObjectName(QStringLiteral("escExitToast"));
+            // T-071 收编：深色玻璃胶囊配色取常暗 token（bgCard 底 235 alpha/
+            // textPrimary 字/白 45 描边 = 玻璃家族 alpha 语义）；radius/padding/
+            // 字号 13px 无对应刻度档，保留原值
+            const FluentTokens t = fluentTheme(true);
+            QColor bg = QColor(t.bgCard);
+            bg.setAlpha(235);
             m_escToast->setStyleSheet(QStringLiteral(
                 "QLabel#escExitToast {"
-                "  background: rgba(28, 28, 30, 235);"
-                "  color: #FFFFFF;"
+                "  background: rgba(%1, %2, %3, %4);"
+                "  color: %5;"
                 "  border: 1px solid rgba(255, 255, 255, 45);"
                 "  border-radius: 6px;"
                 "  padding: 7px 16px;"
                 "  font-size: 13px;"
-                "}"));
+                "}")
+                .arg(bg.red())
+                .arg(bg.green())
+                .arg(bg.blue())
+                .arg(bg.alpha())
+                .arg(t.textPrimary));
             m_escToast->setAttribute(Qt::WA_TransparentForMouseEvents);
         }
         m_escToast->setText(QStringLiteral("再按一次 ESC 退出截图 · 标注将丢弃"));
@@ -1226,7 +1237,9 @@ namespace poptools
         p.drawLine(cx, zoomRect.top(), cx, zoomRect.bottom());
         p.restore();
 
-        // ---- 下 1/3：颜色信息区（白底 + 圆角色块徽章 + Hex/RGB 文本） ----
+        // ---- 下 1/3：颜色信息区（白底 + 圆角色块徽章 + Hex/RGB 文本）。
+        // 白底黑字是取色功能语义（中性底上判色），非 UI 配色——FluentTheme.h
+        // 纪律注已定案豁免，注释声明 ----
         const QRect colorRect(cardRect.left(), zoomRect.bottom() + 1, kZoomW, kColorH);
         p.fillRect(colorRect, Qt::white);
         const QRect chip(colorRect.left() + 12, colorRect.top() + 12, 26, 26);

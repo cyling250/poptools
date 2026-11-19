@@ -224,6 +224,8 @@ QImage DesktopWallpaperProvider::renderWallpaper(const QImage &src, int width, i
     QPainter g(&bmp);
     g.setRenderHint(QPainter::SmoothPixmapTransform);
     if (src.isNull()) {
+        // 无壁纸时的内容回退渐变底（模拟深色壁纸观感），非 UI 配色——
+        // FluentTheme.h 纪律注已定案豁免
         QLinearGradient grad(0, 0, width, height);
         grad.setCoordinateMode(QGradient::ObjectMode);
         grad.setColorAt(0.0, QColor(24, 28, 52));
