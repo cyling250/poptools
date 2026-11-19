@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QVariant>
 
 namespace poptools {
 
@@ -93,6 +94,10 @@ void ProcessRow::finish(State state, const QString &resultText)
 void ProcessRow::setSummary(const QString &summary)
 {
     m_summary = summary;
+    // 同步进动态属性：GoodyWindow::applyTheme 主题切换时经
+    // property("goodySummary") 读回原摘要重抛（只写成员会让主题切换后
+    // 所有过程行摘要清空成空串）
+    setProperty("goodySummary", QVariant(summary));
     refreshHead();
 }
 

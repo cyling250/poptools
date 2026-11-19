@@ -50,7 +50,8 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
         return lines.join(QLatin1Char('\n'));
     }());
 
-    connect(m_text, &QPlainTextEdit::textChanged, this, [this] { update(); });
+    // 文本变化只发生在子控件自身绘制内，父窗绘制（边框/标题/工具条/脚注）
+    // 不依赖文本内容——不再每键整窗 update()（T-071 夜间批次收编）
 }
 
 void CalendarEventEditor::paintEvent(QPaintEvent *)
