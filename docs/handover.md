@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-19 19:25（T-070 落码完成：Goody 按 deepseek-harness 形式重构——后端 ChatSession v3 会话事件日志/块化消息/审批审计对/投影派生模型历史（v1/v2 迁移），前端 dsh WebUI 形态（文档流气泡/ProcessRow 过程行/composer 大圆角卡/侧栏 280），提交 4e153c6，ctest 99 绿，未真机验收；dsh 源码研读存 temp_scripts/dl_dsh/） · Agent_20261119172053
 > 最后更新：2026-11-19 17:20（T-069 落码完成：UI 现代化改版 M0-M3 全流程——Fluent token 底座 theming 库 + 设置界面 SettingCard/ToggleSwitch/即时生效 + Goody 头像行/卡片描边/自适应输入 + 全局配色统一 Fluent token（ThemeColors 表退役），构建+ctest 绿，未提交待用户目测验收；方案 docs/design/20261119-ui-fluent-restyle-proposal.md） · Agent_20261119172053
 > 最后更新：2026-11-18 16:00（T-067 落码完成：Goody 起居注式日摘要（静默自主）+ 月度滚动月报（开机重写【月报更新】）+ 桌面日历摘要链接展示（双击面板后可点/notepad），textlog 接入日总结（T-066b 收口），ctest 97 绿，未提交待真机验收） · Agent_20261118130500
 > 最后更新：2026-11-18 00:30（合并并行会话：本地「桌面日历单屏化+多屏花屏根修+拖动体验闭环」重编号 T-063（原本地草稿编号 T-059，与远端收纳盒 T-059 冲突）、「启动更新自查」T-064（原 T-060）、P-066（原 P-063）；特性已移植到远端槽位协议 CLK4 架构（虚拟桌面并集画布+双缓冲帧翻转+覆盖层预览拖动）） · Agent_20261117164000
@@ -87,47 +88,45 @@
   结构性冲突实锤转 UIA（weasel 本机实证）
 - **相关坑**：P-067 ｜ 细档：[handover/t066_tsf_research.md](handover/t066_tsf_research.md)
 
-### T-065 F1/F3 裸键热键全局最高优先级（LL 优先钩子 + RegisterHotKey 兜底）
-- **执行智能体**：Agent_20261118102200
-- **结果**：✅ 裸键热键加挂 WH_KEYBOARD_LL 优先钩子——命中即吞键+QueuedConnection 触发（后装压过他家钩子，探针双相位 hook_saw=0 实证）；修饰键严格相等、按住重复吞而不触发、up 配对吞、RegisterHotKey 兜底两路径互斥不双触发；注册成功=任一机制可用（托盘不再误报"已被占用"）。改动仅 core/hotkey/GlobalHotKey.{h,cpp}，ctest 96 绿，提交 5287349，用户真机验收通过
-- **相关坑**：无 ｜ 细档：探针 temp_scripts/script_20261118_103000_hotkey_verify.py + out/ 产物
-
-### T-063 桌面日历单屏化+多屏花屏根修+拖动体验闭环（并入远端槽位协议 CLK4）
-- **执行智能体**：Agent_20261117164000（并行会话产物：与远端收纳盒 T-059/T-060 撞号，合并时重编）
-- **结果**：✅ 单屏归属（中心落在哪屏归哪屏+钳制+画布升格虚拟桌面并集 3840×1080）、协议 CLK4
-  （v4 双缓冲帧翻转 frameIndex，撕裂归零）、DLL 擦除两遍法（槽位并集外原生擦除/内双缓冲合成，
-  多屏复制/花屏根治）、拖动跟手三件套（覆盖层预览+窗口固定屏+全局坐标位移）、确认空窗修复、
-  ✕ 取消移除（拖到哪里算哪里）；桌面层调整期间槽置空隐藏（复用远端每槽 prev 失效）；构建
-  ctest 96 绿；**未真机回归**（跨屏拖动/确认无空窗/悬停不闪）
-- **相关坑**：P-066 ｜ 细档：[handover/t063_calendar_single_screen.md](handover/t063_calendar_single_screen.md)
-
-### T-062 全仓库逐模块代码卫生（夜间自动批次，9 模块 9 提交）
-- 执行智能体：Agent_20261117004800
-- 结果：✅ 串行子代理流水线（每模块 R1 审查→F 修改→R2 复审→[F2→R3] 直到 PASS）跑完 9 模块：收纳盒/共享面+hook/日历/应用壳/设置/截图/Goody/监控/小域，提交 e9a1232..8b41161；注释全覆盖 + 结构去重（净减约 300 行）+ 真缺陷修复 ~50（全带 T-062 修复: 标注，行为面即此）；每模块构建+ctest 全绿；跨进程协议逐字节一致核查通过；审查报告全档 temp_scripts/hygiene/
-- 相关坑：P-065 ｜ 细档：报告即细档（temp_scripts/hygiene/{box,shared,calendar,shell,settings,capture,goody,monitor,small}-{r1,fix-r1,r2}.md，含全部行为等价论证与推演链）
-
-### T-058 桌面日历悬停按钮整面板闪烁根修（真机已验收）
-- **执行智能体**：Agent_20261116203300（用户真机两轮反馈逐层定位：DLL 双缓冲修壁纸中间帧后仍闪 → 暴露真正根因在 Qt 撕帧）
-- **结果**：✅ 根因 = 渲染器在共享位图上就地「全屏清透明→重绘」，10~30ms 窗口内 explorer 采到近全透明中间态 → 整面板消失一帧再恢复。修复：①Qt 私有暂存帧渲染 + `publishFrame` 整帧 memcpy 原子发布（CalendarSharedCanvas 新方法）；②DLL WM_ERASEBKGND 双缓冲（壁纸改道进内存 DC + 日历叠加，一次 BitBlt 上屏）；explorer 内 +8MB 内存位图。滑过三按钮真机复验不闪（用户 VeryGOOD），随本轮提交推送
-- **相关坑**：P-061、P-062
-
-### T-057 日历头部收编：只留翻页+调整按钮，其余并入应用设置页 + 脏矩形修闪烁
-- **执行智能体**：Agent_20261116165900（用户二轮目测：hover 闪 / 无意义气泡框 / 设置点多卡死，并拍板头部只留翻页+调整）
-- **结果**：✅ ①DLL WM_CLONE_UPDATE 整桌面失效 → 日历面板+24px 脏矩形（P-061，修闪烁）；②头部 5→3 按钮 {上一页,下一页,调整}（新增 Adjust 十字箭头图标），删 hover 文字气泡；③日历设置五开关+字号+清单显隐+搜索/选日期/导入导出 → 设置对话框新增「桌面日历」页（AppServices 六槽位：apply/search/pick/export/import/openCalendarSettings；MainWindow 传 services + onShowSettings(bool)；CalendarModule 托盘「日历设置」指向应用设置页，shutdown 撤槽）；④删 CalendarMenuForm/CalendarSettingsForm（插件菜单全占位无损失）；⑤文字锚点基线→左上角（GDI+ 语义，修日期骑线）。注入自验：三按钮翻页均重绘、旧按钮位死亡；ctest 96 绿
-- **相关坑**：P-061 ｜ 未提交待用户
-
-### T-056 桌面日历首轮目测修复：表头错位 / 今日双框 / 账户功能 / 弹窗卡死
-- **执行智能体**：Agent_20261116165900（用户真机目测报 4 问题，注入协议取证 + 修复闭环）
-- **结果**：✅ 四修全落地，ctest 96 绿：①星期表头改矩形居中绘制（QFontMetrics 独立测宽与渲染引擎系统性偏差 ~10px）；②今日高亮删白线框、发光环外扩 11px 压格边（贴图环带实测内缩 15.5px）；③删云/账户按钮与菜单项（头部 7→5，openMainMenu 索引 6→4）；④卡死根因 = QDialog::done() 只 hide 不析构 → m_modal 永久卡死——改 finished+deleteLater+trackModal(QPointer 对号) 七处弹窗，另修无 parent 弹窗落副屏问题（centerOnPanel 锚定面板）；注入协议闭环自验：开→关→日历仍响应→可重复开
-- **相关坑**：P-058、P-059、P-060 ｜ 未提交待用户。增补（18:03）：用户报编辑器外点偶尔关不掉——根因 P-060，以 GlobalMouseHook 兜底修复（openEditor 内随编辑器装卸），真实点击闭环自验：外点关/内点不误关/收尾关三步全过
-
-> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-056 → [handover/archive/tasks-047-056.md](handover/archive/tasks-047-056.md)
+> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-058 → [handover/archive/tasks-047-058.md](handover/archive/tasks-047-058.md) ｜ T-059~T-065 → [handover/archive/tasks-059-065.md](handover/archive/tasks-059-065.md)
 
 ## 当前任务
 
 > 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
 
-**T-069b 托盘菜单精简 + F1 卡顿打桩（未提交，验收期监控中，2026-11-19）**：
+**T-070 Goody 按 deepseek-harness 形式重构（已提交 4e153c6，待真机验收，2026-11-19）**：
+- 需求单 requirements/20261119-goody-dsh-restyle.md（用户拍板"就按照 dsh 的来"全权委托；
+  dsh=deepseek-ai/deepseek-harness 官方 agent harness，源码已下载解压
+  temp_scripts/dl_dsh/src/，MIT 许可可借鉴；双子代理研读报告：后端 agent-loop/
+  会话事件日志、前端 WebUI 布局规格）
+- 已落码（15 文件 +1184/-488，ctest 99 绿，提交 4e153c6）：
+  ①后端 **ChatSession v3「会话即事件日志」**：事件词表 turn/start|end(system/user/
+  assistant/tool result/approval asked|decided（审计对 fail-closed），模型历史由
+  **投影派生**（"模型可见即已记录"），**消息块化**（text/reasoning/tool_call 块，
+  arguments 保原始 JSON 串）；v1/v2 无损迁移；trim 按完整回合块淘汰（不拆
+  tool_call/result 对，dsh compaction 切点纪律）；四件套按投影消息下标截断事件
+  ②LlmClient：assistant 消息携 blocks+finish（finish_reason 判据）
+  ③GoodyModule loop：turn 边界事件化（completed/max-tokens/aborted/error/blocked
+  五种收束；max-tokens 粘性——截断的 tool_calls 不执行补错误 result）；审批
+  asked/decided 审计事件
+  ④前端 **dsh WebUI 形态**：GoodyTheme token（neutral-bluish 色板/deepseek 蓝/
+  圆角 8-24/字号 11-15），**气泡→文档流**（user 淡蓝 20px 圆角泡右对齐/assistant
+  全宽无框无头像——M2 头像行撤除），**ProcessRow 过程行**（状态徽章点+工具名+
+  摘要折叠行，替代 ⚙/✓✗ 文本行，GoodyModule 经 toolRowStarted/Finished 接入），
+  composer 大圆角卡（自适应 44~200px），发送/停止同位钮（↑/■），侧栏 280，
+  消息列 880 居中，审批卡 warning 描边
+- 待真机验收：①旧会话数据无损迁移（v2 文件载入新格式）②对话/工具调用审批链
+  视觉（淡蓝气泡/过程行徽章/审批卡）③深浅主题切换 ④悬浮球/侧栏多会话不回归
+- 诚实边界：①Cordis 插件体系/HMR/compaction LLM 摘要器不搬（单应用不需要，
+  超限裁剪为回合块淘汰）②消息时间戳仍未实现（schema 之外）③过程行深浅切换
+  徽章色不重抛（finish 态色深浅同值可接受）④代码块 banner（语言标签）未做，
+  悬浮复制钮保留
+- 坑：**临时 QJsonArray range-for 是 UB 陷阱**（"断组"过滤失效/starts 幻影 -1
+  全由此起——Qt 容器临时对象 range-for 悬垂），全部改具名变量遍历；**QtTest
+  -maxwarnings 默认 2000 条**，海量 qWarning 插桩会静默吞掉后续输出（探针失败
+  误判"未执行"），调试用 QFAIL 携带信息
+
+**T-069b 托盘菜单精简 + F1 卡顿打桩（已提交 8ebd1cd，验收期监控中，2026-11-19）**：
 - 需求单 requirements/20261119-tray-menu-f1-probe.md（用户报三件事：①托盘菜单拉起
   时 F1 卡顿 ②偶发 F1 卡顿无法复现要打桩监控 ③菜单精简到 设置/关于/退出）
 - 已落码：①**打桩**：MainThreadProbe 增 mark(tag) 通用链路标记（全量落盘
@@ -146,7 +145,7 @@
 - 代决：「启用桌面日历」=desktopSurface duty 语义（重启不记忆，同原托盘行为）；
   mark 截断 31 字符全量落盘；收纳盒显隐=任一可见→全隐藏
 
-**T-069 UI 现代化改版 Win11 Fluent（未提交，待用户目测验收，2026-11-19）**：
+**T-069 UI 现代化改版 Win11 Fluent（已提交 2cbd47d，待用户目测验收，2026-11-19）**：
 - 需求单 requirements/20261119-ui-fluent-restyle.md（用户三拍板：Win11 Fluent 风/全部
   界面整体改版/方案确认后落码；D1 设置去 OK/Cancel 即时生效、D2 主色保留品牌蓝
   #2B6FF2、D3 贴桌面面板保留 12px 圆角——均已按默认拍板实施）；方案与选型
