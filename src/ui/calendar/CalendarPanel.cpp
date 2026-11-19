@@ -243,7 +243,7 @@ bool CalendarPanel::handleSummaryLinkClick(const QPoint &p)
 // "清屏→重绘"的 10~30ms 窗口内，explorer 的擦除流程可能采到近全透明的中间态
 // ——悬停头部按钮时连续两次渲染重叠，表现为日历整面板消失一帧再恢复（闪烁，T-058）
 void CalendarPanel::renderFrame(const QPoint &hover, const QString &hoverHint,
-                                bool suppressIfAdjusting)
+                                bool suppressIfAdjusting, const QRect &commitDirty)
 {
     if (suppressIfAdjusting && m_adjusting)
         return;
@@ -257,7 +257,34 @@ void CalendarPanel::renderFrame(const QPoint &hover, const QString &hoverHint,
     m_layout = m_renderer->render(&g, m_surface->canvas(), m_settings, m_store, m_today, m_year,
                                   m_month, hover, hoverHint, false, m_digestView);
     g.end();
-    m_surface->commitSurface();
+    // 暂存帧恒整帧绘制；悬停这类只动头部底色/链接高亮的小改动带脏矩形提交，
+    // 免整屏（虚拟桌面并集画布）合成发布（T-071，BoxPanel 同款）
+    if (commitDirty.isEmpty())
+        m_surface->commitSurface();
+    else
+        m_surface->commitSurface(commitDirty);
+}
+
+QRect CalendarPanel::hoverVisualRect(int headerIdx, const QString &hint, bool monthHov,
+                                     bool armedHov) const
+{
+    QRect r;
+    if (!m_layout.has_value())
+        return r;
+    if (headerIdx >= 0 && headerIdx < m_layout->headerButtons.size())
+        r = r.united(m_layout->headerButtons.at(headerIdx));
+    if (!hint.isEmpty())
+        r = r.united(m_layout->guidePill);
+    if (monthHov)
+        r = r.united(m_layout->monthLink);
+    if (armedHov && m_digestView.armedDate.isValid()) {
+        // armedDate → 所在格（首格日期 + 天数差定位；越出显示月的日期 hit
+        // 阶段已过滤）
+        const int idx = int(m_layout->firstCellDate.daysTo(m_digestView.armedDate));
+        if (idx >= 0 && idx < m_layout->rows * 7)
+            r = r.united(m_layout->cellSummaryLinkRect(m_layout->cellRect(idx / 7, idx % 7)));
+    }
+    return r;
 }
 
 void CalendarPanel::tickClock()
@@ -294,10 +321,14 @@ void CalendarPanel::onLeave()
     if (!eventsAccepted())
         return;
     if (m_hover != QPoint(-9999, -9999) || !m_hoverHint.isEmpty()) {
+        const QRect dirty = hoverVisualRect(m_lastHeaderHover, m_hoverHint,
+                                            m_lastMonthLinkHov, m_lastArmedLinkHov);
         m_hover = QPoint(-9999, -9999);
         m_hoverHint.clear();
         m_lastHeaderHover = -1;
-        render();
+        m_lastMonthLinkHov = false; // 离开面板全量复位（原漏复位两个链接标记：
+        m_lastArmedLinkHov = false; // 重进同一链接时"变化才重绘"判等失效）
+        renderFrame(m_hover, m_hoverHint, true, dirty.adjusted(-2, -2, 2, 2));
     }
 }
 
@@ -341,11 +372,16 @@ void CalendarPanel::updateHover(const QPoint &p)
     }
     if (hh != m_lastHeaderHover || hint != m_hoverHint || monthHov != m_lastMonthLinkHov
         || armedHov != m_lastArmedLinkHov) {
+        // T-071：悬停级小改动带脏矩形提交（新旧语义目标可视矩形并集，外扩
+        // 2px 兜描边/悬停底外扩）；翻页/跨日等大改动仍走 render() 整帧
+        const QRect dirty = hoverVisualRect(m_lastHeaderHover, m_hoverHint,
+                                            m_lastMonthLinkHov, m_lastArmedLinkHov)
+                                .united(hoverVisualRect(hh, hint, monthHov, armedHov));
         m_lastHeaderHover = hh;
         m_hoverHint = hint;
         m_lastMonthLinkHov = monthHov;
         m_lastArmedLinkHov = armedHov;
-        render();
+        renderFrame(p, hint, true, dirty.adjusted(-2, -2, 2, 2));
     }
 }
 

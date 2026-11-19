@@ -74,8 +74,14 @@ private:
     // overlay 平移既有帧——桌面擦除链路退出拖动感知路径（跟手天花板）
     void updateAdjustPreview(bool force);
     // 渲染公共体（S-04）：hover/hint 为真实悬停值时画悬停反馈；suppressIfAdjusting
-    // 时调整模式直接跳过（覆盖层自绘装饰）
-    void renderFrame(const QPoint &hover, const QString &hoverHint, bool suppressIfAdjusting);
+    // 时调整模式直接跳过（覆盖层自绘装饰）。commitDirty 空 = 整帧提交（默认）；
+    // 悬停级小改动带脏矩形提交（对齐 BoxPanel 先例，T-071）
+    void renderFrame(const QPoint &hover, const QString &hoverHint, bool suppressIfAdjusting,
+                     const QRect &commitDirty = QRect());
+    // 悬停语义目标 → 可视矩形（脏矩形计算用）：头部按钮/引导胶囊/月报链接/
+    // 激活摘要链接，未命中的项不计入（P-063 口径：按会改变画面的语义目标计）
+    QRect hoverVisualRect(int headerIdx, const QString &hint, bool monthHov,
+                          bool armedHov) const;
     // 秒级跨日检测：仅日期变化才重绘；正处显示月则跟随跳到新月
     void tickClock();
     // 把设置矩形钳回主屏内（宽高下限 520/420），screen 无效时跳过
