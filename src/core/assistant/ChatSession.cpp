@@ -36,6 +36,28 @@ QString evType(const QJsonObject &e)
     return e.value(QStringLiteral("type")).toString();
 }
 
+// 投影首条是否 system 消息（侧栏计数/trim 口径共用）
+bool hasSystemIn(const QJsonArray &msgs)
+{
+    return !msgs.isEmpty()
+        && msgs.at(0).toObject().value(QStringLiteral("role")).toString()
+               == QLatin1String("system");
+}
+
+// 区间内投影消息数（user/assistant/tool/result 各计 1；审计/边界事件不计）。
+// trim 估算回合块淘汰量用，不触碰投影缓存
+int countProjectedEvents(const QJsonArray &events, int begin, int end)
+{
+    int n = 0;
+    for (int i = begin; i < end; ++i) {
+        const QString t = evType(events.at(i).toObject());
+        if (t == QLatin1String(kEvUser) || t == QLatin1String(kEvAssistant)
+            || t == QLatin1String(kEvToolResult))
+            ++n;
+    }
+    return n;
+}
+
 // v2 messages 数组的序列合法性过滤（迁移入口用，原 R5-C2 逻辑原样保留）。
 // 丢弃：① 无 role 的空对象 ② role 不在白名单 ③ 孤儿 tool（缺配对）
 // ④ tool_calls 后缺 tool 回应的断裂 assistant 项（整组丢弃）
@@ -141,10 +163,18 @@ ChatSession::ChatSession(const QString &storePath, QObject *parent)
     m_saveTimer = new QTimer(this);
     m_saveTimer->setSingleShot(true);
     m_saveTimer->setInterval(kSaveDebounceMs);
-    connect(m_saveTimer, &QTimer::timeout, this, &ChatSession::save);
+    connect(m_saveTimer, &QTimer::timeout, this, &ChatSession::saveAsync);
+    m_ioPool.setMaxThreadCount(1); // 落盘写串行化：不重叠、后到后提交
     // 从未 load 的实例（单测直 append 的用法/防御路径）也保证"恒有一个
     // 可用会话"不变量，append/size 直接可用
     ensureDefaultSession();
+}
+
+ChatSession::~ChatSession()
+{
+    // 防抖写走 IO 池：析构等待在途写完成（lambda 只捕快照值不捕 this，
+    // 对象先亡也不悬垂；这里等待只为"退出即落盘"的完整性）
+    m_ioPool.waitForDone();
 }
 
 void ChatSession::load()
@@ -320,6 +350,7 @@ void ChatSession::load()
 void ChatSession::save()
 {
     m_saveTimer->stop(); // 显式落盘即清挂起的防抖（退出 flush 用）
+    m_ioPool.waitForDone(); // 排空在途/排队的异步快照，保证本同步写最后提交
     QDir().mkpath(QFileInfo(m_path).absolutePath());
     QSaveFile f(m_path);
     if (!f.open(QIODevice::WriteOnly)) {
@@ -344,6 +375,38 @@ void ChatSession::save()
         qWarning("会话落盘失败（提交）：%s", qUtf8Printable(m_path));
 }
 
+// 防抖到期（T-071）：序列化 + 写盘挪 IO 池——工具密集回合旧路径每秒一次
+// 全会话全量序列化+写盘在 GUI 线程（红线①磁盘 IO 禁入主线程）。
+// 快照 = 浅拷贝（QJsonArray COW 共享）：池内序列化读共享数据，主线程此后
+// 的 append 触发 detach 各改各的，互不干扰。lambda 不捕 this——对象析构
+// 后在途写仍安全完成
+void ChatSession::saveAsync()
+{
+    QDir().mkpath(QFileInfo(m_path).absolutePath());
+    QJsonArray sessions;
+    for (const SessionData &s : m_sessions) {
+        sessions.append(QJsonObject{{"id", s.id},
+                                    {"title", s.title},
+                                    {"updatedAt", double(s.updatedAtMs)},
+                                    {"events", s.events}});
+    }
+    const QJsonObject root{{"version", kSessionVersion},
+                           {"active", activeSessionId()},
+                           {"sessions", sessions}};
+    const QString path = m_path;
+    m_ioPool.start([path, root] {
+        QSaveFile f(path);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qWarning("会话落盘失败（打开文件）：%s：%s", qUtf8Printable(path),
+                     qUtf8Printable(f.errorString()));
+            return;
+        }
+        f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+        if (!f.commit())
+            qWarning("会话落盘失败（提交）：%s", qUtf8Printable(path));
+    });
+}
+
 void ChatSession::saveSoon()
 {
     if (!m_saveTimer->isActive())
@@ -355,10 +418,14 @@ void ChatSession::saveSoon()
 void ChatSession::appendEvent(const QJsonObject &event)
 {
     SessionData &s = active();
+    const int ei = s.events.size();
     s.events.append(event);
     touch();
-    rederive();
+    projectAppended(event, ei); // 增量投影：只消费新事件（旧路径每事件全量
+                                // 重投影，回合期累计 O(n²)）
     trim();
+    active().messageCount =
+        m_derived.size() - (hasSystemIn(m_derived) ? 1 : 0); // 侧栏口径同步
     emit changed();
 }
 
@@ -439,6 +506,58 @@ void ChatSession::clear()
 
 // ---- 投影 ----
 
+// 单事件投影（system 事件除外——"取最后一条"需整流语境，走 deriveEvents
+// 全量或 projectAppended 的替换逻辑）。返回是否投影（审计/边界事件 false）
+static bool deriveOneEvent(const QJsonObject &e, int ei, QJsonArray &outMessages,
+                           QList<int> &outEventStart)
+{
+    const QString t = evType(e);
+    if (t == QLatin1String(kEvUser)) {
+        outMessages.append(QJsonObject{{"role", QStringLiteral("user")},
+                                       {"content", e.value(QStringLiteral("text")).toString()}});
+        outEventStart.append(ei);
+        return true;
+    }
+    if (t == QLatin1String(kEvAssistant)) {
+        QString text, reasoning;
+        QJsonArray toolCalls;
+        const QJsonArray blocksArr = e.value(QStringLiteral("blocks")).toArray();
+        for (const QJsonValue &b : blocksArr) {
+            const QJsonObject blk = b.toObject();
+            const QString bt = blk.value(QStringLiteral("t")).toString();
+            if (bt == QLatin1String(asst_blocks::kText))
+                text += blk.value(QStringLiteral("text")).toString();
+            else if (bt == QLatin1String(asst_blocks::kReasoning))
+                reasoning += blk.value(QStringLiteral("text")).toString();
+            else if (bt == QLatin1String(asst_blocks::kToolCall))
+                toolCalls.append(QJsonObject{
+                    {"id", blk.value(QStringLiteral("id")).toString()},
+                    {"type", QStringLiteral("function")},
+                    {"function", QJsonObject{
+                                     {"name", blk.value(QStringLiteral("name")).toString()},
+                                     {"arguments", blk.value(QStringLiteral("args")).toString()}}}});
+        }
+        QJsonObject m{{"role", QStringLiteral("assistant")},
+                      {"content", text}};
+        if (!reasoning.isEmpty())
+            m.insert(QStringLiteral("reasoning"), reasoning); // 请求体发送前剥离
+        if (!toolCalls.isEmpty())
+            m.insert(QStringLiteral("tool_calls"), toolCalls);
+        outMessages.append(m);
+        outEventStart.append(ei);
+        return true;
+    }
+    if (t == QLatin1String(kEvToolResult)) {
+        outMessages.append(QJsonObject{
+            {"role", QStringLiteral("tool")},
+            {"tool_call_id", e.value(QStringLiteral("callId")).toString()},
+            {"content", e.value(QStringLiteral("content")).toString()}});
+        outEventStart.append(ei);
+        return true;
+    }
+    return false; // turn/*、approval/* 不投影（审计/边界事件，模型不可见）
+}
+
 void ChatSession::deriveEvents(const QJsonArray &events, QJsonArray &outMessages,
                                QList<int> &outEventStart)
 {
@@ -459,49 +578,31 @@ void ChatSession::deriveEvents(const QJsonArray &events, QJsonArray &outMessages
     }
 
     // 逐事件投影；assistant 块聚合
-    for (int ei = 0; ei < events.size(); ++ei) {
-        const QJsonObject e = events.at(ei).toObject();
-        const QString t = evType(e);
-        if (t == QLatin1String(kEvUser)) {
-            outMessages.append(QJsonObject{{"role", QStringLiteral("user")},
-                                           {"content", e.value(QStringLiteral("text")).toString()}});
-            outEventStart.append(ei);
-        } else if (t == QLatin1String(kEvAssistant)) {
-            QString text, reasoning;
-            QJsonArray toolCalls;
-            const QJsonArray blocksArr = e.value(QStringLiteral("blocks")).toArray();
-            for (const QJsonValue &b : blocksArr) {
-                const QJsonObject blk = b.toObject();
-                const QString bt = blk.value(QStringLiteral("t")).toString();
-                if (bt == QLatin1String(asst_blocks::kText))
-                    text += blk.value(QStringLiteral("text")).toString();
-                else if (bt == QLatin1String(asst_blocks::kReasoning))
-                    reasoning += blk.value(QStringLiteral("text")).toString();
-                else if (bt == QLatin1String(asst_blocks::kToolCall))
-                    toolCalls.append(QJsonObject{
-                        {"id", blk.value(QStringLiteral("id")).toString()},
-                        {"type", QStringLiteral("function")},
-                        {"function", QJsonObject{
-                                         {"name", blk.value(QStringLiteral("name")).toString()},
-                                         {"arguments", blk.value(QStringLiteral("args")).toString()}}}});
-            }
-            QJsonObject m{{"role", QStringLiteral("assistant")},
-                          {"content", text}};
-            if (!reasoning.isEmpty())
-                m.insert(QStringLiteral("reasoning"), reasoning); // 请求体发送前剥离
-            if (!toolCalls.isEmpty())
-                m.insert(QStringLiteral("tool_calls"), toolCalls);
-            outMessages.append(m);
-            outEventStart.append(ei);
-        } else if (t == QLatin1String(kEvToolResult)) {
-            outMessages.append(QJsonObject{
-                {"role", QStringLiteral("tool")},
-                {"tool_call_id", e.value(QStringLiteral("callId")).toString()},
-                {"content", e.value(QStringLiteral("content")).toString()}});
-            outEventStart.append(ei);
+    for (int ei = 0; ei < events.size(); ++ei)
+        deriveOneEvent(events.at(ei).toObject(), ei, outMessages, outEventStart);
+}
+
+void ChatSession::projectAppended(const QJsonObject &event, int ei)
+{
+    if (evType(event) == QLatin1String(kEvSystem)) {
+        // 新 system 必为"最后一条"：替换投影头内容；投影头还没有 system
+        //（装自无 system 的旧日志）时插到最前——罕见路径，整组重建一次
+        const QString text = event.value(QStringLiteral("text")).toString();
+        if (hasSystemIn(m_derived)) {
+            m_derived.replace(0, QJsonObject{{"role", QStringLiteral("system")},
+                                             {"content", text}});
+        } else {
+            QJsonArray msgs;
+            msgs.append(QJsonObject{{"role", QStringLiteral("system")},
+                                    {"content", text}});
+            for (const QJsonValue &v : m_derived)
+                msgs.append(v);
+            m_derived = msgs;
+            m_eventStartByMsg.prepend(-1);
         }
-        // turn/*、approval/* 不投影（审计/边界事件，模型不可见）
+        return;
     }
+    deriveOneEvent(event, ei, m_derived, m_eventStartByMsg);
 }
 
 void ChatSession::rederive()
@@ -512,6 +613,8 @@ void ChatSession::rederive()
         return;
     }
     deriveEvents(active().events, m_derived, m_eventStartByMsg);
+    active().messageCount =
+        m_derived.size() - (hasSystemIn(m_derived) ? 1 : 0); // 侧栏口径缓存
 }
 
 // ---- 多会话管理 ----
@@ -526,15 +629,17 @@ QList<ChatSession::SessionSummary> ChatSession::sessionSummaries() const
     QList<SessionSummary> out;
     out.reserve(m_sessions.size());
     for (const SessionData &s : m_sessions) {
-        // 侧栏"N 条"计数：投影消息数（排除 system），与主界面口径一致
-        QJsonArray derived;
-        QList<int> start;
-        deriveEvents(s.events, derived, start);
-        const bool hasSystem = !derived.isEmpty()
-            && derived.at(0).toObject().value(QStringLiteral("role")).toString()
-                   == QLatin1String("system");
-        out.append(SessionSummary{s.id, s.title, s.updatedAtMs,
-                                  int(derived.size()) - (hasSystem ? 1 : 0)});
+        // 侧栏"N 条"计数：投影消息数（排除 system），与主界面口径一致。
+        // messageCount 缓存：活跃会话随 append/rederive 维护；冷会话（load
+        // 后未活跃过）首次查询全量投影一次后回填（mutable 穿透 const），
+        // 旧路径每次查询把所有会话全量重投影
+        if (s.messageCount < 0) {
+            QJsonArray derived;
+            QList<int> start;
+            deriveEvents(s.events, derived, start);
+            s.messageCount = int(derived.size()) - (hasSystemIn(derived) ? 1 : 0);
+        }
+        out.append(SessionSummary{s.id, s.title, s.updatedAtMs, s.messageCount});
     }
     std::sort(out.begin(), out.end(),
               [](const SessionSummary &a, const SessionSummary &b) {
@@ -712,53 +817,81 @@ void ChatSession::trim()
 {
     QJsonArray &events = active().events;
     // 前置：流首孤儿 tool/result（前面没有 assistant 块的旧脏数据）没有任何
-    // 回合块会收编它，trim 永远轮不到——单独清理（循环至首事件不再是孤儿）
-    for (;;) {
-        int firstNonSystem = -1;
+    // 回合块会收编它，trim 永远轮不到——单遍清点后一次性重建（旧路径逐条
+    // removeAt + 每条一次全量重投影）
+    int sysPrefixEnd = 0;
+    while (sysPrefixEnd < events.size()
+           && evType(events.at(sysPrefixEnd).toObject()) == QLatin1String(kEvSystem))
+        ++sysPrefixEnd;
+    int orphans = 0;
+    while (sysPrefixEnd + orphans < events.size()
+           && evType(events.at(sysPrefixEnd + orphans).toObject())
+                  == QLatin1String(kEvToolResult))
+        ++orphans;
+    if (orphans > 0) {
+        QJsonArray kept;
         for (int i = 0; i < events.size(); ++i) {
-            const QString t = evType(events.at(i).toObject());
-            if (t == QLatin1String(kEvSystem))
+            if (i >= sysPrefixEnd && i < sysPrefixEnd + orphans)
                 continue;
-            firstNonSystem = i;
-            break;
+            kept.append(events.at(i));
         }
-        if (firstNonSystem < 0
-            || evType(events.at(firstNonSystem).toObject()) != QLatin1String(kEvToolResult))
-            break;
-        events.removeAt(firstNonSystem);
+        events = kept;
         rederive();
     }
+
     // 投影消息 > kMaxHistory：从最旧**完整回合块**开始删除（回合块 = 一条
     // user/message 起至下一条 user/message 之前的全部事件，天然不拆
-    // tool_call/result 对——dsh compaction 切点纪律）。system 消息永不动
-    const bool hasSystem = !m_derived.isEmpty()
-        && m_derived.at(0).toObject().value(QStringLiteral("role")).toString()
-               == QLatin1String("system");
-    const int maxTotal = kMaxHistory + (hasSystem ? 1 : 0);
-    while (m_derived.size() > maxTotal) {
-        // 找回合块边界：第一条 user/message（跳过流首 system/turn/start），
-        // 块终点 = 下一条 user/message（或流尾）
-        int blockStart = -1;
-        int blockEnd = events.size();
+    // tool_call/result 对——dsh compaction 切点纪律）。system 消息永不动。
+    // T-071：一次遍历记下全部回合块边界与块内投影消息数，贪心定出最小淘汰
+    // 前缀后一次性重建 + 单次重投影（旧路径每淘汰一块就逐条 removeAt +
+    // 全量重投影，淘汰 k 块 = O(k·n²)）
+    const int maxTotal = kMaxHistory + (hasSystemIn(m_derived) ? 1 : 0);
+    if (m_derived.size() <= maxTotal)
+        return;
+    struct TurnBlock
+    {
+        int begin; // 块内首条 user 事件下标
+        int end;   // 块终点（exclusive）= 下一条 user 事件（或流尾）
+        int msgs;  // 块内投影消息数（user + assistant + tool/result）
+    };
+    QList<TurnBlock> blocks;
+    {
+        int curBegin = -1;
         int userSeen = 0;
         for (int i = 0; i < events.size(); ++i) {
-            const QString t = evType(events.at(i).toObject());
-            if (t == QLatin1String(kEvUser)) {
-                ++userSeen;
-                if (userSeen == 1) {
-                    blockStart = i;
-                } else {
-                    blockEnd = i;
-                    break;
-                }
-            }
+            if (evType(events.at(i).toObject()) != QLatin1String(kEvUser))
+                continue;
+            ++userSeen;
+            if (curBegin >= 0)
+                blocks.append({curBegin, i, 0});
+            curBegin = i;
         }
-        if (blockStart < 0 || userSeen < 2)
-            break; // 不足两个回合块可删：停（防御，防误删尾部未完成回合）
-        for (int i = blockEnd - 1; i >= blockStart; --i)
-            events.removeAt(i);
-        rederive();
+        if (curBegin >= 0)
+            blocks.append({curBegin, int(events.size()), 0});
+        for (TurnBlock &b : blocks)
+            b.msgs = countProjectedEvents(events, b.begin, b.end);
     }
+    // 淘汰自最旧起，最后一格（最新块）永留——原防御口径（不足两个回合块不删，
+    // 防误删尾部未完成回合）
+    int cutEnd = -1;
+    int removed = 0;
+    for (int bi = 0; bi + 1 < blocks.size() && m_derived.size() - removed > maxTotal;
+         ++bi) {
+        removed += blocks.at(bi).msgs;
+        cutEnd = blocks.at(bi + 1).begin;
+    }
+    if (cutEnd < 0)
+        return;
+    QJsonArray kept;
+    // 头部 system 前缀永不动（首块起点之前的事件，当前恒为 system）
+    const int headEnd = blocks.first().begin;
+    for (int i = 0; i < headEnd; ++i)
+        kept.append(events.at(i));
+    // 淘汰区段 [首块起点, cutEnd) 整段跳过，其余保留
+    for (int i = cutEnd; i < events.size(); ++i)
+        kept.append(events.at(i));
+    events = kept;
+    rederive();
 }
 
 } // namespace poptools

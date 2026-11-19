@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <QThreadPool>
 
 class QTimer;
 
@@ -64,10 +65,13 @@ class ChatSession : public QObject
 public:
     // storePath：sessions.json 全路径（注入便于单测）
     explicit ChatSession(const QString &storePath, QObject *parent = nullptr);
+    ~ChatSession() override; // 等待在途异步落盘完成（防析构后写半截）
 
     void load(); // 文件缺失/损坏 → 空会话；v1/v2 → 迁移为 v3
-    void save(); // QSaveFile 原子落盘
+    void save(); // QSaveFile 原子落盘（同步：排空异步队列后本写最后提交；
+                 // 退出 flush/单测往返依赖同步语义）
     // 防抖落盘：1s 内合并为一次写（工具密集回合的热路径用）；
+    // 防抖到期经 saveAsync 走 IO 线程池序列化+写盘（主线程只做快照），
     // 退出 flush 走显式 save()
     void saveSoon();
 
@@ -130,15 +134,24 @@ private:
         QString title;
         qint64 updatedAtMs = 0;
         QJsonArray events; // 追加式事件日志（v3 存储）
+        // 投影消息数缓存（侧栏"N 条"口径，排 system）。
+        // mutable：sessionSummaries() const 内冷缓存回填。活跃会话随
+        // append/rederive 维护；未活跃过的会话首次查询时全量投影一次。
+        // -1 = 未算
+        mutable int messageCount = -1;
     };
 
     SessionData &active() { return m_sessions[m_activeIndex]; }
     const SessionData &active() const { return m_sessions[m_activeIndex]; }
     void ensureDefaultSession(); // 装载后保证至少一个会话且 active 指向有效项
     void touch();                // 活跃时间戳刷新（append 系入口共用）
-    void appendEvent(const QJsonObject &event); // 追加事件 + 触摸 + 重投影 + changed
+    void appendEvent(const QJsonObject &event); // 追加事件 + 触摸 + 增量投影 + changed
+    // 追加事件进投影缓存（只消费新事件；system 事件特殊：替换投影头）。
+    // 截断/迁移/trim 走 rederive 全量重建（T-071：append 不再全量重投影）
+    void projectAppended(const QJsonObject &event, int ei);
     void rederive();             // 事件日志 → OpenAI 消息投影 + 消息起点索引
     void trim();                 // 投影超限时按完整回合块淘汰最旧事件
+    void saveAsync();            // 防抖到期：快照 + IO 池序列化写盘（主线程零写盘）
     // 从事件数组重投影（load/迁移/单测共用；q事件 → m_derived/m_eventStartByMsg）
     static void deriveEvents(const QJsonArray &events, QJsonArray &outMessages,
                              QList<int> &outEventStart);
@@ -149,6 +162,9 @@ private:
     QJsonArray m_derived;        // 投影缓存（当前会话）
     QList<int> m_eventStartByMsg; // 投影消息 i 的起始事件下标（四件套/trim 用）
     QTimer *m_saveTimer = nullptr; // 防抖落盘定时器（单发）
+    // 异步落盘 IO 池：单线程串行（写不重叠）；析构 waitForDone 兜底。
+    // save() 同步路径先 waitForDone 排空队列，保证同步写最后提交
+    QThreadPool m_ioPool;
 };
 
 } // namespace poptools
