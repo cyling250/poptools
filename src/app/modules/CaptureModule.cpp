@@ -8,6 +8,7 @@
 #include "../AppServices.h"
 #include "core/assistant/ToolRegistry.h"
 #include "core/hotkey/HotKeyNames.h"
+#include "core/monitor/MainThreadProbe.h"
 #include "core/settings/Settings.h"
 #include "ui/capture/CaptureWindow.h"
 
@@ -40,28 +41,28 @@ void CaptureModule::init(AppServices &services)
         return m_window->isVisible() ? m_window->copyToClipboardAndClose() : QRect{};
     };
 
-    // 先注册截图全局热键（vk 可在设置中修改），注册结果决定托盘文案——
-    // 热键被其他程序占用时（如其他截图工具），让用户在菜单里直接看出来
+    // 先注册截图全局热键（vk 可在设置中修改）。注册失败由气泡告知
+    //（takeFailedHotKeyNames，T-065 起托盘不再重复文案）
     const quint32 captureVk = Settings::instance().captureHotKeyVk();
-    const bool hotkeyOk = services.registerHotKey(captureVk, 0, [this] {
+    services.registerHotKey(captureVk, 0, [this] {
         // T-062 修复: 热键回调在 GlobalHotKey 的原生事件过滤器栈中直发，
         // 直接建窗/激活违反 AppServices 契约（"GUI 操作请自行延迟到事件
         // 循环"）——对齐 PinModule/划词翻译与本模块 toolRegistry 路径的
         // singleShot 先例
+        // T-069b F1 卡顿取证：热键回调与启动两段打点（探针 mark 全量落盘，
+        // 与 cap_begin/cap_grabbed/cap_shown 分段按 QPC 对时还原完整链路）
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("f1_hotkey");
         QTimer::singleShot(0, QCoreApplication::instance(), [this] {
+            if (auto *p = MainThreadProbe::instance())
+                p->mark("f1_start");
             if (!m_window->isVisible())
                 m_window->startCapture();
         });
     });
 
-    // 托盘入口
-    services.addTrayAction(hotkeyOk
-        ? QStringLiteral("截图 (%1)").arg(hotKeyDisplayName(captureVk))
-        : QStringLiteral("截图（%1 已被占用）").arg(hotKeyDisplayName(captureVk)),
-        [this] {
-            if (!m_window->isVisible())
-                m_window->startCapture();
-        });
+    // T-069b 托盘菜单精简：「截图」托盘入口撤除（F1 热键即入口），菜单只留
+    // 设置/关于/退出（需求单 requirements/20261119-tray-menu-f1-probe.md）
 
     // Goody 工具贡献：模型可发起截图（UI 操作延迟到事件循环，与热键同纪律）
     if (services.toolRegistry) {

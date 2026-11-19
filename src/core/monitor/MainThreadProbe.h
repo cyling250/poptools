@@ -62,6 +62,12 @@ public:
     // 钩子回调同样跑在主线程，后续调用恒为取现成指针
     static MainThreadProbe *instance();
 
+    // ---- 链路标记（T-069b F1 卡顿取证扩展） ----
+    // 主线程任意点打标（托盘菜单弹出/关闭、F1 热键回调、抓屏起止等），
+    // 全量落盘（频率低，每条带 QPC/tick/前台 PID）。tag 截断到 31 字符。
+    // 与钩子延迟/泵卡顿记录同钟（QPC），回查时按 qpc 对齐还原完整链路时序
+    void mark(const char *tag);
+
 private:
     explicit MainThreadProbe();
     ~MainThreadProbe() override;
@@ -99,12 +105,19 @@ private:
         quint32 fgPid;
         qint32 gapMs;
     };
+    struct MarkRec {      // 链路标记（全量落盘）
+        qint64 qpc;
+        quint32 tick;
+        quint32 fgPid;
+        char tag[32];     // 定长 POD：跨线程值拷贝，截断到 31 字符 + NUL
+    };
     // 落盘批（POD 值拷贝跨线程，无共享指针）；零异常周期也换出——统计行
     // 是探针的活体证据，区分"没有卡顿"与"探针死了"
     struct Batch {
         std::vector<Rec> ctx;                        // 上下文窗口记录
         std::vector<HookIncident> hookIncidents;
         std::vector<PumpIncident> pumpIncidents;
+        std::vector<MarkRec> marks;                  // 本周期链路标记（全量）
         quint64 calls[3] = {0, 0, 0};                // 本周期回调数（按源）
         quint32 maxDelay[3] = {0, 0, 0};             // 本周期最大延迟（按源）
         quint32 maxGap = 0;                          // 本周期最大泵间隔
@@ -133,6 +146,7 @@ private:
     quint32 m_maxGap = 0;
     std::vector<HookIncident> m_hookIncidents;
     std::vector<PumpIncident> m_pumpIncidents;
+    std::vector<MarkRec> m_marks;       // 链路标记缓冲（主线程独占，2s 换出）
     qint64 m_lastIncidentQpc[3] = {0, 0, 0}; // 同源 500ms 内合并：一次卡顿放行
                                              // 一串事件只记一次异常
     // ---- 落盘线程侧（m_ioMutex 保护） ----

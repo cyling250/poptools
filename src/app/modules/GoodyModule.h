@@ -7,7 +7,6 @@
 #include <QList>
 #include <QObject>
 
-class QAction;
 class QTimer;
 
 namespace poptools {
@@ -79,7 +78,6 @@ private:
     // core/assistant/ToolText.h（纯自由函数，单测覆盖）
 
     AppServices *m_services = nullptr;
-    QAction *m_trayAction = nullptr;
 
     ToolRegistry *m_registry = nullptr;   // 组合根创建，各模块共用
     ActivityStore *m_auditStore = nullptr; // goody 目录审计流（worker 写盘）

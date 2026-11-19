@@ -48,14 +48,12 @@ public:
 
 private slots:
     void applyRunningState(); // 按设置开停整套监控
-    void toggleFromTray();
 
 private:
     void startMonitor();
     void stopMonitor();
 
     AppServices *m_services = nullptr;
-    QAction *m_trayAction = nullptr;
 
     // 运行期对象（startMonitor 创建 / stopMonitor 销毁）
     ActivityStore *m_store = nullptr;

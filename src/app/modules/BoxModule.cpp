@@ -4,7 +4,6 @@
 #include "ui/box/BoxManagerDialog.h"
 #include "ui/box/BoxPanel.h"
 
-#include <QAction>
 #include <QObject>
 #include <QTimer>
 
@@ -28,35 +27,36 @@ void BoxModule::init(AppServices &services)
         });
     }
 
-    const auto toggleShow = [this] {
-        if (!m_catalog || !m_toggleAction)
+    // T-069b 托盘菜单精简：「收纳盒管理」「隐藏收纳盒」托盘入口撤除，等价
+    // 入口收进设置页通用页「收纳盒」卡片组（管理对话框 + 显示开关）。
+    // 显隐语义沿用原 toggleShow：任一可见 → 全隐藏，否则全显示（零盒时
+    // 不动，BUG-08 口径保持）
+    services.boxOpenManager = [this] { openManager(QString()); };
+    services.boxAnyVisible = [this] {
+        if (!m_catalog)
+            return false;
+        return std::any_of(m_catalog->boxes().cbegin(), m_catalog->boxes().cend(),
+                           [](const BoxDef &d) { return !d.hidden; });
+    };
+    services.boxSetVisible = [this](bool visible) {
+        if (!m_catalog || m_catalog->boxes().isEmpty())
             return;
-        // T-062 修复: 零盒时翻转文案会变成谎话（桌面无盒可显隐，下一次点击又翻回，
-        // 还白落盘一次），直接不动（BUG-08）
-        if (m_catalog->boxes().isEmpty())
-            return;
-        const bool anyVisible =
-            std::any_of(m_catalog->boxes().cbegin(), m_catalog->boxes().cend(),
-                        [](const BoxDef &d) { return !d.hidden; });
-        m_catalog->setHiddenAll(anyVisible); // 全可见 → 全隐藏；否则全显示
+        m_catalog->setHiddenAll(!visible); // visible=true → 全显示（清 hidden）
         for (const PanelEntry &e : m_panels) {
             if (e.panel)
                 e.panel->reloadDef();
         }
-        m_toggleAction->setText(anyVisible ? QStringLiteral("显示收纳盒")
-                                           : QStringLiteral("隐藏收纳盒"));
     };
-
-    services.addTrayAction(QStringLiteral("收纳盒管理"),
-                           [this] { openManager(QString()); });
-    // 盒头 ✛ 即调整入口（同日历头部），托盘不再重复
-    m_toggleAction = services.addTrayAction(QStringLiteral("隐藏收纳盒"), toggleShow);
 }
 
-// 反注册全部面板并销毁实例（宿主槽位/命中随之失效）；托盘 action 归 AppServices，
-// 不在此析构
+// 反注册全部面板并销毁实例（宿主槽位/命中随之失效）；能力槽同步撤销防悬垂
 void BoxModule::shutdown()
 {
+    if (m_services) {
+        m_services->boxOpenManager = nullptr;  // T-069b
+        m_services->boxAnyVisible = nullptr;
+        m_services->boxSetVisible = nullptr;
+    }
     if (m_services && m_services->desktopSurface) {
         for (const PanelEntry &e : m_panels)
             m_services->desktopSurface->unregisterPanel(e.surfaceId);

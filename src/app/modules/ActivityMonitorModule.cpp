@@ -44,14 +44,14 @@ void ActivityMonitorModule::init(AppServices &services)
     connect(&services, &AppServices::settingsChanged, this,
             &ActivityMonitorModule::applyRunningState);
 
-    // 托盘一键启停（设置页之外的快捷入口；文案随状态翻转）
-    m_trayAction = services.addTrayAction(QStringLiteral("活动监控"), [this] { toggleFromTray(); });
+    // T-069b 托盘菜单精简：「活动监控」托盘入口撤除（启停在设置页活动监控页，
+    // 开关即时生效；气泡告知随 applyRunningState 保留）
 
-    // 事件循环就绪后再开钩子（init 早于 app.exec）；无条件调用以刷新
-    // 托盘文案（enabled=false 时只改文案不建任何运行期对象）。
-    // 上下文用 this 而非 app 实例：singleShot 的 QObject 重载即支持成员
-    // 上下文，模块若先于触发亡则回调自动丢弃（原 app 上下文下会悬垂），
-    // 且与本文件其余回调一律以 this 为上下文的口径一致
+    // 事件循环就绪后再开钩子（init 早于 app.exec）；enabled=false 时只走
+    // 空转分支不建任何运行期对象。上下文用 this 而非 app 实例：singleShot
+    // 的 QObject 重载即支持成员上下文，模块若先于触发亡则回调自动丢弃
+    //（原 app 上下文下会悬垂），且与本文件其余回调一律以 this 为上下文的
+    // 口径一致
     QTimer::singleShot(0, this, [this] { applyRunningState(); });
 }
 
@@ -79,23 +79,6 @@ void ActivityMonitorModule::applyRunningState()
             stopMonitor();
             startMonitor();
         }
-    }
-    if (m_trayAction)
-        m_trayAction->setText(want ? QStringLiteral("活动监控：运行中（点击暂停）")
-                                   : QStringLiteral("活动监控：已暂停（点击开启）"));
-}
-
-// 托盘一键启停：翻转设置持久化 → applyRunningState 执行/暂停 → 气泡告知结果
-void ActivityMonitorModule::toggleFromTray()
-{
-    Settings &s = Settings::instance();
-    s.setMonitorEnabled(!s.monitorEnabled());
-    applyRunningState();
-    if (m_services && m_services->notify) {
-        m_services->notify(QStringLiteral("活动监控"),
-                           s.monitorEnabled()
-                               ? QStringLiteral("已开启：键入与窗口活动将记录到本地日志")
-                               : QStringLiteral("已暂停：不再记录新的活动"));
     }
 }
 

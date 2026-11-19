@@ -57,6 +57,10 @@ public:
     std::function<void()> calendarPickDate;      // 选择日期
     std::function<void()> calendarExportTasks;   // 导出日程
     std::function<void()> calendarImportTasks;   // 导入日程
+    // T-069b 菜单精简：托盘入口撤除后的设置页等价入口
+    std::function<void()> calendarAdjust;        // 进入「调整位置和大小」模式
+    std::function<bool()> calendarDutyStopped;   // 桌面日历总开关当前是否停用
+    std::function<void(bool)> calendarSetDuty;   // 启用/停用桌面日历（桌面表面 duty）
     // 打开应用设置对话框并定位「桌面日历」页（MainWindow 组合根发布）
     std::function<void()> openCalendarSettings;
 
@@ -66,6 +70,13 @@ public:
     std::function<QString(int year, int month, int day)> goodyDailyDigestPath;
     // 指定月份的月报文件路径（goody/monthly/<yyyy-MM>.md）；无则空串
     std::function<QString(int year, int month)> goodyMonthlyDigestPath;
+    // T-069b 菜单精简：打开 Goody 对话窗（设置页「打开 Goody 管家」入口）
+    std::function<void()> goodyOpenChat;
+
+    // ---- 贡献点：收纳盒（BoxModule 发布；设置页消费，T-069b 菜单精简） ----
+    std::function<void()> boxOpenManager;        // 打开收纳盒管理对话框
+    std::function<bool()> boxAnyVisible;         // 当前是否有任一可见收纳盒
+    std::function<void(bool)> boxSetVisible;     // 全部显示 / 全部隐藏
 
     // ---- 贡献点 ----
     // 向托盘菜单追加动作（模块在 init 中调用；组合根的系统项在其后追加，

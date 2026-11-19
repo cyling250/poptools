@@ -61,36 +61,30 @@ void CalendarModule::init(AppServices &services)
             m_panel->importTasks();
     };
 
-    const auto showCal = [this] {
-        if (m_panel)
-            m_panel->showCalendar();
-    };
     const auto adjust = [this] {
         if (m_panel)
             m_panel->enterAdjustMode();
     };
-    // S-10：与其余槽位统一 [this] 捕获风格（原按引用捕获形参 services，语义
-    // 等价但可读性差）
-    const auto openSettings = [this] {
-        if (m_services && m_services->openCalendarSettings)
-            m_services->openCalendarSettings();
-    };
-    const auto toggleDuty = [this] {
-        if (!m_services || !m_services->desktopSurface || !m_toggleAction)
-            return;
-        if (m_services->desktopSurface->isStopped()) {
-            m_services->desktopSurface->resumeDuty();
-            m_toggleAction->setText(QStringLiteral("停用桌面日历"));
-        } else {
-            m_services->desktopSurface->stopDuty();
-            m_toggleAction->setText(QStringLiteral("启用桌面日历"));
-        }
-    };
 
-    services.addTrayAction(QStringLiteral("显示桌面日历"), showCal);
-    services.addTrayAction(QStringLiteral("调整日历位置和大小"), adjust);
-    services.addTrayAction(QStringLiteral("日历设置"), openSettings);
-    m_toggleAction = services.addTrayAction(QStringLiteral("停用桌面日历"), toggleDuty);
+    // T-069b 托盘菜单精简：四个日历托盘入口全部撤除，等价入口收进设置页
+    //「桌面日历」页——「调整位置和大小」按钮（calendarAdjust）、
+    //「启用桌面日历」开关（calendarDutyStopped/calendarSetDuty，桌面表面
+    // duty 语义，与原「停用桌面日历」一致）；「显示桌面日历」与设置页既有
+    // 「显示日历清单」开关语义重叠、「日历设置」即设置页自身，直接删
+    services.calendarAdjust = adjust;
+    services.calendarDutyStopped = [this] {
+        return m_services && m_services->desktopSurface
+                   ? m_services->desktopSurface->isStopped()
+                   : false;
+    };
+    services.calendarSetDuty = [this](bool enable) {
+        if (!m_services || !m_services->desktopSurface)
+            return;
+        if (enable)
+            m_services->desktopSurface->resumeDuty();
+        else
+            m_services->desktopSurface->stopDuty();
+    };
 }
 
 void CalendarModule::shutdown()
@@ -103,6 +97,9 @@ void CalendarModule::shutdown()
         m_services->calendarPickDate = nullptr;
         m_services->calendarExportTasks = nullptr;
         m_services->calendarImportTasks = nullptr;
+        m_services->calendarAdjust = nullptr;        // T-069b
+        m_services->calendarDutyStopped = nullptr;
+        m_services->calendarSetDuty = nullptr;
     }
     if (m_services && m_services->desktopSurface && m_panel)
         m_services->desktopSurface->unregisterPanel(m_panelId);

@@ -105,6 +105,17 @@ MainWindow::MainWindow(QObject *parent)
     m_tray->setContextMenu(m_menu);
     m_tray->show();
 
+    // T-069b F1 卡顿取证：托盘菜单弹出/关闭打链路标记（探针 mark 全量落盘，
+    // 与 F1 链路分段标记按 QPC 对时——定位"菜单拉起时 F1 卡顿"的竞争关系）
+    connect(m_menu, &QMenu::aboutToShow, this, [] {
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("tray_menu_show");
+    });
+    connect(m_menu, &QMenu::aboutToHide, this, [] {
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("tray_menu_hide");
+    });
+
     // 热键注册失败的统一告知（模块 init 时记录；气泡须在托盘可见后弹出）。
     // 失败名已带具体原因（"F1：已被其他程序占用"/Win32 错误码），此处不再复述。
     // 聚合为一条气泡：Windows 托盘气泡同一时刻只显示一条，逐条弹后发覆盖
@@ -180,7 +191,10 @@ MainWindow::~MainWindow()
 }
 
 // 模态打开设置对话框；openCalendarPage 为 true 时定位桌面日历页
-//（Goody 日历托盘入口复用）。仅 Accepted 时广播 settingsChanged
+//（Goody 日历托盘入口复用）。2026-11-19 Fluent 改版（M1）：设置即时生效——
+// 对话框内每次变更已自行写 Settings 并经 notifySettingsChanged 广播，
+// 这里不再有 Accepted 后统一广播（关闭/Esc 路径同样已生效，防抖冲刷由
+// SettingsDialog::done 负责）
 void MainWindow::onShowSettings(bool openCalendarPage)
 {
     SettingsDialog dlg(m_services);
@@ -194,10 +208,6 @@ void MainWindow::onShowSettings(bool openCalendarPage)
     const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
     dlg.move(avail.center() - dlg.rect().center());
     dlg.exec();
-    // 设置保存后刷新运行时组件：Translator 每次 translate() 读取最新 Settings，
-    // 无需额外操作；有缓存外观的模块经 settingsChanged 信号重应用。
-    if (dlg.result() == QDialog::Accepted)
-        m_services->notifySettingsChanged();
 }
 
 } // namespace poptools

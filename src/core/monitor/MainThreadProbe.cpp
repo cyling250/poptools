@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstring>
 
 #ifndef POPTOOLS_VERSION
 #define POPTOOLS_VERSION "dev"
@@ -210,6 +211,16 @@ private:
             o.insert(QStringLiteral("fgExe"), fgExe(inc.fgPid));
             appendLine(QJsonDocument(o).toJson(QJsonDocument::Compact));
         }
+        for (const auto &m : b.marks) {
+            QJsonObject o;
+            o.insert(QStringLiteral("k"), QStringLiteral("mark"));
+            o.insert(QStringLiteral("qpc"), qint64(m.qpc));
+            o.insert(QStringLiteral("tick"), qint64(m.tick));
+            o.insert(QStringLiteral("tag"), QLatin1String(m.tag));
+            o.insert(QStringLiteral("fgPid"), qint64(m.fgPid));
+            o.insert(QStringLiteral("fgExe"), fgExe(m.fgPid));
+            appendLine(QJsonDocument(o).toJson(QJsonDocument::Compact));
+        }
 
         if (!b.ctx.empty()) {
             // 上下文行：recs 为紧凑数组 [相对毫秒, tick, delayMs, durMs, src, inj, noEvent]，
@@ -387,6 +398,20 @@ void MainThreadProbe::hookExit(Src src)
     }
 }
 
+void MainThreadProbe::mark(const char *tag)
+{
+    LARGE_INTEGER c{};
+    QueryPerformanceCounter(&c);
+    MarkRec r;
+    r.qpc = c.QuadPart;
+    r.tick = GetTickCount();
+    r.fgPid = captureForegroundPid();
+    // 定长拷贝 + 截断：tag 最长 31 字符 + NUL（跨线程 POD 值拷贝）
+    std::strncpy(r.tag, tag ? tag : "", sizeof(r.tag) - 1);
+    r.tag[sizeof(r.tag) - 1] = '\0';
+    m_marks.push_back(r);
+}
+
 void MainThreadProbe::onHeartbeat()
 {
     LARGE_INTEGER c{};
@@ -431,6 +456,8 @@ void MainThreadProbe::onFlushTick()
     m_hookIncidents.clear();
     b.pumpIncidents = std::move(m_pumpIncidents);
     m_pumpIncidents.clear();
+    b.marks = std::move(m_marks);
+    m_marks.clear();
 
     // 上下文窗口：本批全部异常取并集窗 [最早前2s, 最晚后1s]，从环形缓冲
     // 抽取（超限抽稀）。缓冲只在主线程写，此处同步读无竞争

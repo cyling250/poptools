@@ -1,6 +1,5 @@
 #include "GoodyModule.h"
 
-#include <QAction>
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
@@ -152,15 +151,9 @@ void GoodyModule::init(AppServices &services)
     // R5-D2 复审修正（P3-4）：失败标注对齐 CaptureModule 的括注先例风格，
     // 原因取 GlobalHotKey::lastError 的具体原因——常见即"已被其他程序占用"，
     // 进程内冲突/Win32 错误码场景也比笼统"注册失败"可排查
-    const QString hkFailNote =
-        hkOk ? QString()
-             : QStringLiteral("（%1）").arg(
-                   services.hotkey && !services.hotkey->lastError().isEmpty()
-                       ? services.hotkey->lastError()
-                       : QStringLiteral("注册失败"));
-    m_trayAction = services.addTrayAction(
-        QStringLiteral("Goody 管家 (%1)%2").arg(hotKeyDisplayName(hkVk, hkMods), hkFailNote),
-        [this] { openChat(); });
+    // T-069b 托盘菜单精简：「Goody 管家」托盘入口撤除，打开动作改由设置页
+    //「打开 Goody 管家」卡片消费（热键与悬浮球入口不变）
+    services.goodyOpenChat = [this] { openChat(); };
 
     // T-050：桌面悬浮球（开关默认开；关=销毁，设置页即时重应用）
     applyBallSettings();
@@ -184,6 +177,8 @@ void GoodyModule::init(AppServices &services)
 //（QObject 子对象）析构终止
 void GoodyModule::shutdown()
 {
+    if (m_services)
+        m_services->goodyOpenChat = nullptr; // T-069b：能力槽撤销防悬垂
     if (m_session)
         m_session->save();
     if (m_auditStore)
