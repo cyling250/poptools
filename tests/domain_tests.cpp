@@ -55,6 +55,7 @@
 #include "core/translation/Languages.h"
 #include "core/translation/Translator.h"
 #include "ui/ThemeColors.h"
+#include "ui/theming/FluentTheme.h"
 #include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyWindow.h"
 #include "ui/goody/MarkdownRenderer.h" // T-050-P2：流式渲染节流/围栏状态机
@@ -265,35 +266,45 @@ private slots:
         QCOMPARE(hotKeyDisplayName(0xAB), QStringLiteral("0xAB"));
     }
 
-    // ---- ThemeColors ----
+    // ---- FluentTokens（2026-11-19 Fluent 改版：token 表完整性 + 明暗两套
+    // 关键值；原 ThemeColors"无灰字"约定已被 Fluent 文本四档取代） ----
     void theme_colors_light_and_dark()
     {
-        const ThemeColors light = uiThemeColors(false);
-        const ThemeColors dark = uiThemeColors(true);
+        const FluentTokens light = fluentTheme(false);
+        const FluentTokens dark = fluentTheme(true);
         QVERIFY(!light.dark);
         QVERIFY(dark.dark);
-        // 浅色=纯黑文字白底；深色=纯白文字黑底（用户约定：不允许灰字）
-        QCOMPARE(QByteArray(light.cardBg), QByteArray("#FFFFFF"));
-        QCOMPARE(QByteArray(light.body), QByteArray("#000000"));
-        QCOMPARE(QByteArray(light.sectionTitle), QByteArray("#000000"));
-        QCOMPARE(QByteArray(light.title), QByteArray("#000000"));
-        QCOMPARE(QByteArray(dark.cardBg), QByteArray("#1E1E1E"));
-        QCOMPARE(QByteArray(dark.body), QByteArray("#FFFFFF"));
-        QCOMPARE(QByteArray(dark.sectionTitle), QByteArray("#FFFFFF"));
-        QCOMPARE(QByteArray(dark.title), QByteArray("#FFFFFF"));
-        // 禁用态按钮文字同样不许灰（本应用无输入提示语义）
-        QCOMPARE(QByteArray(light.ctrlDisabledText), QByteArray("#000000"));
-        QCOMPARE(QByteArray(dark.ctrlDisabledText), QByteArray("#FFFFFF"));
-        // 灰色只允许出现在线框：卡片边框 / 文本区边框 / 分隔线
-        QVERIFY(light.line && *light.line);
-        QVERIFY(dark.line && *dark.line);
-        QVERIFY(light.cardBorder && *light.cardBorder);
-        QVERIFY(dark.cardBorder && *dark.cardBorder);
-        QVERIFY(light.editBorder && *light.editBorder);
-        QVERIFY(dark.editBorder && *dark.editBorder);
-        // 错误态三色齐全
-        QVERIFY(light.errText && light.errBg && light.errBorder);
-        QVERIFY(dark.errText && dark.errBg && dark.errBorder);
+        // 基底：浅色 #F3F3F3 / 深色 #202020（Win11 SolidBackgroundFillColorBase）
+        QCOMPARE(QByteArray(light.bgBase), QByteArray("#F3F3F3"));
+        QCOMPARE(QByteArray(dark.bgBase), QByteArray("#202020"));
+        // 卡面：浅色纯白 / 深色 #2A2A2A（Win11 CardBackgroundFillColorDefault）
+        QCOMPARE(QByteArray(light.bgCard), QByteArray("#FFFFFF"));
+        QCOMPARE(QByteArray(dark.bgCard), QByteArray("#2A2A2A"));
+        // 文本四档齐全（主/次/三级/禁用），主文本浅深反转
+        QVERIFY(light.textPrimary && light.textSecondary
+                && light.textTertiary && light.textDisabled);
+        QVERIFY(dark.textPrimary && dark.textSecondary
+                && dark.textTertiary && dark.textDisabled);
+        QCOMPARE(QByteArray(dark.textPrimary), QByteArray("#FFFFFF"));
+        QVERIFY(QByteArray(light.textPrimary) != QByteArray(dark.textPrimary));
+        // 品牌主色保留：浅色 #2B6FF2；深色套预提亮为 #5B93FF；accent 实底文字白
+        QCOMPARE(QByteArray(light.accent), QByteArray("#2B6FF2"));
+        QCOMPARE(QByteArray(dark.accent), QByteArray("#5B93FF"));
+        QCOMPARE(QByteArray(light.onAccent), QByteArray("#FFFFFF"));
+        // 低透明选区底（#AARRGGBB）与描边/分隔线齐全
+        QVERIFY(QByteArray(light.accentSoft).startsWith("#"));
+        QVERIFY(light.cardStroke && *light.cardStroke);
+        QVERIFY(dark.cardStroke && *dark.cardStroke);
+        QVERIFY(light.divider && *light.divider);
+        QVERIFY(dark.divider && *dark.divider);
+        // 控件四态齐全（底/描边/悬停/按下）
+        QVERIFY(light.ctrlBg && light.ctrlBorder && light.ctrlHover && light.ctrlPressed);
+        QVERIFY(dark.ctrlBg && dark.ctrlBorder && dark.ctrlHover && dark.ctrlPressed);
+        // 错误/成功语义 + 滚动条两档齐全
+        QVERIFY(light.errText && light.errBg && light.successText);
+        QVERIFY(dark.errText && dark.errBg && dark.successText);
+        QVERIFY(light.scrollThumb && light.scrollThumbHover);
+        QVERIFY(dark.scrollThumb && dark.scrollThumbHover);
     }
 
     // ---- Translator 内联辅助 ----

@@ -1,13 +1,17 @@
 #include "CalendarSearchForm.h"
 
 #include "core/calendar/CalendarTaskStore.h"
+#include "ui/ThemeColors.h"
+#include "ui/theming/FluentTheme.h"
 
 #include <QCalendarWidget>
 #include <QDialogButtonBox>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QStyleHints>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -18,17 +22,14 @@ CalendarSearchForm::CalendarSearchForm(const CalendarTaskStore &store, QWidget *
     : QDialog(parent)
     , m_store(store)
 {
+    setObjectName("calendarSearchDialog");
     setWindowTitle(QStringLiteral("内容搜索"));
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setWindowFlag(Qt::WindowStaysOnTopHint, true);
     setFixedSize(480, 480);
-    setStyleSheet(QStringLiteral(
-        "QDialog { background: #1E2026; color: #EBEBEB; font-size: 13px; }"
-        "QLineEdit { background: #2D3038; color: #FFFFFF; border: 1px solid #3C4048; "
-        "padding: 6px 8px; }"
-        "QListWidget { background: #181A20; color: #EBEBEB; border: 1px solid #3C4048; }"
-        "QPushButton { background: #383C46; color: #FFFFFF; border: 1px solid #5A606E; "
-        "padding: 8px 24px; border-radius: 4px; }"));
+    // 2026-11-19 收编：原硬编码深色十六进制 → Fluent token，跟随系统明暗
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, &CalendarSearchForm::applyTheme);
 
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(16, 16, 16, 16);
@@ -62,6 +63,29 @@ CalendarSearchForm::CalendarSearchForm(const CalendarTaskStore &store, QWidget *
             [this, open](QListWidgetItem *) { open->click(); });
     connect(m_query, &QLineEdit::textChanged, this, [this] { rebuild(); });
     rebuild();
+    applyTheme();
+}
+
+// Fluent token 主题（2026-11-19 收编，方案 docs/design/
+// 20261119-ui-fluent-restyle-proposal.md）：窗口基底/控件基线/列表取 token，
+// Qt 内置类走类型选择器（P-022），无 palette 钉扎（SettingsDialog 同款口径）
+void CalendarSearchForm::applyTheme()
+{
+    const FluentTokens t = fluentTheme(systemSchemeDark());
+    setStyleSheet(QStringLiteral("#calendarSearchDialog { background: %1; }"
+                                 "QLabel { color: %2; font-size: 14px; }")
+                      .arg(t.bgBase, t.textPrimary) +
+                  fluentInputQss(t) + fluentButtonQss(t) +
+                  QStringLiteral("QListWidget { background: %1; color: %2;"
+                                 "  border: 1px solid %3; border-radius: 4px; }"
+                                 "QListWidget::item { padding: 5px 8px;"
+                                 "  border-radius: 3px; }"
+                                 "QListWidget::item:selected { background: %4;"
+                                 "  color: %5; }")
+                      .arg(t.bgCard, t.textPrimary, t.cardStroke, t.accentSoft,
+                           t.textPrimary) +
+                  fluentScrollBarQss(t));
+    poptools::applyFluentWindowChrome(this, t.dark);
 }
 
 void CalendarSearchForm::rebuild()
@@ -94,17 +118,14 @@ void CalendarSearchForm::rebuild()
 CalendarDatePickerForm::CalendarDatePickerForm(const QDate &initial, QWidget *parent)
     : QDialog(parent)
 {
+    setObjectName("calendarDatePickerDialog");
     setWindowTitle(QStringLiteral("选择日期"));
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setWindowFlag(Qt::WindowStaysOnTopHint, true);
     setFixedSize(340, 340);
-    setStyleSheet(QStringLiteral(
-        "QDialog { background: #1E2026; color: #FFFFFF; font-size: 13px; }"
-        "QCalendarWidget QWidget { alternate-background-color: #282A32; }"
-        "QAbstractItemView { background: #282A32; color: #FFFFFF; "
-        "selection-background-color: #383C46; }"
-        "QPushButton { background: #383C46; color: #FFFFFF; border: 1px solid #5A606E; "
-        "padding: 7px 20px; border-radius: 4px; }"));
+    // 2026-11-19 收编：原硬编码深色十六进制 → Fluent token，跟随系统明暗
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, &CalendarDatePickerForm::applyTheme);
 
     auto *lay = new QVBoxLayout(this);
     auto *calendar = new QCalendarWidget(this);
@@ -120,6 +141,32 @@ CalendarDatePickerForm::CalendarDatePickerForm(const QDate &initial, QWidget *pa
         accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    applyTheme();
+}
+
+// Fluent token 主题（2026-11-19 收编）：QCalendarWidget 底色/导航栏/选中态
+// 走 token；按钮基线复用 fluentButtonQss
+void CalendarDatePickerForm::applyTheme()
+{
+    const FluentTokens t = fluentTheme(systemSchemeDark());
+    setStyleSheet(QStringLiteral("#calendarDatePickerDialog { background: %1; }"
+                                 "QCalendarWidget QWidget {"
+                                 "  alternate-background-color: %2; }"
+                                 "QCalendarWidget QAbstractItemView {"
+                                 "  background: %2; color: %3;"
+                                 "  selection-background-color: %4;"
+                                 "  selection-color: %3; }"
+                                 "QCalendarWidget QWidget#qt_calendar_navigationbar {"
+                                 "  background: %1; }"
+                                 "QCalendarWidget QToolButton { color: %3;"
+                                 "  background: %1; border-radius: 4px; padding: 2px 6px; }"
+                                 "QCalendarWidget QToolButton:hover { background: %5; }"
+                                 "QCalendarWidget QToolButton::menu-indicator {"
+                                 "  image: none; }")
+                      .arg(t.bgBase, t.bgCard, t.textPrimary, t.accentSoft,
+                           t.ctrlHover) +
+                  fluentButtonQss(t));
+    applyFluentWindowChrome(this, t.dark);
 }
 
 } // namespace poptools

@@ -6,8 +6,11 @@
 #include <functional>
 
 #include "MarkdownRenderer.h"
-#include "ui/ThemeColors.h"
+#include "ui/theming/FluentTheme.h"
 #include "core/assistant/ChatSession.h" // SessionSummary（makeSessionRow 参数）
+#include "MessageBubble.h"              // MessageBubble::Role（头像行参数，嵌套枚举不可前置声明）
+
+#include <QHash>
 
 class QLabel;
 class QListWidget;
@@ -20,7 +23,6 @@ class QVBoxLayout;
 namespace poptools {
 
 class ChatSession;
-class MessageBubble;
 
 // ============================================================
 // Goody 管家聊天窗（T-050-P2 全新重构：居中卡片聊天窗）。
@@ -114,9 +116,12 @@ private:
     int bubbleMessageIndex(MessageBubble *target) const; // 气泡→会话消息下标
     void refreshSessionList();         // 侧栏重建（流式期间推迟）
     QWidget *makeSessionRow(const ChatSession::SessionSummary &s,
-                            const ThemeColors &c); // 单条侧栏行装配（T-062 抽取）
+                            const FluentTokens &t); // 单条侧栏行装配（T-062 抽取）
+    QWidget *makeAvatar(MessageBubble::Role role, QWidget *parent) const; // 气泡头像（user/assistant）
+    int maxBubblePaneWidth() const;    // 气泡可用宽度（视口 - 头像列）
     void markRegenerateOnLast();       // 仅最后一条 assistant 气泡显示"重新生成"
     void updateMaxWidths();            // 窗口缩放 → 气泡宽度上限
+    void adjustInputHeight();          // 输入框 1~6 行自适应高度
     void scrollIfAtBottom();           // 仅在本就贴底时跟随（force=false 委托）
     void scrollToBottomNow(bool force); // force=true 强制贴底（"必须看见"场景）
     void onBubbleAction(MessageBubble *bubble, int action);
@@ -124,8 +129,9 @@ private:
     void updateSessionUiLocked();      // busy/工具期联合禁侧栏操作
     // applyTheme 拆分（T-062）：窗口级 QSS 与控件调色板钉扎两段各归其位，
     // 气泡重抛/侧栏刷新留主干——纯函数分解，调用顺序不变
-    void applyWindowQss(const ThemeColors &c);
-    void applyControlPalettes(const ThemeColors &c);
+    // （2026-11-19 改版：ThemeColors → Fluent token）
+    void applyWindowQss(const FluentTokens &t);
+    void applyControlPalettes(const FluentTokens &t);
 
     ChatSession *m_session = nullptr;
     MarkdownRenderer m_renderer;       // 流式渲染状态机（纯逻辑，150ms 节流）
@@ -147,6 +153,7 @@ private:
     QWidget *m_msgList = nullptr;
     QVBoxLayout *m_msgLay = nullptr;
     QList<MessageBubble *> m_bubbles;
+    QHash<MessageBubble *, QWidget *> m_rows; // 气泡→头像行容器（改版 M2 头像行）
     QString m_builtSessionId;          // 气泡列表当前对应的会话 id
     bool m_atBottom = true;            // 用户本就贴底才自动跟随
 

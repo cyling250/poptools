@@ -1,5 +1,7 @@
 #include "ToolBar.h"
 
+#include "ui/theming/FluentTheme.h"
+
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFrame>
@@ -184,15 +186,18 @@ namespace poptools
         // QMetaObject::className() 返回 "poptools::ToolBar"，样式表类型选择器失配 → 底衬丢失。
         // 改用 objectName ID 选择器（#annotationToolBar）与命名空间解耦。
         setObjectName("annotationToolBar");
-        // 常暗玻璃面板：深底 + 白 9% 细描边 + 12px 圆角；悬停白 10%；
-        // 选中主色蓝 + 顶部内高光。qproperty-iconSize 统一 20px 图标（4x 超采样位图）
+        // 常暗玻璃面板（2026-11-19 收编：色值取 Fluent token 深色套，底/悬停/
+        // 选中不再硬编码；白 9% 细描边为玻璃家族半透明语义色，保留字面量）。
+        // qproperty-iconSize 统一 20px 图标（4x 超采样位图）
+        const FluentTokens tb = fluentTheme(true);
         setStyleSheet(QStringLiteral(
-                          "#annotationToolBar { background: #1E2024; border: 1px solid rgba(255,255,255,23);"
+                          "#annotationToolBar { background: %1; border: 1px solid rgba(255,255,255,23);"
                           "  border-radius: 12px; }"
                           "QToolButton { qproperty-iconSize: 20px 20px; border: none; border-radius: 7px;"
                           "  background: transparent; padding: 2px; }"
-                          "QToolButton:hover { background: #33363B; }"
-                          "QToolButton:checked { background: #2B6FF2; }"));
+                          "QToolButton:hover { background: %2; }"
+                          "QToolButton:checked { background: %3; }")
+                          .arg(tb.bgBase, tb.ctrlHover, tb.accent));
 
         // 浮起阴影（大模糊低透明度，近似双层观感）
         auto *shadow = new QGraphicsDropShadowEffect(this);
@@ -226,8 +231,9 @@ namespace poptools
         translateBtn->setText(QStringLiteral("译"));
         translateBtn->setStyleSheet(QStringLiteral(
                                         "QToolButton { border: none; border-radius: 7px; background: transparent;"
-                                        "  color: #E0E0E0; font-weight: bold; padding: 0; }"
-                                        "QToolButton:hover { background: #33363B; }"));
+                                        "  color: %1; font-weight: bold; padding: 0; }"
+                                        "QToolButton:hover { background: %2; }")
+                                        .arg(tb.textPrimary, tb.ctrlHover));
         translateBtn->setToolTip(QStringLiteral("识别并翻译：识别选区文字，自动打开面板并显示原文与翻译结果"));
         connect(translateBtn, &QToolButton::clicked, this, &ToolBar::translateRequested);
 
@@ -326,13 +332,15 @@ namespace poptools
         m_fontSizeBox->setInsertPolicy(QComboBox::NoInsert); // 手动输入不自动加入下拉列表
         m_fontSizeBox->setMaxVisibleItems(12);
         m_fontSizeBox->setFixedSize(62, 28);
+        // 半透明白底/描边为玻璃家族语义色（保留字面量）；文字/弹层底/选中取 token
         m_fontSizeBox->setStyleSheet(QStringLiteral(
             "QComboBox { background: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,26); border-radius: 7px;"
-            "  color: #E8EAED; padding: 2px 6px; }"
-            "QComboBox:hover { border-color: #2B6FF2; }"
+            "  color: %1; padding: 2px 6px; }"
+            "QComboBox:hover { border-color: %2; }"
             "QComboBox::drop-down { border: none; width: 14px; }"
-            "QComboBox QAbstractItemView { background: #26282C; color: #E8EAED;"
-            "  border: 1px solid rgba(255,255,255,26); selection-background-color: #2B6FF2; }"));
+            "QComboBox QAbstractItemView { background: %3; color: %1;"
+            "  border: 1px solid rgba(255,255,255,26); selection-background-color: %2; }")
+            .arg(tb.textPrimary, tb.accent, tb.bgCard));
         const int presets[] = {8, 9, 10, 12, 14, 16, 18, 24, 36, 48};
         for (int v : presets)
             m_fontSizeBox->addItem(QString::number(v));
@@ -384,11 +392,12 @@ namespace poptools
             btn->setFixedSize(14, 14); // 2×14 + 行距 3 = 31，贴合 32px 行高
             btn->setCheckable(true);   // 当前色带主色描边
             btn->setProperty("color", presetColors[i].name());
+            // 半透明白描边为玻璃家族语义色（保留字面量）；选中描边取 token 主色
             btn->setStyleSheet(QString(
                                    "QToolButton { border: 1px solid rgba(255,255,255,45); border-radius: 7px; background: %1; padding: 0; }"
                                    "QToolButton:hover { border: 1px solid rgba(255,255,255,90); }"
-                                   "QToolButton:checked { border: 2px solid #2B6FF2; }")
-                                   .arg(presetColors[i].name()));
+                                   "QToolButton:checked { border: 2px solid %2; }")
+                                   .arg(presetColors[i].name(), tb.accent));
             connect(btn, &QToolButton::clicked, this, &ToolBar::onColorClicked);
             colorGrid->addWidget(btn, i / 8, i % 8);
             m_colorButtons.append(btn);
@@ -452,8 +461,8 @@ namespace poptools
 
     QColor ToolBar::iconColor() const
     {
-        // 深色面板上用浅色图标保证可见性
-        return m_dark ? QColor("#E0E0E0") : QColor("#1A1A1A");
+        // 图标色取 Fluent token 文字主色（2026-11-19 收编，原 #E0E0E0/#1A1A1A 字面量）
+        return QColor(fluentTheme(m_dark).textPrimary);
     }
 
     void ToolBar::setUndoRedoEnabled(bool undo, bool redo)

@@ -13,6 +13,22 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
+# ---- Fluent 主题 token 底座（2026-11-19 UI 现代化改版 M0） ----
+# 全部界面库 PUBLIC 链接：token/QSS 生成器/窗口 chrome 一处定义
+add_library(poptools_ui_theming STATIC
+    theming/FluentTheme.cpp
+    theming/FluentTheme.h
+)
+target_link_libraries(poptools_ui_theming PUBLIC
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+if(WIN32)
+    target_link_libraries(poptools_ui_theming PUBLIC dwmapi)
+endif()
+target_include_directories(poptools_ui_theming PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # ---- 共享窗口技术（贴桌 Z 序协调器 + 桌面表面注入通道 T-059） ----
 add_library(poptools_ui_shared STATIC
     shared/DesktopStack.cpp
@@ -71,6 +87,7 @@ add_library(poptools_ui_capture STATIC
 )
 target_link_libraries(poptools_ui_capture PUBLIC
     poptools_core
+    poptools_ui_theming
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -85,6 +102,7 @@ add_library(poptools_ui_pin STATIC
 )
 target_link_libraries(poptools_ui_pin PUBLIC
     poptools_core
+    poptools_ui_theming
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -98,6 +116,7 @@ add_library(poptools_ui_translate STATIC
 )
 target_link_libraries(poptools_ui_translate PUBLIC
     poptools_core
+    poptools_ui_theming
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -124,6 +143,7 @@ add_library(poptools_ui_goody STATIC
 )
 target_link_libraries(poptools_ui_goody PUBLIC
     poptools_core
+    poptools_ui_theming
     poptools_ui_shared
     Qt6::Core
     Qt6::Gui
@@ -145,6 +165,7 @@ add_library(poptools_ui_calendar STATIC
 )
 target_link_libraries(poptools_ui_calendar PUBLIC
     poptools_core
+    poptools_ui_theming
     poptools_ui_shared
     Qt6::Core
     Qt6::Gui
@@ -167,6 +188,7 @@ add_library(poptools_ui_box STATIC
 )
 target_link_libraries(poptools_ui_box PUBLIC
     poptools_core
+    poptools_ui_theming
     poptools_ui_shared
     Qt6::Core
     Qt6::Gui
@@ -177,13 +199,19 @@ target_link_libraries(poptools_ui_box PUBLIC
 target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
+# 2026-11-19 Fluent 改版 M1：SettingCard/ToggleSwitch 为 Win11 设置卡片组件
 add_library(poptools_ui_settings STATIC
     settings/SettingsDialog.cpp
     settings/SettingsDialog.h
+    settings/SettingCard.cpp
+    settings/SettingCard.h
+    settings/ToggleSwitch.cpp
+    settings/ToggleSwitch.h
 )
 target_link_libraries(poptools_ui_settings PUBLIC
     poptools_app_infra
     poptools_core
+    poptools_ui_theming
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -193,6 +221,7 @@ target_include_directories(poptools_ui_settings PUBLIC "${CMAKE_CURRENT_SOURCE_D
 # ---- 聚合目标：可执行目标只需链接 poptools_ui ----
 add_library(poptools_ui INTERFACE)
 target_link_libraries(poptools_ui INTERFACE
+    poptools_ui_theming
     poptools_ui_capture
     poptools_ui_pin
     poptools_ui_translate

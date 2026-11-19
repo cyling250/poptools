@@ -21,6 +21,9 @@ public:
     // 仅"打开"accept 路径写入；取消 / 未选中返回无效日期
     QDate selectedDate() const { return m_selectedDate; }
 
+private slots:
+    void applyTheme(); // Fluent token 主题应用（构造末尾 + 系统明暗切换）
+
 private:
     // 全量重建列表：日期键降序、逐条文本过滤，无匹配时占位行
     void rebuild();
@@ -40,6 +43,9 @@ public:
     explicit CalendarDatePickerForm(const QDate &initial, QWidget *parent = nullptr);
 
     QDate selectedDate() const { return m_selectedDate; }
+
+private slots:
+    void applyTheme(); // Fluent token 主题应用（构造末尾 + 系统明暗切换）
 
 private:
     QDate m_selectedDate;

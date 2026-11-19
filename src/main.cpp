@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QFont>
 #include <QIcon>
 #include <QMessageBox>
 #include <QStyleFactory>
@@ -31,6 +32,17 @@ int main(int argc, char *argv[])
     // 组合存在文字颜色不生效等非确定渲染（故障机实测：深色下源文本呈灰色），
     // Fusion 完全由 Qt/QSS 接管，跨 Windows 版本表现一致
     QApplication::setStyle(QStyleFactory::create("Fusion"));
+
+    // 全局字体栈（2026-11-19 Fluent 改版 M0）：西文/数字 Segoe UI Variable
+    // （Win11）→ Segoe UI，中文回退微软雅黑——Win10 上不再落到宋体。
+    // 只改字体族，保留默认字号（9pt）；token 刻度由各窗口按需细排
+    {
+        QFont appFont = app.font();
+        appFont.setFamilies({QStringLiteral("Segoe UI Variable Text"),
+                             QStringLiteral("Segoe UI"),
+                             QStringLiteral("Microsoft YaHei UI")});
+        app.setFont(appFont);
+    }
 
     // 主题强制覆盖（验证/演示用）：POPTOOLS_COLOR_SCHEME=light|dark；
     // 未设置时跟随系统明暗

@@ -351,50 +351,53 @@ void MessageBubble::setMaxContentWidth(int paneWidth)
     }
 }
 
-void MessageBubble::applyTheme(const ThemeColors &c)
+void MessageBubble::applyTheme(const FluentTokens &t)
 {
-    // P-023 双通道：① 控件自身内联样式（颜色取 ThemeColors）+ 调色板三组
+    // P-023 双通道：① 控件自身内联样式（颜色取 Fluent token）+ 调色板三组
     // 钉扎；② 样式表只留布局类声明（背景/边框/圆角/内边距）。P-022：全部
     // ID 选择器
     switch (m_role) {
     case User:
         setStyleSheet(QStringLiteral(
-            "QFrame#goodyBubbleUser { background: %1; border-radius: 10px; }")
-            .arg(c.accent));
+            "QFrame#goodyBubbleUser { background: %1; border-radius: 8px; }")
+            .arg(t.accent));
         m_userText->setStyleSheet(QStringLiteral(
-            "QLabel#goodyUserText { color: #FFFFFF; font-size: 13px;"
-            "  background: transparent; }"));
+            "QLabel#goodyUserText { color: %1; font-size: 14px;"
+            "  background: transparent; }").arg(t.onAccent));
         {
             QPalette pal = m_userText->palette();
-            const QBrush white{Qt::white};
+            const QBrush onAccent{QColor(t.onAccent)};
             for (const QPalette::ColorGroup group :
                  {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
-                pal.setBrush(group, QPalette::WindowText, white);
-                pal.setBrush(group, QPalette::Text, white);
+                pal.setBrush(group, QPalette::WindowText, onAccent);
+                pal.setBrush(group, QPalette::Text, onAccent);
             }
             m_userText->setPalette(pal);
         }
         break;
     case Assistant:
+        // Win11 卡片范式（2026-11-19 改版）：bgCard 底 + 1px 描边 + 8px 圆角
+        //（原 ctrlHover 实底无边框）
         setStyleSheet(QStringLiteral(
-            "QFrame#goodyBubbleAssistant { background: %1; border-radius: 10px; }")
-            .arg(c.ctrlHover));
+            "QFrame#goodyBubbleAssistant { background: %1; border: 1px solid %2;"
+            "  border-radius: 8px; }")
+            .arg(t.bgCard, t.cardStroke));
         m_body->setStyleSheet(QStringLiteral(
             "QTextBrowser#goodyBubbleText { color: %1; background: transparent;"
-            "  font-size: 13px; }").arg(c.body));
+            "  font-size: 14px; }").arg(t.textPrimary));
         m_reasonBody->setStyleSheet(QStringLiteral(
             "QTextBrowser#goodyReasoningBody { color: %1; background: %2;"
-            "  border-radius: 6px; padding: 4px; font-size: 12px; }")
-            .arg(c.body, c.editBg));
+            "  border-radius: 4px; padding: 4px; font-size: 12px; }")
+            .arg(t.textSecondary, t.bgSubtle));
         m_reasonHead->setStyleSheet(QStringLiteral(
             "QToolButton#goodyReasoningHead { color: %1; background: transparent;"
             "  border: none; font-size: 12px; padding: 2px 4px;"
-            "  text-align: left; }").arg(c.sectionTitle));
+            "  text-align: left; }").arg(t.textSecondary));
         // 正文与思考区调色板钉扎（Base/Text 三组全钉）
         {
             QPalette pal = m_body->palette();
-            const QBrush textBrush{QColor(c.body)};
-            const QBrush baseBrush{QColor(c.ctrlHover)}; // 与气泡底一致
+            const QBrush textBrush{QColor(t.textPrimary)};
+            const QBrush baseBrush{QColor(t.bgCard)}; // 与气泡底一致
             for (const QPalette::ColorGroup group :
                  {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
                 pal.setBrush(group, QPalette::Text, textBrush);
@@ -403,10 +406,11 @@ void MessageBubble::applyTheme(const ThemeColors &c)
             m_body->setPalette(pal);
 
             QPalette rpal = m_reasonBody->palette();
-            const QBrush rbase{QColor(c.editBg)};
+            const QBrush rtext{QColor(t.textSecondary)};
+            const QBrush rbase{QColor(t.bgSubtle)};
             for (const QPalette::ColorGroup group :
                  {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
-                rpal.setBrush(group, QPalette::Text, textBrush);
+                rpal.setBrush(group, QPalette::Text, rtext);
                 rpal.setBrush(group, QPalette::Base, rbase);
             }
             m_reasonBody->setPalette(rpal);
@@ -414,16 +418,16 @@ void MessageBubble::applyTheme(const ThemeColors &c)
         break;
     case System:
         setStyleSheet(errorLine() ? QStringLiteral(
-            "QFrame#goodyBubbleSystemError { background: %1; border-radius: 6px; }")
-            .arg(c.errBg)
+            "QFrame#goodyBubbleSystemError { background: %1; border-radius: 4px; }")
+            .arg(t.errBg)
             : QStringLiteral("QFrame#goodyBubbleSystem { background: transparent; }"));
         m_systemText->setStyleSheet(QStringLiteral(
             "QLabel#goodySystemText { color: %1; font-size: 12px;"
             "  background: transparent; }")
-            .arg(errorLine() ? c.errText : c.sectionTitle));
+            .arg(errorLine() ? t.errText : t.textTertiary));
         {
             QPalette pal = m_systemText->palette();
-            const QBrush textBrush{QColor(errorLine() ? c.errText : c.sectionTitle)};
+            const QBrush textBrush{QColor(errorLine() ? t.errText : t.textTertiary)};
             for (const QPalette::ColorGroup group :
                  {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
                 pal.setBrush(group, QPalette::WindowText, textBrush);
@@ -436,15 +440,15 @@ void MessageBubble::applyTheme(const ThemeColors &c)
     if (m_toolbar) {
         m_toolbar->setStyleSheet(QStringLiteral(
             "QFrame#goodyBubbleToolbar { background: %1; border: 1px solid %2;"
-            "  border-radius: 6px; }").arg(c.ctrlBg, c.line));
+            "  border-radius: 4px; }").arg(t.bgCard, t.cardStroke));
         for (QToolButton *btn : findChildren<QToolButton *>(QStringLiteral("goodyBubbleActBtn"))) {
             btn->setStyleSheet(QStringLiteral(
                 "QToolButton#goodyBubbleActBtn { color: %1; background: transparent;"
                 "  border: none; padding: 1px 5px; font-size: 11px; }"
                 "QToolButton#goodyBubbleActBtn:hover { background: %2; }")
-                .arg(c.ctrlText, c.ctrlHover));
+                .arg(t.textPrimary, t.bgCardHover));
             QPalette pal = btn->palette();
-            const QBrush textBrush{QColor(c.ctrlText)};
+            const QBrush textBrush{QColor(t.textPrimary)};
             for (const QPalette::ColorGroup group :
                  {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
                 pal.setBrush(group, QPalette::ButtonText, textBrush);
@@ -457,10 +461,10 @@ void MessageBubble::applyTheme(const ThemeColors &c)
     if (m_codeCopyBtn) {
         m_codeCopyBtn->setStyleSheet(QStringLiteral(
             "QToolButton#goodyCodeCopyBtn { color: %1; background: %2;"
-            "  border: 1px solid %3; border-radius: 5px; padding: 1px 7px;"
-            "  font-size: 11px; }").arg(c.ctrlText, c.ctrlBg, c.line));
+            "  border: 1px solid %3; border-radius: 4px; padding: 1px 7px;"
+            "  font-size: 11px; }").arg(t.textPrimary, t.bgCard, t.cardStroke));
         QPalette pal = m_codeCopyBtn->palette();
-        const QBrush textBrush{QColor(c.ctrlText)};
+        const QBrush textBrush{QColor(t.textPrimary)};
         for (const QPalette::ColorGroup group :
              {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
             pal.setBrush(group, QPalette::ButtonText, textBrush);
@@ -469,7 +473,7 @@ void MessageBubble::applyTheme(const ThemeColors &c)
 
     // 语法高亮配色跟随主题
     if (m_highlighter)
-        m_highlighter->setSyntaxColors(c.dark ? CodeSyntaxColors::dark()
+        m_highlighter->setSyntaxColors(t.dark ? CodeSyntaxColors::dark()
                                               : CodeSyntaxColors::light());
 }
 

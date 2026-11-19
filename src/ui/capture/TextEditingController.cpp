@@ -84,11 +84,12 @@ namespace poptools
         }
 
         // 输入中不显示白色底：背景透明，仅虚线标出输入区域；默认文本色 = 本次输入开始色
-        // （与提交后渲染兜底色 it.color 一致：无显式色的文字编辑中/提交后显示同色）
+        // （与提交后渲染兜底色 it.color 一致：无显式色的文字编辑中/提交后显示同色）。
+        // 虚线色取 overlay 语义主色（ThemeColors.h overlay::accent，覆盖层恒暗语境）
         m_textEdit->setStyleSheet(QString(
-                                      "QTextEdit { background: transparent; border: 1px dashed #2B6FF2;"
-                                      " border-radius: 3px; padding: 1px 2px; color: %1; }")
-                                      .arg(m_startColor.name()));
+                                      "QTextEdit { background: transparent; border: 1px dashed %1;"
+                                      " border-radius: 3px; padding: 1px 2px; color: %2; }")
+                                      .arg(overlay::accent().name(), m_startColor.name()));
 
         // 定位：选区局部坐标 → 全局坐标 → 窗口坐标
         const QPointF global = boxPos + m_ctx->selectionRect().topLeft();

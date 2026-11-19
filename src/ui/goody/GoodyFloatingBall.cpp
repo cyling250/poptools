@@ -3,7 +3,8 @@
 
 #include "GoodyBallLogic.h"
 #include "core/settings/Settings.h"
-#include "ui/ThemeColors.h"
+#include "ui/ThemeColors.h" // systemSchemeDark
+#include "ui/theming/FluentTheme.h"
 #include "ui/shared/DesktopStack.h"
 
 #include <QEnterEvent>
@@ -68,13 +69,13 @@ void GoodyFloatingBall::applyTheme()
     // P-023 双通道在本件的落法：球体完全 paintEvent 自绘，无 QSS 通道
     //（不存在"样式表失效落黑底"路径）；调色板钉扎作第二通道兜底——
     // tooltip 等经调色板取色的路径在 QSS/主题异常时仍可读
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    const FluentTokens t = fluentTheme(systemSchemeDark());
     QPalette pal = palette();
     for (const QPalette::ColorGroup group :
          {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
-        pal.setBrush(group, QPalette::Window, QColor(c.cardBg));
-        pal.setBrush(group, QPalette::WindowText, QColor(c.body));
-        pal.setBrush(group, QPalette::Highlight, QColor(c.accent));
+        pal.setBrush(group, QPalette::Window, QColor(t.bgCard));
+        pal.setBrush(group, QPalette::WindowText, QColor(t.textPrimary));
+        pal.setBrush(group, QPalette::Highlight, QColor(t.accent));
     }
     setPalette(pal);
     update(); // 窗体即球矩形（68px），全量重绘无伤
@@ -243,7 +244,7 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    const FluentTokens c = fluentTheme(systemSchemeDark());
     const QRect ball = ballRect();
     const QPointF center = ball.center();
     const qreal r = ball.width() / 2.0;
@@ -259,10 +260,10 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
         p.drawEllipse(center, r + 4, r + 4);
     }
 
-    // 玻璃感球体：cardBg 半透明垂直渐变（底色随主题表）+ 顶部高光
-    QColor top{QColor(c.cardBg)};
+    // 玻璃感球体：bgCard 半透明垂直渐变（底色随 Fluent token）+ 顶部高光
+    QColor top{QColor(c.bgCard)};
     top.setAlpha(225);
-    QColor bottom{QColor(c.cardBg)};
+    QColor bottom{QColor(c.bgCard)};
     bottom.setAlpha(195);
     QLinearGradient grad(ball.topLeft(), ball.bottomLeft());
     grad.setColorAt(0.0, top);
@@ -277,23 +278,18 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
     p.setPen(Qt::NoPen);
     p.drawEllipse(QPointF(center.x(), ball.top() + r * 0.42), r * 0.72, r * 0.55);
 
-    // 边框：悬停强调色，常态主题灰（lighter 一档保证深色底可见）
-    QColor border = m_hover ? QColor(c.accent) : QColor(c.cardBorder);
-    if (!m_hover && c.dark)
-        border = border.lighter(125);
+    // 边框：悬停强调色，常态取 cardStroke（token 已按主题配好可见度）
+    QColor border = m_hover ? QColor(c.accent) : QColor(c.cardStroke);
     p.setBrush(Qt::NoBrush);
     p.setPen(QPen(border, 1.2));
     p.drawEllipse(ball.adjusted(0, 0, -1, -1));
 
-    // 中央字标 "G"：浅色主题 accent 原色，深色主题 accent 提亮
+    // 中央字标 "G"：accent（深色套 token 已预提亮，无需 lighter 补丁）
     QFont f = p.font();
     f.setBold(true);
     f.setPixelSize(24);
     p.setFont(f);
-    QColor letter{QColor(c.accent)};
-    if (c.dark)
-        letter = letter.lighter(150);
-    p.setPen(letter);
+    p.setPen(QColor(c.accent));
     p.drawText(ball, Qt::AlignCenter, QStringLiteral("G"));
 }
 

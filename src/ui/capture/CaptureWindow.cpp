@@ -14,6 +14,7 @@
 #include "core/annotation/AnnotationPainter.h"
 #include "core/capture/QrScanner.h"
 #include "core/capture/SmartRectDetector.h"
+#include "core/monitor/MainThreadProbe.h" // T-069b F1 链路打点
 #include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 
 #include "ToolBar.h"
@@ -219,9 +220,15 @@ namespace poptools
 
     void CaptureWindow::startCapture()
     {
+        // T-069b F1 卡顿取证：三段链路标记（入口 / 抓屏完成 / 窗口显示），
+        // 与 f1_hotkey/f1_start 及探针钩子延迟记录按 QPC 对时还原完整链路
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("cap_begin");
         // 捕获所有屏幕拼接的物理分辨率画面（多屏扩展无黑屏），
         // 并记录逻辑/物理虚拟桌面几何（窗口/鼠标/选区均用逻辑坐标）
         m_cap = ScreenCapturer::capture();
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("cap_grabbed");
 
         m_state = State::Selecting;
         resetSelectionSession(); // 选区会话公共复位（含双击重选标志，T-062 修复新增项）
@@ -250,6 +257,8 @@ namespace poptools
         activateWindow();
         raise();
         setFocus();
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("cap_shown");
     }
 
     void CaptureWindow::exitCapture()

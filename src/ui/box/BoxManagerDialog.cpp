@@ -1,10 +1,14 @@
 #include "BoxManagerDialog.h"
 
+#include "ui/ThemeColors.h"
+#include "ui/theming/FluentTheme.h"
+
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -12,6 +16,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStyleHints>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -21,6 +26,7 @@ BoxManagerDialog::BoxManagerDialog(BoxCatalog &catalog, QWidget *parent)
     : QDialog(parent, Qt::Dialog | Qt::WindowCloseButtonHint)
     , m_catalog(catalog)
 {
+    setObjectName("boxManagerDialog");
     setWindowTitle(QStringLiteral("收纳盒管理"));
     // 关闭即销毁（P-058 纪律）：hide-only 会让 openManager 的"已开着"分支
     // 抬不起隐藏窗；销毁后 destroyed 回调复位 m_manager，下次托盘「收纳盒管理」
@@ -28,22 +34,21 @@ BoxManagerDialog::BoxManagerDialog(BoxCatalog &catalog, QWidget *parent)
     setAttribute(Qt::WA_DeleteOnClose);
     setModal(false);
     setFixedSize(440, 440);
+    // 2026-11-19 收编：原硬编码深色十六进制 → Fluent token，跟随系统明暗
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, &BoxManagerDialog::applyTheme);
 
     auto *layout = new QVBoxLayout(this);
 
     auto *hint = new QLabel(QStringLiteral(
         "每个收纳盒绑定一个真实文件夹：盒内条目随文件夹实时同步；\n"
         "整理文件在资源管理器进行，删除盒只是解除绑定，不会删文件。"), this);
-    hint->setStyleSheet(QStringLiteral("color: #9a9a9a; font-size: 12px;"));
+    hint->setObjectName("boxManagerHint");
+    hint->setWordWrap(true);
     layout->addWidget(hint);
 
     m_list = new QListWidget(this);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_list->setStyleSheet(QStringLiteral(
-        "QListWidget { background: #23252d; color: #e6e6e6; border: 1px solid #3a3d47;"
-        " border-radius: 4px; }"
-        "QListWidget::item { padding: 4px 6px; }"
-        "QListWidget::item:selected { background: #3d5a8a; }"));
     layout->addWidget(m_list, 1);
 
     auto addBtn = [&](QHBoxLayout *row, const QString &text, auto slot) {
@@ -71,6 +76,28 @@ BoxManagerDialog::BoxManagerDialog(BoxCatalog &catalog, QWidget *parent)
     layout->addLayout(row3);
 
     reloadList();
+    applyTheme();
+}
+
+// Fluent token 主题（2026-11-19 收编，方案 docs/design/
+// 20261119-ui-fluent-restyle-proposal.md）：提示行取 textSecondary 档，
+// 列表/按钮取 token；Qt 内置类走类型选择器（P-022）
+void BoxManagerDialog::applyTheme()
+{
+    const FluentTokens t = fluentTheme(systemSchemeDark());
+    setStyleSheet(QStringLiteral("#boxManagerDialog { background: %1; }"
+                                 "#boxManagerHint { color: %2; font-size: 12px; }"
+                                 "QListWidget { background: %3; color: %4;"
+                                 "  border: 1px solid %5; border-radius: 4px; }"
+                                 "QListWidget::item { padding: 6px 8px;"
+                                 "  border-radius: 3px; }"
+                                 "QListWidget::item:selected { background: %6;"
+                                 "  color: %4; }"
+                                 "QLabel { color: %4; font-size: 14px; }")
+                      .arg(t.bgBase, t.textSecondary, t.bgCard, t.textPrimary,
+                           t.cardStroke, t.accentSoft) +
+                  fluentButtonQss(t) + fluentScrollBarQss(t));
+    applyFluentWindowChrome(this, t.dark);
 }
 
 void BoxManagerDialog::focusBox(const QString &boxId)

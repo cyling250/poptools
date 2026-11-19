@@ -3,6 +3,7 @@
 #include "CalendarPaintUtils.h" // 圆角矩形路径（S-03 模块内收敛，原 editorRoundPath）
 #include "core/calendar/CalendarTaskStore.h"
 #include "core/calendar/ChineseCalendar.h"
+#include "ui/theming/FluentTheme.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -29,10 +30,16 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
     m_text = new QPlainTextEdit(this);
     m_text->setObjectName("calendarEventEdit");
     m_text->setFrameShape(QPlainTextEdit::NoFrame);
-    m_text->setStyleSheet(
-        QStringLiteral("QPlainTextEdit#calendarEventEdit { background: #16181E; "
-                       "color: #F0F0F0; border: none; font: 15px 'SimSun'; "
-                       "selection-background-color: #2B6FF2; }"));
+    // 2026-11-19 收编：原硬编码十六进制 → Fluent token 常暗套（本编辑器浮在
+    // 贴桌面玻璃日历之上，属恒暗玻璃家族语境，不随系统明暗——对齐 ToolBar 先例）
+    {
+        const FluentTokens t = fluentTheme(true);
+        m_text->setStyleSheet(
+            QStringLiteral("QPlainTextEdit#calendarEventEdit { background: %1; "
+                           "color: %2; border: none; font: 15px 'SimSun'; "
+                           "selection-background-color: %3; }")
+                .arg(t.bgSubtle, t.textPrimary, t.accent));
+    }
     m_text->setGeometry(14, 48, 352, 280);
     m_text->setPlainText([this, store, date] {
         const QVector<CalendarTaskItem> tasks = store->get(date);
@@ -48,12 +55,16 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
 
 void CalendarEventEditor::paintEvent(QPaintEvent *)
 {
+    // 常暗玻璃家族语境：底/描边取 Fluent token 深色套（描边保留半透明白
+    // 的玻璃语义——alpha 色不入 token 表，见 FluentTheme.h 使用纪律）
+    const FluentTokens t = fluentTheme(true);
+    const QColor border{QColor(t.textPrimary)};
     QPainter g(this);
     g.setRenderHint(QPainter::Antialiasing);
     g.setCompositionMode(QPainter::CompositionMode_Source);
-    g.fillRect(rect(), QColor(26, 28, 34));
+    g.fillRect(rect(), QColor(t.bgBase));
     g.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    g.setPen(QPen(QColor(255, 255, 255, 46), 1));
+    g.setPen(QPen(QColor(border.red(), border.green(), border.blue(), 46), 1));
     g.setBrush(Qt::NoBrush);
     g.drawRect(QRectF(0.5, 0.5, width() - 1, height() - 1));
 

@@ -28,6 +28,9 @@ signals:
     void catalogChanged();               // 结构变更（模块重建面板实例）
     void adjustRequested(const QString &boxId); // 调整位置和列数（模块转面板）
 
+private slots:
+    void applyTheme(); // Fluent token 主题应用（构造末尾 + 系统明暗切换）
+
 private:
     void reloadList();
     void createManagedBox(); // 新建空盒（托管目录）

@@ -6,7 +6,7 @@
 #include <initializer_list>
 #include <utility>
 
-#include "ui/ThemeColors.h"
+#include "ui/theming/FluentTheme.h"
 
 class QLabel;
 class QToolButton;
@@ -89,7 +89,7 @@ public:
     Role role() const { return m_role; }
     void setRegenerateVisible(bool on); // 仅最后一条 assistant 气泡为 true
     void setMaxContentWidth(int paneWidth); // 窗口缩放时重设宽度约束
-    void applyTheme(const ThemeColors &c);
+    void applyTheme(const FluentTokens &t); // 2026-11-19 改版：ThemeColors → Fluent token
 
 signals:
     // 动作请求（气泡不带消息下标：会话消息下标由窗口在动作时刻按

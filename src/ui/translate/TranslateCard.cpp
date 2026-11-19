@@ -3,7 +3,8 @@
 #include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
-#include "ui/ThemeColors.h"
+#include "ui/ThemeColors.h" // systemSchemeDark
+#include "ui/theming/FluentTheme.h"
 
 #include <QLabel>
 #include <QPushButton>
@@ -230,47 +231,49 @@ TranslateCard::TranslateCard(QWidget *parent)
 
 void TranslateCard::applyTheme()
 {
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    // 2026-11-19 改版 M3：ThemeColors → Fluent token（值替换，双通道纪律不变）
+    const FluentTokens c = fluentTheme(systemSchemeDark());
     // 注意：文本框（QTextEdit）的颜色不走本样式表——故障机（Win10）实测
     // 父级样式表的 QTextEdit color 不生效而控件内联样式生效，见下方 m_editSheet
     setStyleSheet(QString(
         "#translateCard { background: %1; border: 1px solid %2;"
         "  border-radius: 8px; }"
-        "QLabel.card-title { color: %3; font-weight: bold; font-size: 13px; }"
+        "QLabel.card-title { color: %3; font-weight: 600; font-size: 14px; }"
         "QLabel.section-title { color: %4; font-size: 11px; }"
         "QComboBox { background: %5; color: %6; border: 1px solid %7;"
-        "  border-radius: 3px; padding: 2px 4px; font-size: 12px; }"
-        "QComboBox:focus { border-color: #2B6FF2; }"
+        "  border-radius: 4px; padding: 2px 4px; font-size: 12px; }"
+        "QComboBox:focus { border-color: %8; }"
         "QComboBox::drop-down { border: none; }"
         "QComboBox QAbstractItemView { background: %5; color: %6;"
-        "  selection-background-color: %8; }"
+        "  selection-background-color: %9; }"
         "QPushButton.ctrl-btn { background: %5; color: %6;"
-        "  border: 1px solid %7; border-radius: 3px; padding: 2px 6px;"
+        "  border: 1px solid %7; border-radius: 4px; padding: 2px 6px;"
         "  font-size: 12px; }"
-        "QPushButton.ctrl-btn:hover { background: %8; }"
-        "QPushButton.translate-btn { background: #2B6FF2; color: #FFFFFF;"
-        "  border: none; border-radius: 3px; padding: 2px 10px; font-size: 12px; }"
-        "QPushButton.translate-btn:hover { background: #1E5FD9; }"
-        "QPushButton.translate-btn:disabled { background: %8; color: %9; }"
-        "QFrame { color: %10; }"
+        "QPushButton.ctrl-btn:hover { background: %9; border-color: %8; color: %8; }"
+        "QPushButton.translate-btn { background: %8; color: %10;"
+        "  border: none; border-radius: 4px; padding: 2px 10px; font-size: 12px;"
+        "  font-weight: 600; }"
+        "QPushButton.translate-btn:hover { background: %11; }"
+        "QPushButton.translate-btn:disabled { background: %9; color: %12; }"
+        "QFrame { color: %13; }"
         "QPushButton.close-btn { background: transparent; border: none;"
-        "  color: %11; font-size: 14px; }"
-        "QPushButton.close-btn:hover { color: %12; }")
-        .arg(c.cardBg, c.cardBorder, c.title, c.sectionTitle, c.ctrlBg,
-             c.body, c.ctrlBorder, c.ctrlHover, c.ctrlDisabledText,
-             c.line, c.closeText, c.closeHover));
+        "  color: %4; font-size: 14px; }"
+        "QPushButton.close-btn:hover { color: %8; }")
+        .arg(c.bgCard, c.cardStroke, c.textPrimary, c.textTertiary, c.ctrlBg,
+             c.textPrimary, c.cardStroke, c.accent, c.ctrlHover, c.onAccent,
+             c.accentHover, c.textDisabled, c.divider));
 
     // 文本框颜色直接写在控件自身（内联样式在故障机上被验证有效）；
     // 恢复默认时须重新应用本样式而非清空
-    m_editSheet = editSheet(c.body, c.editBg, c.editBorder);
+    m_editSheet = editSheet(c.textPrimary, c.ctrlBg, c.cardStroke);
     m_sourceText->setStyleSheet(m_editSheet);
     m_translateText->setStyleSheet(m_editSheet);
 
     // 卡片是 WA_ShowWithoutActivating 的不激活窗口，Qt 以 Inactive 调色板组
     // 绘制其文字，把 Text 角色的三个组都钉到主题文字色兜底；内部背景钉
     // Base/Window（Win10 原生风格下 QSS 背景可能失效）
-    const QBrush textBrush{QColor(c.body)};
-    const QBrush editBgBrush{QColor(c.editBg)};
+    const QBrush textBrush{QColor(c.textPrimary)};
+    const QBrush editBgBrush{QColor(c.ctrlBg)};
     for (QTextEdit *edit : {m_sourceText, m_translateText}) {
         QPalette pal = edit->palette();
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
@@ -339,8 +342,8 @@ void TranslateCard::setTranslateResult(const QString &text)
 void TranslateCard::showError(const QString &errorMsg)
 {
     m_translateText->setPlainText(errorMsg);
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
-    m_translateText->setStyleSheet(editSheet(c.errText, c.errBg, c.errBorder));
+    const FluentTokens c = fluentTheme(systemSchemeDark());
+    m_translateText->setStyleSheet(editSheet(c.errText, c.errBg, c.cardStroke));
     m_translateBtn->setEnabled(true);
     syncActionUi(); // T-062 修复: 同 setTranslateResult，文案随当前动作
     m_copyBtn->setEnabled(false);

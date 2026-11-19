@@ -3,7 +3,8 @@
 #include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
 #include "core/settings/Settings.h"
 #include "core/translation/Languages.h"
-#include "ui/ThemeColors.h"
+#include "ui/ThemeColors.h" // systemSchemeDark
+#include "ui/theming/FluentTheme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -143,38 +144,39 @@ OcrPanel::OcrPanel(QWidget *parent)
 
 void OcrPanel::applyTheme()
 {
-    const ThemeColors c = uiThemeColors(systemSchemeDark());
+    // 2026-11-19 改版 M3：ThemeColors → Fluent token（值替换，双通道纪律不变）
+    const FluentTokens t = fluentTheme(systemSchemeDark());
     // 文本框颜色直接写在控件自身：父级样式表的 QTextEdit color 在部分
     // Win10 渲染路径下不生效（见 TranslateCard 同款处理）
     const QString editSheet = QStringLiteral(
         "QTextEdit { color: %1; background: %2; border: 1px solid %3;"
-        "  border-radius: 3px; padding: 4px; font-size: 13px; }"
-        "QTextEdit:focus { border-color: #2B6FF2; }").arg(c.body, c.editBg, c.editBorder);
+        "  border-radius: 4px; padding: 4px; font-size: 13px; }"
+        "QTextEdit:focus { border-color: %4; }").arg(t.textPrimary, t.ctrlBg, t.cardStroke, t.accent);
     m_ocrEdit->setStyleSheet(editSheet);
     m_translateEdit->setStyleSheet(editSheet);
 
     setStyleSheet(QString(
-        "#ocrPanel { background: %1; border: 1px solid %2; border-radius: 4px; }"
-        "QComboBox { background: %3; border: 1px solid %4; border-radius: 3px;"
+        "#ocrPanel { background: %1; border: 1px solid %2; border-radius: 8px; }"
+        "QComboBox { background: %3; border: 1px solid %4; border-radius: 4px;"
         "  color: %5; padding: 2px 4px; }"
-        "QComboBox:focus { border-color: #2B6FF2; }"
+        "QComboBox:focus { border-color: %6; }"
         "QComboBox QAbstractItemView { background: %3; color: %5; }"
-        "QPushButton { background: %3; border: 1px solid #2B6FF2; border-radius: 3px;"
-        "  color: #2B6FF2; padding: 2px 10px; font-size: 12px; }"
-        "QPushButton:hover { background: %6; }"
-        "QPushButton:disabled { color: %7; border-color: %4; background: %6; }"
+        "QPushButton { background: %3; border: 1px solid %4; border-radius: 4px;"
+        "  color: %5; padding: 2px 10px; font-size: 12px; }"
+        "QPushButton:hover { background: %7; border-color: %6; color: %6; }"
+        "QPushButton:disabled { color: %8; border-color: %4; background: %7; }"
         "QLabel { color: %5; font-size: 12px; }"
-        "QFrame { color: %8; }"
+        "QFrame { color: %9; }"
         "QPushButton#ocrCloseBtn { background: transparent; border: none;"
-        "  color: %9; font-size: 14px; }"
+        "  color: %10; font-size: 14px; }"
         "QPushButton#ocrCloseBtn:hover { color: %5; }")
-        .arg(c.cardBg, c.cardBorder, c.editBg, c.editBorder, c.body,
-             c.ctrlHover, c.ctrlDisabledText, c.line, c.closeText));
+        .arg(t.bgCard, t.cardStroke, t.ctrlBg, t.cardStroke, t.textPrimary,
+             t.accent, t.ctrlHover, t.textDisabled, t.divider, t.textTertiary));
 
     // 与 TranslateCard 同理：把 Text 角色三个组都钉到主题文字色，
     // 内部背景钉 Base/Window，避免任何系统样式路径下 QSS 不生效
-    const QBrush textBrush{QColor(c.body)};
-    const QBrush editBgBrush{QColor(c.editBg)};
+    const QBrush textBrush{QColor(t.textPrimary)};
+    const QBrush editBgBrush{QColor(t.ctrlBg)};
     for (QTextEdit *edit : {m_ocrEdit, m_translateEdit}) {
         QPalette pal = edit->palette();
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
