@@ -121,6 +121,7 @@ private:
                             bool dark); // 单条侧栏行装配（T-062 抽取）
     void markRegenerateOnLast();       // 仅最后一条 assistant 气泡显示"重新生成"
     void updateMaxWidths();            // 窗口缩放 → 气泡宽度上限与消息列居中
+    int maxBubblePaneWidth() const;    // 气泡可用宽度（视口与消息列上限取小）
     void adjustInputHeight();          // 输入框自适应高度
     void scrollIfAtBottom();           // 仅在本就贴底时跟随（force=false 委托）
     void scrollToBottomNow(bool force); // force=true 强制贴底（"必须看见"场景）
@@ -140,7 +141,7 @@ public:
                         const QString &argsSummary);
     void toolRowFinished(const QString &callId, bool ok, const QString &resultText);
 
-signals:
+private:
 
     ChatSession *m_session = nullptr;
     MarkdownRenderer m_renderer;       // 流式渲染状态机（纯逻辑，150ms 节流）

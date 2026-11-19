@@ -706,11 +706,10 @@ void GoodyWindow::promptPermission(const QString &tool, const QString &argsSumma
 // ---- 状态守卫（B-2/C-N2） ----
 
 void GoodyWindow::setBusy(bool on)
-    // T-070：发送/停止同位钮形态切换（dsh InputBar 状态机）
-    m_sendBtn->setText(on ? QStringLiteral("■") : QStringLiteral("↑"));
 {
+    // T-070：发送/停止同位钮形态切换（dsh InputBar 状态机）
     m_busy = on;
-    m_sendBtn->setText(on ? QStringLiteral("停止") : QStringLiteral("发送"));
+    m_sendBtn->setText(on ? QStringLiteral("■") : QStringLiteral("↑"));
     m_input->setEnabled(true); // busy 时仍可输入下一条，但 Enter 不发送
     // busy（LLM 请求在途）同样禁用「清空」（C-N2 第一道保险）：清空后迟到
     // 回包 unconditional append 进空会话，断裂序列会让下一轮请求 400。
@@ -740,7 +739,6 @@ void GoodyWindow::toolRowFinished(const QString &callId, bool ok,
                     resultText);
 }
 
-void GoodyWindow::setToolPhase(bool on)
 void GoodyWindow::setToolPhase(bool on)
 {
     // 工具执行期（含权限确认等待）禁用「清空」（B-2）：会话清空后剩余工具
@@ -1057,5 +1055,4 @@ void GoodyWindow::applyTheme()
     refreshSessionList(); // 侧栏行配色随主题重建（不回环：刷新不触发 applyTheme）
 }
 
-} // namespace poptools
 } // namespace poptools
