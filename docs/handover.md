@@ -1,7 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
-> 最后更新：2026-11-19 16:35（T-068 结算：三类主线程停摆根治+探针验证归零，发版 v0.5.1（Release 451052105），探针随验收期保留；细档 t068_mouse_stall.md） · Agent_20261119101500
+> 最后更新：2026-11-19 17:20（T-069 落码完成：UI 现代化改版 M0-M3 全流程——Fluent token 底座 theming 库 + 设置界面 SettingCard/ToggleSwitch/即时生效 + Goody 头像行/卡片描边/自适应输入 + 全局配色统一 Fluent token（ThemeColors 表退役），构建+ctest 绿，未提交待用户目测验收；方案 docs/design/20261119-ui-fluent-restyle-proposal.md） · Agent_20261119172053
 > 最后更新：2026-11-18 16:00（T-067 落码完成：Goody 起居注式日摘要（静默自主）+ 月度滚动月报（开机重写【月报更新】）+ 桌面日历摘要链接展示（双击面板后可点/notepad），textlog 接入日总结（T-066b 收口），ctest 97 绿，未提交待真机验收） · Agent_20261118130500
 > 最后更新：2026-11-18 00:30（合并并行会话：本地「桌面日历单屏化+多屏花屏根修+拖动体验闭环」重编号 T-063（原本地草稿编号 T-059，与远端收纳盒 T-059 冲突）、「启动更新自查」T-064（原 T-060）、P-066（原 P-063）；特性已移植到远端槽位协议 CLK4 架构（虚拟桌面并集画布+双缓冲帧翻转+覆盖层预览拖动）） · Agent_20261117164000
 > 最后更新：2026-11-17 16:45（T-059：桌面日历单屏化+多屏花屏/复制根修——协议 v2 增所在屏矩形、DLL 擦除两遍法限定日历屏、宿主坐标体系升级虚拟桌面、跨屏拖动；用户实拍副屏初验通过） · Agent_20261117164000
@@ -36,7 +36,7 @@
   - `src/app/` — 应用外壳（组合根）：MainWindow（托盘 + 模块装配）+ `IFeatureModule`/`FeatureRegistry`/`AppServices` 基础设施；CMake 目标：`poptools_app_infra`（基础设施，可执行与测试共链）+ `poptools_module_<id>`（每功能模块一个静态库，含其界面库）+ 聚合 `poptools_modules`（T-036 起「拔插=删一个目标」字面成立）
   - `src/app/modules/` — 功能模块（capture 截图 / pin 贴图 / selectionTranslate 划词翻译 / activitymonitor / goody / calendar 桌面日历），各自自包含
   - `src/core/` — 核心域静态库 `poptools_core`（annotation 标注模型与渲染、calendar 桌面日历域（农历/节气/节日、布局命中、任务与设置 JSON 存储，T-054）、capture 多屏捕获与窗口检测、hotkey 全局热键与全局鼠标钩子、monitor 活动监控（键盘钩子/文本镜像/输入状态机/前台跟踪/OCR 快照管线/UIA 取文与剪贴板流/JSONL 存储，T-045/T-047/T-066）、ocr OCR 服务、settings 设置、translation 翻译与划词翻译、assistant Goody 助手域（LLM 流式客户端/工具注册表/权限/会话/每日记录/记忆/MCP，T-045））
-  - `src/ui/` — 界面层按功能分库：`poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框：左侧导航分页，跟随系统明暗主题），`poptools_ui_goody`（悬浮球+卡片聊天窗，T-045/T-050）/ `poptools_ui_calendar`（桌面日历：共享内存画布/渲染器/宿主控制器/五窗，T-054）/ `poptools_ui_shared`（DesktopStack 贴桌 Z 序协调器），聚合为 INTERFACE 目标 `poptools_ui`
+  - `src/ui/` — 界面层按功能分库：`poptools_ui_theming`（T-069 Fluent token 底座：FluentTokens/fluentTheme 明暗双套+通用 QSS 生成器+applyFluentWindowChrome，**全部 UI 配色唯一来源**，新窗口接法见 FluentTheme.h 头注释）/ `poptools_ui_capture`（截图画布+工具栏+OCR 面板）/ `poptools_ui_pin`（贴图窗口）/ `poptools_ui_translate`（划词翻译卡片）/ `poptools_ui_settings`（设置对话框：T-069 起左导航+SettingCard 分组卡片+ToggleSwitch，即时生效），`poptools_ui_goody`（悬浮球+卡片聊天窗，T-045/T-050/T-069 头像行）/ `poptools_ui_calendar`（桌面日历：共享内存画布/渲染器/宿主控制器/五窗，T-054）/ `poptools_ui_shared`（DesktopStack 贴桌 Z 序协调器），聚合为 INTERFACE 目标 `poptools_ui`
   - `src/hook/` — 桌面日历 Explorer 注入 DLL 源码 `calendar_hook.cpp`（纯 Win32，CMake 目标 `poptools_calendar_hook` → `PopToolsCalendarHook.dll` 与 exe 同目录，T-054）
   - `tests/` — QtTest 域逻辑单元测试（ctest 运行，`SNIPASTE_BUILD_TESTS` 默认 ON）
   - `src/resources/` — qrc 资源与图标：`app_icon.svg` 为应用图标源文件（「破框而出」设计，托盘/窗口图标直接引用，见 T-026）；`icons/` 为 24×24 工具条线性图标（svg）
@@ -121,36 +121,63 @@
 - **结果**：✅ 四修全落地，ctest 96 绿：①星期表头改矩形居中绘制（QFontMetrics 独立测宽与渲染引擎系统性偏差 ~10px）；②今日高亮删白线框、发光环外扩 11px 压格边（贴图环带实测内缩 15.5px）；③删云/账户按钮与菜单项（头部 7→5，openMainMenu 索引 6→4）；④卡死根因 = QDialog::done() 只 hide 不析构 → m_modal 永久卡死——改 finished+deleteLater+trackModal(QPointer 对号) 七处弹窗，另修无 parent 弹窗落副屏问题（centerOnPanel 锚定面板）；注入协议闭环自验：开→关→日历仍响应→可重复开
 - **相关坑**：P-058、P-059、P-060 ｜ 未提交待用户。增补（18:03）：用户报编辑器外点偶尔关不掉——根因 P-060，以 GlobalMouseHook 兜底修复（openEditor 内随编辑器装卸），真实点击闭环自验：外点关/内点不误关/收尾关三步全过
 
-### T-055 净克隆环境重建：依赖三件套 + VS2026 配置构建 + ctest 96 绿
-- **执行智能体**：Agent_20261116165900
-- **结果**：✅ tools/（qt 6.8.3 / rapidocr 含 rec 裁剪 / zxing）+ .venv（uv，py3.12.14）+ build/Release 全量产物（exe / 注入 DLL / rapidocr 部署），ctest 96/96 绿；顺手修脚本两处——代理 7897→17890（qt/rapidocr/zxing 三脚本）与 7z MSI 路径 bug（P-057）；改动未提交待用户
-- **相关坑**：P-057
-
-### T-054 桌面日历重写：日历/收纳盒痕迹清零 + 照搬 rlqd 复刻移植 Qt
-- **执行智能体**：Agent_20261116003308（用户指令两步走：先清零不留痕迹，再照搬移植）
-- **结果**：✅ 清零（独立提交）：旧日历/YYNote 在途实现/收纳盒/desktopband 代码+设置+测试+文档全清，ctest 89 绿；移植：注入 DLL `PopToolsCalendarHook.dll`（照搬 rlqd DesktopHook：WH_CALLWNDPROC 注入 + 子类化 SHELLDLL_DefView/SysListView32 + 共享内存 DIB AlphaBlend）+ Qt 应用侧（共享画布/QPainter 渲染/宿主控制器/五窗）+ 农历引擎（solarlunar 权威表脚本生成 + 2020-2030 逐日真值校验），ctest 96 绿（+7 用例），DLL 加载冒烟通过；**真机目测待用户**
-- **相关坑**：P-054、P-055 ｜ 细档：[handover/t054_rlqd_calendar_port.md](handover/t054_rlqd_calendar_port.md)
-
-### T-050 Goody 管家界面升级·阶段一悬浮球 + 阶段二聊天窗重构（阶段三待开工）
-- **执行智能体**：Agent_20261112003400（夜间全自动，子代理开发/复审流水线）
-- **结果**：✅ 阶段一（1d85540，ctest 99 绿）：贴桌悬浮球（拖动记忆 assistant/ballPos、单击/热键开窗、聊天隐没、工作呼吸光效、设置页开关，结构冒烟端到端验证）；阶段二（5a00f7e，ctest 108 绿）：GoodyWindow 推倒重写为卡片式聊天窗（会话侧栏 + 消息气泡 + MarkdownRenderer 150ms 节流流式 + 代码高亮与块复制 + 思考折叠区 reasoning_content 透传/持久化/请求体剥离 + 消息四件套），ChatSession 升 v2 多会话（v1 无损迁移）；阶段三未开工（见当前任务）
-- **相关坑**：P-039 ｜ 细档：[handover/t047_048_050_night_batch.md](handover/t047_048_050_night_batch.md) §4
-
-### T-049 R6 批量修复轮（探查工作单 A~E → 9 条修复 + 测试补齐 16 例）
-- **执行智能体**：Agent_20261112003400
-- **结果**：✅ 四张只读探查单（DPI 扫描 / QSS 主题 / 性能红线 / 测试缺口）+ 复审闭环：修复 9 条（R6-B1 底图 DPR 直绘、B2 快照归属时序、B3 GoodyWindow 双通道、B4 翻译目标语言双入口同步、C1 fs.list 异步化、C2 MCP 懒启动、C3~C5 卫生）+ ToolText/consumeBaselineAdded 抽取 + 16 新用例；ctest 60→77 绿；复审跟进 R6-B1a 混合 DPR 回退随 T-047 提交。C17/C18 两个大重构按计划缓议（见当前任务遗留候修）
-- **相关坑**：P-038 ｜ 细档：[handover/t047_048_050_night_batch.md](handover/t047_048_050_night_batch.md) §1
-
-### T-047 深度输入监控升级（UIA 取文 + 剪贴板流 + OCR rec v4）
-- **执行智能体**：Agent_20261112003400
-- **结果**：✅ ①UIA-first 取文：UiaTextReader（STA worker，TextPattern→ValuePattern，IsPassword 精确判密，进程号对号防串窗，elPid 救回浏览器场景）+ uia/ocr 双基线隔离 + 滑动窗口 diff，失败回落截图+RapidOCR（ocrtext.jsonl 增 source 字段）；②clipboard.jsonl 新流（300ms 防抖、OwnWriteGuard 9 写入点自写排除、高熵打码、前 64KB 哈希去重 repeat 冲账、图片仅元数据）；③OCR rec 切 v4（A/B 实测小字 CER 5.17%→2.59%、时延 +11%、零回归——**T-041 悬置的 ch v4 去留就此结算**；v4 det 劣化与 2x 上采样均不采用）。密码三流全静默（500ms TTL 共享缓存）。ctest 77→86 绿；真机走查留用户
-- **相关坑**：无新增（复审 P2×2+P3×8 当轮修毕）｜ 细档：[handover/t047_048_050_night_batch.md](handover/t047_048_050_night_batch.md) §2
-
-> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md)
+> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-056 → [handover/archive/tasks-047-056.md](handover/archive/tasks-047-056.md)
 
 ## 当前任务
 
 > 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
+
+**T-069b 托盘菜单精简 + F1 卡顿打桩（未提交，验收期监控中，2026-11-19）**：
+- 需求单 requirements/20261119-tray-menu-f1-probe.md（用户报三件事：①托盘菜单拉起
+  时 F1 卡顿 ②偶发 F1 卡顿无法复现要打桩监控 ③菜单精简到 设置/关于/退出）
+- 已落码：①**打桩**：MainThreadProbe 增 mark(tag) 通用链路标记（全量落盘
+  probe-*.jsonl 的 k:"mark" 行，QPC/tick/前台PID）；F1 全链路五点 f1_hotkey→
+  f1_start→cap_begin→cap_grabbed（ScreenCapturer::capture 抓屏分段）→cap_shown
+  + 托盘菜单 tray_menu_show/hide（MainWindow aboutToShow/Hide）——用户日常用
+  数天后按日志定位（与钩子延迟/泵卡顿记录同钟对齐）；②**菜单精简**：五模块九项
+  托盘入口全撤（Capture/ActivityMonitor/Goody/Calendar×4/Box×2），m_trayAction
+  成员与文案更新链路同删；AppServices 新槽 calendarAdjust/calendarDutyStopped/
+  calendarSetDuty/goodyOpenChat/boxOpenManager/boxAnyVisible/boxSetVisible
+  （各模块 shutdown 撤槽防悬垂）；设置页补等价入口：通用页「收纳盒」组（管理+
+  显示开关）、日历页「启用桌面日历」总开关（duty 语义）+「调整桌面日历位置和
+  大小」按钮（关闭设置页让路）、Goody 页「打开 Goody 管家」卡
+- 待办：用户日常使用数天 → 回查 probe 日志定位 F1 卡顿根因（重点：
+  tray_menu_show 与 cap_* 的时间竞争、cap_grabbed 段耗时=ScreenCapturer 抓屏）
+- 代决：「启用桌面日历」=desktopSurface duty 语义（重启不记忆，同原托盘行为）；
+  mark 截断 31 字符全量落盘；收纳盒显隐=任一可见→全隐藏
+
+**T-069 UI 现代化改版 Win11 Fluent（未提交，待用户目测验收，2026-11-19）**：
+- 需求单 requirements/20261119-ui-fluent-restyle.md（用户三拍板：Win11 Fluent 风/全部
+  界面整体改版/方案确认后落码；D1 设置去 OK/Cancel 即时生效、D2 主色保留品牌蓝
+  #2B6FF2、D3 贴桌面面板保留 12px 圆角——均已按默认拍板实施）；方案与选型
+  docs/design/20261119-ui-fluent-restyle-proposal.md（选型结论：零新依赖自研
+  Fluent 视觉层，Mica 直调 DWM；开源 C++ Fluent 库均 2026 新库未采）
+- 已落码（M0-M3 全流程，构建+ctest 全绿）：①M0 底座：src/ui/theming/FluentTheme
+  （FluentTokens/fluentTheme 明暗双套+fluentInput/Button/ScrollBarQss 生成器+
+  applyFluentWindowChrome 深色标题栏+Mica 尝试；ui/theming 新静态库
+  poptools_ui_theming 全功能库 PUBLIC 链接）+游离暗色小窗收编（CalendarSearchForm/
+  CalendarDatePicker/BoxManagerDialog 接 token 随明暗切换；CalendarEventEditor/
+  capture ToolBar 常暗语境钉深色 token）+main.cpp 全局字体栈（Segoe UI Variable→
+  Segoe UI→雅黑）；②M1 设置界面：SettingsDialog 全重写（SettingCard 分组卡片+
+  ToggleSwitch 自研 Win11 开关+左导航胶囊选中+页内滚动+Mica/深浅标题栏+
+  即时生效：控件变更即写 Settings 并 notifySettingsChanged 广播，文本框 400ms
+  防抖 done 冲刷，MainWindow Accepted 后统一广播移除）；③M2 Goody：气泡改
+  Fluent 卡片（bgCard+cardStroke 描边+8px 圆角）+头像行（GoodyAvatar 自绘：
+  assistant "G" 玻璃球/user "我" 圆牌，逐帧取 token 免重抛）+输入框 1~6 行自适应
+  （44~120px）+token 对齐（气泡/侧栏/输入区/权限条）；④M3：OcrPanel/TranslateCard/
+  GoodyFloatingBall 接 token；ThemeColors.h 退役（只余 overlay 语义色+
+  systemSchemeDark，struct/uiThemeColors 删除）；domain_tests 主题用例迁移
+  FluentTokens；capture ToolBar/TextEditingController 字面量收编
+- 待用户目测验收：设置界面（导航/卡片/开关/即时生效）/Goody（气泡描边/头像/输入
+  自适应）/日历搜索/选日期/收纳盒管理（浅色系统下不再恒暗）/截图工具条/悬浮球/
+  OcrPanel/TranslateCard 明暗切换
+- 诚实边界：①Mica 在 Qt 不透明 backing store 下不可见，实际呈现=Mica 回退固色
+  （官方等值观感），真云母需 WA_TranslucentBackground（对话风险未做）；②消息逐条
+  时间戳暂缓（ChatSession 消息无逐条 ts 字段，需动存储 schema，超视觉改版边界）；
+  ③导航无图标（暂无合适 qrc 图标源，文字导航已可用）；④Win10 无 Segoe UI Variable
+  自动回退 Segoe UI+雅黑
+- 红线：样式一律取 fluentTheme() 禁止窗口内写十六进制字面量（半透明玻璃描边除外，
+  注释声明）；新窗口主题接法见 FluentTheme.h 头注释
 
 **T-067 Goody 起居注 + 日历摘要展示（已提交 d3c926d，待真机验收，2026-11-18）**：
 - 需求单 requirements/20261118-goody-calendar-summary.md（用户四拍板：起居注静默自主、
@@ -235,6 +262,15 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-069 删公共 API 前的残留审计漏 tests/：编译在最后一环才炸
+- **关联任务**：T-069 ｜ 记录智能体：Agent_20261119172053
+- **现象**：删除 ThemeColors::uiThemeColors 后 src/ 全绿，末轮全量构建在
+  domain_tests.cpp 连环报错（测试还在断言旧配色约定）
+- **原因**：残留审计 grep 只扫了 src/，漏了 tests/——domain_tests 有一个
+  uiThemeColors 用例
+- **解决**：测试用例迁移到 FluentTokens（断言新 token 关键值）。教训：**删公共
+  API 的残留审计必须覆盖全部构建目标（tests/tools/packaging），不只 src/**
 
 ### P-068 低级钩子装在主线程：任何主线程停摆都以全系统鼠标瞬移呈现
 - **关联任务**：T-068 ｜ 记录智能体：Agent_20261119101500
@@ -427,18 +463,10 @@
 
 > 维护智能体：Agent_20261117004800
 
-> 更早台账（2026-11-01 ~ 11-08）→ [handover/archive/ledger-arch.md](handover/archive/ledger-arch.md)
+> 更早台账（2026-11-01 ~ 11-11）→ [handover/archive/ledger-arch.md](handover/archive/ledger-arch.md)
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
-| 2026-11-09 02:50 | Agent_20261109024000 | 历史任务 / 项目快照 / 当前任务 / 踩坑记录 / README | 新增 T-045；红线 2 加豁免条款；快照刷新（一句话描述、core/ui 目录、ctest 40 用例）；当前任务写移交；新增 P-032、P-033、P-034 | 活动监控 + Goody 管家全栈（监控/OCR 快照/LLM 工具权限/每日记录/记忆/MCP），ctest 17→40 用例 |
-| 2026-11-11 22:10 | Agent_20261111220402 | 全文（归档） | 存量迁移：任务 T-001~T-020、T-021~T-036 原文剪切至 archive/tasks-001-020.md、archive/tasks-021-036.md；冷坑 P-001~P-013、P-015、P-017~P-019、P-024、P-028 → archive/pits-001-028.md；主档留索引；失效锚点引用去链为纯编号；T-041 重复标题行清除 | 主档 823 行回归 ≤500 行预算 |
-| 2026-11-11 22:10 | Agent_20261111220402 | 历史任务 / 当前任务 / 项目快照 / 各板块头 / 修改台账 | 新增 T-046（R1~R4 入账，git 痕迹回填）；当前任务改写为 R5 在途移交；快照与目录标注刷新；各板块补维护智能体行 | 补记 2026-11-11 R 系列会话成果，交接对齐当下 |
-| 2026-11-11 23:46 | Agent_20261111234632 | 当前任务 / 修改台账 / 头部 | 当前任务新增「已定待开工 T-047 输入监控升级」块（UIA 取文+剪贴板流+OCR v4，方案定案）；当前任务维护智能体与头部更新 | T-045 真机验证（监控四管线落盘正常）驱动输入监控升级定案，入账待开工 |
-| 2026-11-12 01:00 | Agent_20261111234632 | 当前任务 / 踩坑记录 / 细档 | 新增 T-049/R6 批量修复轮计划（细档 t049_r6_plan.md：P-035 修法 + 探查工作单 A~E + 执行顺序）；新增 P-035；头部时间更新 | 用户报 F1 糊屏 bug 诊断定案；修复执行交后续 AI，本会话只出计划 |
-| 2026-11-12 07:45 | Agent_20261112003400 | 全文（结算） | 夜间批次结算：T-046 补 R5 结算注记；新增 T-049/T-047/T-050 条目；当前任务重写（T-050 阶段三待开工 + 晨起验收清单 + 遗留候修）；新增 P-038、P-039；冷坑 5 条与 T-037~T-040 归档；快照/红线/目录/命令刷新 | 夜间全自动 7 提交（ead3339..5a00f7e），ctest 40→108 绿，R5/R6/T-047/T-050 阶段一二全部收口 |
-| 2026-11-16 00:33 | Agent_20261116003308 | 全文（破坏性清理，用户指令） | T-054 清零阶段：删除旧日历/YYNote 在途实现/收纳盒/desktopband 全部代码、设置键、测试与文档痕迹；删除 T-042/T-043/T-044/T-048/T-053 条目与 P-036/P-037 坑（编号不复用）；细档去 T-048 节、归档去 P-028 与相关台账行；快照/当前任务/红线/命令刷新 | 日历+收纳盒全量清零（代码+文档），仓库回无痕迹基线；移植阶段进行中 |
-| 2026-11-16 01:40 | Agent_20261116003308 | 历史任务 / 当前任务 / 踩坑记录 / 项目快照 / 头部 / 细档 | T-054 结算：新增条目与细档 t054_rlqd_calendar_port.md；当前任务改写为真机验收清单；新增 P-054、P-055；快照目录/命令/ctest 96/状态刷新 | 注入 DLL + Qt 应用侧移植完成，ctest 89→96 绿，真机目测待用户 |
 | 2026-11-16 10:45 | Agent_20261116003308 | 踩坑记录 / 细档 / hook 源码 / CMake | 用户首次拉起：注入静默失败（P-056）——钩子 DLL 改静态 CRT + SendMessage 强触发；explorer 侧日志确认注入成功（双子类化 + DIB 1920×1080） | 日历首次真实上屏，用户目测进行中 |
 | 2026-11-16 16:59 | Agent_20261116165900 | 头部 / 历史任务 / 踩坑记录 / 项目快照 / 修改台账 | 新增 T-055、P-057；快照 scripts 行补全脚本清单并把代理端口对齐 17890 | 净克隆环境重建（tools 三件套 + .venv + build + ctest 96 绿）；脚本双修复未提交待用户 |
 | 2026-11-16 17:50 | Agent_20261116165900 | 头部 / 历史任务 / 当前任务 / 踩坑记录 / 修改台账 | 新增 T-056、P-058、P-059；当前任务补 T-056 回归重点 | 日历首轮目测 4 问题修复（表头对齐/今日单框/删账户/弹窗卡死根因+副屏），ctest 96 绿，未提交待用户 |
@@ -469,3 +497,4 @@
 | 2026-11-19 10:16 | Agent_20261119101500 | 头部 / 当前任务 / monitor+hotkey 源码 / MainWindow / CMake / 需求单 / temp_scripts | T-068 立项并部署取证桩：MainThreadProbe 探针（三钩子 RAII 打点+主线程心跳+worker 落盘）+ 系统侧 Raw Input/光标/CPU 被动监听；构建 ctest 100% 绿，双路日志上线并录得启动期 380ms 泵停摆首条线索 | 用户报拖动卡顿瞬移；不动鼠标纯被动取证，跨会话待日志回查；取证代码未提交 |
 | 2026-11-19 12:32 | Agent_20261119101500 | 头部 / 当前任务 / 踩坑记录 / wallpaper+capture+monitor+assistant 源码 / temp_scripts | T-068 定案+根治：根因三类主线程停摆（30s 壁纸重算 160-170ms 主犯 / IME 快照截屏 / 开机月报拼接 380ms）；三处全挪离主线程（签名免重算+GDI 直出 QImage 进池+聚合进池），ctest 100% 绿；探针验证 30s 停摆归零；新增 P-068 | 用户报"刚刚就卡了"触发日志回查，30s 严格周期定位主犯；修复未提交待真机验收 |
 | 2026-11-19 16:35 | Agent_20261119101500 | 头部 / 历史任务 / 当前任务 / 细档 / 版本三处 / dist | T-068 结算入历史任务（9ffa3b4 fix + 2cb237b bump，tag v0.5.1 已推）；细档 t068_mouse_stall.md；发版 GitHub Release id 451052105 + 上传安装包 56MB（旧 0.5.0 包已清）；perf 基线追加（启动 324ms/主进程 159MB，快照待复核） | 用户指令提交+推送+发版；探针随验收期保留在版本内，体感确认后删探针收口 |
+| 2026-11-19 17:20 | Agent_20261119172053 | 头部 / 当前任务 / 项目快照 / 踩坑记录 / ui 全域源码 / CMake / main / 测试 / 需求单+设计文档 | T-069 UI 现代化改版 M0-M3 落码：theming 新库（FluentTokens/QSS 生成器/窗口 chrome）+设置界面重写（SettingCard/ToggleSwitch/即时生效去 OK/Cancel）+Goody 头像行/卡片描边/自适应输入+暗色小窗收编+OcrPanel/TranslateCard/悬浮球接 token+ThemeColors 退役；domain_tests 主题用例迁移；新增 P-069 | 网调（双子代理代码盘点+开源方案调研）→用户三拍板→方案确认后落码；构建+ctest 全绿，未提交待用户目测验收；需求单 requirements/20261119-ui-fluent-restyle.md，方案 docs/design/20261119-ui-fluent-restyle-proposal.md |
