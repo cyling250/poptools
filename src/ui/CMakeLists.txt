@@ -140,6 +140,9 @@ add_library(poptools_ui_goody STATIC
     goody/GoodyFloatingBall.cpp
     goody/GoodyFloatingBall.h
     goody/GoodyBallLogic.h
+    goody/GoodyTheme.h
+    goody/ProcessRow.cpp
+    goody/ProcessRow.h
 )
 target_link_libraries(poptools_ui_goody PUBLIC
     poptools_core

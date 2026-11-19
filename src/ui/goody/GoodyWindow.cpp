@@ -29,22 +29,22 @@
 #include "core/settings/Settings.h"
 #include "core/assistant/ChatSession.h"
 #include "core/assistant/ToolText.h"
-#include "ui/ThemeColors.h" // systemSchemeDark（主题查询归 ThemeColors.h，token 在 FluentTheme.h）
-#include "ui/theming/FluentTheme.h"
+#include "ui/ThemeColors.h" // systemSchemeDark
+#include "ui/goody/GoodyTheme.h"
+#include "ui/goody/ProcessRow.h"
 #include "MessageBubble.h"
 
 namespace poptools {
 
 namespace {
-constexpr int kCardRadius = 12; // = fluent::kRadiusPanel（贴桌面玻璃家族 signature 圆角）
-constexpr int kSidebarWidth = 190;
-constexpr int kDefaultWidth = 720;   // T-050-P2 定案：居中卡片聊天窗默认尺寸
-constexpr int kDefaultHeight = 560;
+constexpr int kCardRadius = 12; // = goody 贴桌面玻璃家族 signature 圆角
+constexpr int kSidebarWidth = 280;   // T-070 dsh 侧栏默认宽
+constexpr int kDefaultWidth = 760;   // T-050-P2 定案：居中卡片聊天窗默认尺寸
+constexpr int kDefaultHeight = 600;
 constexpr int kBottomSlackPx = 40;   // 贴底判定余量（自动滚动跟随门槛）
 constexpr int kReasonThrottleMs = 150; // T-050-FIX2：reasoning 流式 flush 节流线（同正文 150ms）
-constexpr int kAvatarD = 24;         // 气泡头像直径（改版 M2）
 constexpr int kInputMinH = 44;       // 输入框最小高（单行）
-constexpr int kInputMaxH = 120;      // 输入框最大高（约 6 行，超出转内部滚动）
+constexpr int kInputMaxH = goody_theme::kComposerMaxHeight; // 输入卡自适应上限
 
 QString formatSessionTime(qint64 ms)
 {
@@ -53,52 +53,6 @@ QString formatSessionTime(qint64 ms)
         return dt.toString(QStringLiteral("HH:mm"));
     return dt.toString(QStringLiteral("M-dd HH:mm"));
 }
-
-// 气泡头像（改版 M2）：assistant = "G" 玻璃球（悬浮球同款品牌呼应，
-// accent 渐变 + 白 G）；user = 圆形首字牌（bgCardHover 底 + cardStroke
-// 描边 + textSecondary "我"）。逐帧取 Fluent token 自绘——主题切换免重抛
-//（对齐 GoodyFloatingBall 自绘先例），QLabel 空文本无基类绘制负担
-class GoodyAvatar : public QLabel
-{
-public:
-    explicit GoodyAvatar(bool assistant, QWidget *parent = nullptr)
-        : QLabel(parent), m_assistant(assistant)
-    {
-        setFixedSize(kAvatarD, kAvatarD);
-        setAlignment(Qt::AlignCenter);
-    }
-
-protected:
-    void paintEvent(QPaintEvent *event) override
-    {
-        Q_UNUSED(event);
-        QPainter g(this);
-        g.setRenderHint(QPainter::Antialiasing);
-        const QRectF ball(0.5, 0.5, kAvatarD - 1.0, kAvatarD - 1.0);
-        const FluentTokens t = fluentTheme(systemSchemeDark());
-        if (m_assistant) {
-            QLinearGradient grad(0, 0, 0, kAvatarD);
-            grad.setColorAt(0, QColor(t.accentHover));
-            grad.setColorAt(1, QColor(t.accent));
-            g.setPen(Qt::NoPen);
-            g.setBrush(grad);
-            g.drawEllipse(ball);
-            g.setFont(uiFluentFont(13, QFont::Bold));
-            g.setPen(QColor(t.onAccent));
-            g.drawText(rect(), Qt::AlignCenter, QStringLiteral("G"));
-        } else {
-            g.setPen(QPen(QColor(t.cardStroke), 1));
-            g.setBrush(QColor(t.bgCardHover));
-            g.drawEllipse(ball);
-            g.setFont(uiFluentFont(10));
-            g.setPen(QColor(t.textSecondary));
-            g.drawText(rect(), Qt::AlignCenter, QStringLiteral("我"));
-        }
-    }
-
-private:
-    bool m_assistant;
-};
 } // namespace
 
 GoodyWindow::GoodyWindow(QWidget *parent)
@@ -193,11 +147,13 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     m_permBar->hide();
     lay->addWidget(m_permBar);
 
-    // ---- 输入区（多行自适应输入 + 发送/停止） ----
-    // 改版 M2：定高 64 → 1~6 行自适应（44~120px，超出转内部滚动）
-    auto *inputRow = new QHBoxLayout;
-    inputRow->setSpacing(6);
-    m_input = new QPlainTextEdit(card);
+    // ---- 输入区（T-070 dsh composer：大圆角卡 + 自适应输入 + 同位发送钮） ----
+    m_composerCard = new QFrame(card);
+    m_composerCard->setObjectName("goodyComposer");
+    auto *composerLay = new QHBoxLayout(m_composerCard);
+    composerLay->setContentsMargins(12, 10, 10, 10);
+    composerLay->setSpacing(8);
+    m_input = new QPlainTextEdit(m_composerCard);
     m_input->setObjectName("goodyInput");
     m_input->setPlaceholderText(QStringLiteral("和 Goody 说点什么…（Enter 发送 / Shift+Enter 换行）"));
     m_input->setMinimumHeight(kInputMinH);
@@ -206,12 +162,14 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     m_input->installEventFilter(this); // Enter 发送
     connect(m_input, &QPlainTextEdit::textChanged, this,
             [this] { adjustInputHeight(); });
-    inputRow->addWidget(m_input, 1);
-    m_sendBtn = new QPushButton(QStringLiteral("发送"), card);
+    composerLay->addWidget(m_input, 1);
+    // 发送/停止同位圆钮（dsh InputBar 状态机）：空闲 ↑ / busy ■（点击即停）
+    m_sendBtn = new QPushButton(QStringLiteral("↑"), m_composerCard);
     m_sendBtn->setObjectName("goodySendBtn");
-    m_sendBtn->setFixedSize(64, kInputMinH);
-    inputRow->addWidget(m_sendBtn, 0, Qt::AlignBottom);
-    lay->addLayout(inputRow);
+    m_sendBtn->setFixedSize(36, 36);
+    m_sendBtn->setToolTip(QStringLiteral("发送（Enter）；Goody 工作时点击可停止"));
+    composerLay->addWidget(m_sendBtn, 0, Qt::AlignBottom);
+    lay->addWidget(m_composerCard);
 
     // 右下角缩放柄（无边框窗口的手动缩放；窗口可自由缩放）
     auto *grip = new QSizeGrip(card);
@@ -377,9 +335,9 @@ void GoodyWindow::onSessionDataChanged()
 }
 
 // 单条侧栏行装配（T-062 抽取）：标题/元信息/删除钮 + P-023 双通道配色 +
-// 删除接线，原 refreshSessionList 内联块原样搬移（改版 M2：Fluent token）
+// 删除接线（T-070：配色切 GoodyTheme，行高对齐 dsh 32px 密度）
 QWidget *GoodyWindow::makeSessionRow(const ChatSession::SessionSummary &s,
-                                     const FluentTokens &t)
+                                     bool dark)
 {
     auto *row = new QWidget;
     row->setObjectName("goodySessionRow");
@@ -407,14 +365,16 @@ QWidget *GoodyWindow::makeSessionRow(const ChatSession::SessionSummary &s,
     del->setProperty("sessionId", s.id);
     rowLay->addWidget(del);
     // P-023：行内关键颜色双通道——ID 选择器内联样式 + 调色板钉扎
+    Q_UNUSED(dark);
     row->setStyleSheet(QStringLiteral(
         "QWidget#goodySessionRow { background: transparent; }"
-        "QLabel#goodySessionTitle { color: %1; font-size: 12px; }"
-        "QLabel#goodySessionMeta { color: %2; font-size: 10px; }"
+        "QLabel#goodySessionTitle { color: %1; font-size: 13px; }"
+        "QLabel#goodySessionMeta { color: %2; font-size: 11px; }"
         "QToolButton#goodySessionDelBtn { color: %2; background: transparent;"
         "  border: none; font-size: 11px; }"
         "QToolButton#goodySessionDelBtn:hover { color: %3; }")
-        .arg(t.textPrimary, t.textTertiary, t.errText));
+        .arg(goody_theme::textPrimary().name(), goody_theme::textTertiary().name(),
+             goody_theme::error().name()));
     const auto pinLabelPalette = [&](QLabel *l, const QColor &color) {
         QPalette pal = l->palette();
         const QBrush b{color};
@@ -423,8 +383,8 @@ QWidget *GoodyWindow::makeSessionRow(const ChatSession::SessionSummary &s,
             pal.setBrush(group, QPalette::WindowText, b);
         l->setPalette(pal);
     };
-    pinLabelPalette(title, QColor(t.textPrimary));
-    pinLabelPalette(meta, QColor(t.textTertiary));
+    pinLabelPalette(title, goody_theme::textPrimary());
+    pinLabelPalette(meta, goody_theme::textTertiary());
     const QString sid = s.id; // 结构化循环变量不可直接捕获，落为局部
     connect(del, &QToolButton::clicked, this, [this, sid] {
         emit sessionDeleteRequested(sid);
@@ -443,12 +403,12 @@ void GoodyWindow::refreshSessionList()
     m_sessionListDirty = false;
     m_sessionList->blockSignals(true); // 防重建触发 currentItemChanged
     m_sessionList->clear();
-    const FluentTokens t = fluentTheme(systemSchemeDark());
+    const bool dark = systemSchemeDark();
     for (const ChatSession::SessionSummary &s : m_session->sessionSummaries()) {
         auto *item = new QListWidgetItem(m_sessionList);
         item->setData(Qt::UserRole, s.id);
-        item->setSizeHint(QSize(0, 44));
-        m_sessionList->setItemWidget(item, makeSessionRow(s, t));
+        item->setSizeHint(QSize(0, 36));
+        m_sessionList->setItemWidget(item, makeSessionRow(s, dark));
         if (s.id == m_session->activeSessionId())
             m_sessionList->setCurrentItem(item);
     }
@@ -498,62 +458,36 @@ void GoodyWindow::reloadFromSession()
 void GoodyWindow::addBubble(MessageBubble *bubble)
 {
     m_bubbles.append(bubble);
-    // 改版 M2 头像行：user/assistant 气泡包进行容器，头像挂外侧
-    //（assistant 左上对齐 / user 右下对齐，system 行无头像保持整行）
-    const bool isUser = bubble->role() == MessageBubble::User;
-    QWidget *row = new QWidget(m_msgList);
-    row->setObjectName("goodyMsgRow");
-    auto *rowLay = new QHBoxLayout(row);
-    rowLay->setContentsMargins(0, 0, 0, 0);
-    rowLay->setSpacing(8);
-    if (isUser) {
-        rowLay->addStretch(1);
-        rowLay->addWidget(bubble, 0, Qt::AlignBottom);
-        rowLay->addWidget(makeAvatar(bubble->role(), row), 0, Qt::AlignBottom);
-        m_msgLay->insertWidget(m_msgLay->count() - 1, row, 0);
-    } else if (bubble->role() == MessageBubble::Assistant) {
-        rowLay->addWidget(makeAvatar(bubble->role(), row), 0, Qt::AlignTop);
-        rowLay->addWidget(bubble, 1);
-        m_msgLay->insertWidget(m_msgLay->count() - 1, row, 1);
-    } else {
-        rowLay->addWidget(bubble, 1);
-        m_msgLay->insertWidget(m_msgLay->count() - 1, row, 1);
-    }
-    m_rows.insert(bubble, row);
+    // T-070 dsh 形态：无头像无角色标签——user 右对齐、assistant/system 全宽
+    if (bubble->role() == MessageBubble::User)
+        m_msgLay->insertWidget(m_msgLay->count() - 1, bubble, 0, Qt::AlignRight);
+    else
+        m_msgLay->insertWidget(m_msgLay->count() - 1, bubble, 1);
     bubble->setMaxContentWidth(maxBubblePaneWidth());
     // T-050-FIX2：新增气泡在此局部套主题——追加路径不再全量重抛（窗口
     // QSS 重设 + 全气泡 re-theme + 侧栏全重建）；全量 applyTheme 仅保留在
     // 主题切换（colorSchemeChanged）与窗口初始化
-    bubble->applyTheme(fluentTheme(systemSchemeDark()));
+    bubble->applyTheme(systemSchemeDark());
     connect(bubble, &MessageBubble::actionRequested, this,
             [this, bubble](int action) { onBubbleAction(bubble, action); });
 }
 
-// 头像工厂（改版 M2）：user/assistant 返回 GoodyAvatar，system 返回空
-//（系统提示行不配头像）
-QWidget *GoodyWindow::makeAvatar(MessageBubble::Role role, QWidget *parent) const
-{
-    if (role == MessageBubble::System)
-        return nullptr;
-    return new GoodyAvatar(role == MessageBubble::Assistant, parent);
-}
-
-// 气泡可用宽度（改版 M2）：视口宽 - 头像直径 - 行间距（system 行虽无头像，
-// 同一宽度口径保持列表节奏一致）
+// 气泡可用宽度：视口与消息列宽上限（T-070 dsh：内容列 clamp 至
+// goody_theme::kMsgColumnMax，居中由 updateMaxWidths 的 margins 实现）
 int GoodyWindow::maxBubblePaneWidth() const
 {
-    return m_scroll->viewport()->width() - kAvatarD - 8;
+    const int pane = m_scroll->viewport()->width();
+    return pane > 0 ? qMin(pane, goody_theme::kMsgColumnMax) : pane;
 }
 
 void GoodyWindow::clearBubbles()
 {
     for (MessageBubble *b : m_bubbles) {
-        m_msgLay->removeWidget(m_rows.value(b));
-        if (QWidget *row = m_rows.value(b))
-            row->deleteLater(); // 气泡已 reparent 进行容器，随行容器一并销毁
+        m_msgLay->removeWidget(b);
+        b->deleteLater();
     }
     m_bubbles.clear();
-    m_rows.clear();
+    m_processRows.clear(); // 过程行随消息列表一并销毁（同为 m_msgList 子控件）
     m_streamBubble = nullptr;
 }
 
@@ -772,6 +706,8 @@ void GoodyWindow::promptPermission(const QString &tool, const QString &argsSumma
 // ---- 状态守卫（B-2/C-N2） ----
 
 void GoodyWindow::setBusy(bool on)
+    // T-070：发送/停止同位钮形态切换（dsh InputBar 状态机）
+    m_sendBtn->setText(on ? QStringLiteral("■") : QStringLiteral("↑"));
 {
     m_busy = on;
     m_sendBtn->setText(on ? QStringLiteral("停止") : QStringLiteral("发送"));
@@ -783,6 +719,28 @@ void GoodyWindow::setBusy(bool on)
     updateSessionUiLocked();
 }
 
+// ---- T-070 工具过程行（dsh ToolRow 形态） ----
+
+// 工具发起：插入过程行（运行中徽章），行随消息列表滚动
+void GoodyWindow::toolRowStarted(const QString &callId, const QString &name,
+                                 const QString &argsSummary)
+{
+    auto *row = new ProcessRow(name, argsSummary, m_msgList);
+    m_msgLay->insertWidget(m_msgLay->count() - 1, row, 1);
+    m_processRows.insert(callId, row);
+    scrollIfAtBottom();
+}
+
+// 工具结束：徽章翻绿/红 + 结果进展开体（默认折叠，点行查看）
+void GoodyWindow::toolRowFinished(const QString &callId, bool ok,
+                                  const QString &resultText)
+{
+    if (ProcessRow *row = m_processRows.take(callId))
+        row->finish(ok ? ProcessRow::State::Ok : ProcessRow::State::Error,
+                    resultText);
+}
+
+void GoodyWindow::setToolPhase(bool on)
 void GoodyWindow::setToolPhase(bool on)
 {
     // 工具执行期（含权限确认等待）禁用「清空」（B-2）：会话清空后剩余工具
@@ -858,8 +816,7 @@ void GoodyWindow::paintEvent(QPaintEvent *event)
     p.setRenderHint(QPainter::Antialiasing);
     QPainterPath path;
     path.addRoundedRect(rect(), kCardRadius, kCardRadius);
-    const FluentTokens t = fluentTheme(systemSchemeDark());
-    p.fillPath(path, QColor(t.bgCard)); // 胶囊底：整体一张圆角卡（Fluent 卡面色）
+    p.fillPath(path, goody_theme::bgBase()); // 胶囊底：整体一张圆角卡（dsh 基底色）
 }
 
 void GoodyWindow::hideEvent(QHideEvent *event)
@@ -878,11 +835,16 @@ void GoodyWindow::resizeEvent(QResizeEvent *event)
 
 void GoodyWindow::updateMaxWidths()
 {
-    const int pane = maxBubblePaneWidth(); // 改版 M2：扣除头像列宽
+    // T-070 dsh：消息列 clamp 至 kMsgColumnMax 且居中（margins 动态收放）
+    const int pane = m_scroll->viewport()->width();
     if (pane <= 0)
         return;
+    const int content = qMin(pane, goody_theme::kMsgColumnMax);
+    const int side = (pane - content) / 2;
+    m_msgLay->setContentsMargins(side, m_msgLay->contentsMargins().top(), side,
+                                 m_msgLay->contentsMargins().bottom());
     for (MessageBubble *b : m_bubbles)
-        b->setMaxContentWidth(pane);
+        b->setMaxContentWidth(content);
 }
 
 bool GoodyWindow::eventFilter(QObject *watched, QEvent *event)
@@ -935,81 +897,99 @@ bool GoodyWindow::eventFilter(QObject *watched, QEvent *event)
 // 两个纯搬移 helper，主干只留编排顺序（纯函数分解，调用顺序不变）
 
 // 窗口级 QSS：只保留布局类声明（P-022 一律 ID 选择器；颜色取 Fluent token）
-void GoodyWindow::applyWindowQss(const FluentTokens &t)
+void GoodyWindow::applyWindowQss(bool dark)
 {
-    // R6-B3/P-023：关键颜色双通道——① 控件内联样式（颜色取 Fluent token）
-    // ② Active/Inactive/Disabled 三组调色板钉扎；窗口级样式表只保留布局
-    // 类声明。P-022：QSS 一律 ID 选择器
+    // R6-B3/P-023：窗口级样式表只保留布局类声明 + ID 选择器（P-022）；
+    // 颜色取 GoodyTheme（T-070 dsh 形态）。关键颜色双通道钉扎在
+    // applyControlPalettes
+    const QColor bgBase = goody_theme::bgBase();
+    const QColor stroke = goody_theme::stroke();
+    const QColor strokeSoft = goody_theme::strokeSoft();
+    const QColor textPrimary = goody_theme::textPrimary();
+    const QColor textSecondary = goody_theme::textSecondary();
+    const QColor textTertiary = goody_theme::textTertiary();
+    const QColor accent = goody_theme::accent();
+    const QColor accentHover = goody_theme::accentHover();
+    const QColor onAccent = QColor(0xFF, 0xFF, 0xFF);
+    const QColor bgCard = goody_theme::bgCard();
+    const QColor bgHover = goody_theme::bgHover();
+    const QColor inputBg = goody_theme::inputBg();
+    const QColor sidebar = goody_theme::bgSidebar();
+    const QColor error = goody_theme::error();
+    const QColor warning = goody_theme::warning();
     setStyleSheet(QStringLiteral(
         "#goodyCard { background: %1; border: 1px solid %2; border-radius: 12px; }"
-        "#goodyTitle { color: %3; font-weight: 600; font-size: 14px; }"
+        "#goodyTitle { color: %3; font-weight: 600; font-size: %4px; }"
         "QPushButton#goodyHeaderBtn { background: transparent; border: none;"
-        "  font-size: 12px; padding: 2px 8px; border-radius: 4px; }"
-        "QPushButton#goodyHeaderBtn:hover { background: %4; }"
-        "QPushButton#goodySendBtn { background: %5; color: %6;"
-        "  border: 1px solid %5; border-radius: 4px; font-weight: 600; }"
-        "QPushButton#goodySendBtn:hover { background: %7; border-color: %7; }"
+        "  font-size: %5px; padding: 2px 8px; border-radius: 8px; color: %3; }"
+        "QPushButton#goodyHeaderBtn:hover { background: %6; }"
+        // 发送/停止同位圆钮（dsh InputBar 状态机：蓝↑ / 方块 stop）
+        "QPushButton#goodySendBtn { background: %7; color: %8;"
+        "  border: none; border-radius: 8px; font-weight: 600; font-size: %5px; }"
+        "QPushButton#goodySendBtn:hover { background: %9; }"
         "QToolButton#goodySidebarToggle { color: %3; background: transparent;"
-        "  border: none; font-size: 14px; border-radius: 4px; }"
-        "QToolButton#goodySidebarToggle:hover { background: %4; }"
-        "QWidget#goodySidebar { background: %8; border-right: 1px solid %2;"
+        "  border: none; font-size: 14px; border-radius: 8px; }"
+        "QToolButton#goodySidebarToggle:hover { background: %6; }"
+        "QWidget#goodySidebar { background: %10; border-right: 1px solid %2;"
         "  border-radius: 8px; }"
-        "QPushButton#goodyNewChatBtn { background: %4; color: %3;"
-        "  border: 1px solid %2; border-radius: 4px; padding: 5px;"
-        "  font-size: 12px; font-weight: 600; }"
-        "QPushButton#goodyNewChatBtn:hover { background: %5; color: %6;"
-        "  border-color: %5; }"
+        "QPushButton#goodyNewChatBtn { background: %6; color: %3;"
+        "  border: 1px solid %2; border-radius: 8px; padding: 6px;"
+        "  font-size: %5px; font-weight: 600; }"
+        "QPushButton#goodyNewChatBtn:hover { background: %7; color: %8;"
+        "  border-color: %7; }"
         "QListWidget#goodySessionList { background: transparent; border: none;"
-        "  font-size: 12px; outline: none; }"
-        "QListWidget#goodySessionList::item { margin: 1px 2px; border-radius: 4px; }"
-        "QListWidget#goodySessionList::item:selected { background: %9; }"
-        "QListWidget#goodySessionList::item:hover { background: %4; }"
+        "  font-size: %5px; outline: none; }"
+        "QListWidget#goodySessionList::item { margin: 1px 2px; border-radius: 8px; }"
+        "QListWidget#goodySessionList::item:selected { background: %6; }"
+        "QListWidget#goodySessionList::item:hover { background: %6; }"
         "QWidget#goodyScroll, QWidget#goodyMsgList { background: transparent; }"
-        "QWidget#goodyPermBar { background: %4; border: 1px solid %2;"
-        "  border-radius: 8px; }"
-        "QPushButton#goodyPermBtn, QPushButton#goodyPermDeny { background: %1;"
-        "  border: 1px solid %2; border-radius: 4px; padding: 3px 10px; }"
-        "QPushButton#goodyPermDeny:hover { border-color: %10; }"
-        "QPushButton#goodyPermAllow { background: %5; border: 1px solid %5;"
-        "  border-radius: 4px; padding: 3px 10px; }"
-        "QWidget#goodyGrip { background: transparent; }")
-        .arg(t.bgCard, t.cardStroke, t.textPrimary, t.bgCardHover, t.accent,
-             t.onAccent, t.accentHover, t.bgSubtle, t.accentSoft, t.errText));
+        // composer 大圆角卡（dsh InputBar：radius-panel + 内嵌底色）
+        "QFrame#goodyComposer { background: %11; border: 1px solid %2;"
+        "  border-radius: %12px; }"
+        "QPlainTextEdit#goodyInput { background: transparent; border: none; }"
+        // 权限确认卡（dsh ApprovalCard：接管输入位，warning 描边大卡）
+        "QWidget#goodyPermBar { background: %11; border: 1px solid %13;"
+        "  border-radius: %12px; }"
+        "QPushButton#goodyPermBtn, QPushButton#goodyPermDeny { background: transparent;"
+        "  border: 1px solid %2; border-radius: 8px; padding: 5px 12px; color: %3; }"
+        "QPushButton#goodyPermDeny:hover { border-color: %13; color: %13; }"
+        "QPushButton#goodyPermAllow { background: %7; border: 1px solid %7;"
+        "  border-radius: 8px; padding: 5px 12px; color: %8; font-weight: 600; }"
+        "QPushButton#goodyPermAllow:hover { background: %9; }"
+        "QWidget#goodyGrip { background: transparent; }"
+        // 过程行（T-070 ProcessRow）
+        "QWidget#goodyProcessRow { background: transparent; }"
+        "QLabel#goodyProcessDot { border: none; }"
+        "QToolButton#goodyProcessHead { background: transparent; border: none;"
+        "  font-size: %14px; text-align: left; padding: 2px 4px; color: %3; }"
+        "QTextBrowser#goodyProcessResult { color: %15; background: %6;"
+        "  border: 1px solid %2; border-radius: 8px; font-size: %5px; }")
+        .arg(bgBase.name(), stroke.name(), textPrimary.name(),
+             QString::number(goody_theme::kFontTitle),
+             QString::number(goody_theme::kFontProcess),
+             bgHover.name(), accent.name(), onAccent.name(), accentHover.name(),
+             sidebar.name(), inputBg.name(),
+             QString::number(goody_theme::kRadiusPanel),
+             warning.name(),
+             QString::number(goody_theme::kFontProcess),
+             textSecondary.name()));
 }
 
 // 通道一（控件内联样式）+ 通道二（Active/Inactive/Disabled 三组调色板钉扎）
-void GoodyWindow::applyControlPalettes(const FluentTokens &t)
+void GoodyWindow::applyControlPalettes(bool dark)
 {
-    m_input->setStyleSheet(QStringLiteral(
-        "QPlainTextEdit#goodyInput { color: %1; background: %2;"
-        "  border: 1px solid %3; border-radius: 4px; padding: 6px; font-size: 14px; }"
-        "QPlainTextEdit#goodyInput:focus { border-color: %4; }")
-        .arg(t.textPrimary, t.ctrlBg, t.cardStroke, t.accent));
-    m_permText->setStyleSheet(QStringLiteral(
-        "QLabel#goodyPermText { color: %1; font-size: 12px; }").arg(t.textPrimary));
-    for (QPushButton *btn : findChildren<QPushButton *>(QStringLiteral("goodyHeaderBtn")))
-        btn->setStyleSheet(QStringLiteral(
-            "QPushButton#goodyHeaderBtn { color: %1; }").arg(t.textPrimary));
-    m_sidebarToggle->setStyleSheet(QStringLiteral(
-        "QToolButton#goodySidebarToggle { color: %1; }").arg(t.textPrimary));
-    m_newChatBtn->setStyleSheet(QStringLiteral(
-        "QPushButton#goodyNewChatBtn { color: %1; }"
-        "QPushButton#goodyNewChatBtn:hover { color: %2; }").arg(t.textPrimary, t.onAccent));
-    m_permDeny->setStyleSheet(QStringLiteral(
-        "QPushButton#goodyPermDeny { color: %1; }"
-        "QPushButton#goodyPermDeny:hover { color: %2; }").arg(t.textPrimary, t.errText));
-    m_permAlways->setStyleSheet(QStringLiteral(
-        "QPushButton#goodyPermBtn { color: %1; }").arg(t.textPrimary));
-    m_permAllow->setStyleSheet(QStringLiteral(
-        "QPushButton#goodyPermAllow { color: %1; }").arg(t.onAccent));
+    // P-023 通道二：三组调色板钉扎（T-070：取 GoodyTheme）
+    const QColor textPrimary = goody_theme::textPrimary();
+    const QColor inputBg = goody_theme::inputBg();
+    const QColor accent = goody_theme::accent();
 
-    // 占位字：token 无占位色，取正文色 47% 透明度（深浅底都可读且别于正文）
-    QColor phColor{QColor(t.textPrimary)};
+    // 占位字：正文色 47% 透明度（深浅底都可读且别于正文）
+    QColor phColor{goody_theme::textPrimary()};
     phColor.setAlpha(120);
     const auto pinEditPalette = [&](QWidget *edit, bool placeholder) {
         QPalette pal = edit->palette();
-        const QBrush textBrush{QColor(t.textPrimary)};
-        const QBrush editBgBrush{QColor(t.ctrlBg)};
+        const QBrush textBrush{textPrimary};
+        const QBrush editBgBrush{inputBg};
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                                  QPalette::Disabled}) {
             pal.setBrush(group, QPalette::Text, textBrush);
@@ -1033,16 +1013,14 @@ void GoodyWindow::applyControlPalettes(const FluentTokens &t)
         }
         btn->setPalette(pal);
     };
-    for (QPushButton *btn : findChildren<QPushButton *>(QStringLiteral("goodyHeaderBtn")))
-        pinButtonPalette(btn, QBrush{QColor(t.textPrimary)});
+    const QBrush textBrush{textPrimary};
     for (QPushButton *btn : {m_permDeny, m_permAlways})
-        pinButtonPalette(btn, QBrush{QColor(t.textPrimary)});
-    pinButtonPalette(m_permAllow, QBrush{QColor(t.onAccent)});
-    pinButtonPalette(m_newChatBtn, QBrush{QColor(t.textPrimary)});
-    pinButtonPalette(m_sidebarToggle, QBrush{QColor(t.textPrimary)});
+        pinButtonPalette(btn, textBrush);
+    pinButtonPalette(m_permAllow, QBrush{goody_theme::onAccent()});
+    pinButtonPalette(m_newChatBtn, textBrush);
+    pinButtonPalette(m_sidebarToggle, textBrush);
     {
         QPalette pal = m_permText->palette();
-        const QBrush textBrush{QColor(t.textPrimary)};
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                                  QPalette::Disabled})
             pal.setBrush(group, QPalette::Text, textBrush);
@@ -1051,8 +1029,7 @@ void GoodyWindow::applyControlPalettes(const FluentTokens &t)
     // 会话列表调色板钉扎（选中底/字取主题色，防 QSS 失效黑字）
     {
         QPalette pal = m_sessionList->palette();
-        const QBrush textBrush{QColor(t.textPrimary)};
-        const QBrush selBrush{QColor(t.bgCardHover)};
+        const QBrush selBrush{goody_theme::bgHover()};
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                                  QPalette::Disabled}) {
             pal.setBrush(group, QPalette::Text, textBrush);
@@ -1062,18 +1039,23 @@ void GoodyWindow::applyControlPalettes(const FluentTokens &t)
         }
         m_sessionList->setPalette(pal);
     }
+    Q_UNUSED(dark);
 }
 
 void GoodyWindow::applyTheme()
 {
-    const FluentTokens t = fluentTheme(systemSchemeDark());
-    applyWindowQss(t);
-    applyControlPalettes(t);
+    const bool dark = systemSchemeDark();
+    applyWindowQss(dark);
+    applyControlPalettes(dark);
 
     for (MessageBubble *b : m_bubbles)
-        b->applyTheme(t); // 气泡自带双通道（含代码高亮配色跟随）
+        b->applyTheme(dark); // 气泡自带双通道（含代码高亮配色跟随）
+    // 过程行徽章/配色重抛（T-070：重置态色随主题刷新——经 finish 原态重涂）
+    for (ProcessRow *row : m_processRows)
+        row->setSummary(row->property("goodySummary").toString());
 
     refreshSessionList(); // 侧栏行配色随主题重建（不回环：刷新不触发 applyTheme）
 }
 
+} // namespace poptools
 } // namespace poptools

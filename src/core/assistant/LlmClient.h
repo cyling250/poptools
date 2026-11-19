@@ -8,6 +8,8 @@
 #include <QObject>
 #include <QString>
 
+#include "ChatSession.h" // asst_blocks 块标记（T-070 块化输出）
+
 class QNetworkReply;
 
 namespace poptools {
@@ -70,7 +72,13 @@ public:
     // 完成后的助手消息（可直接 append 进对话数组）：
     //   {"role":"assistant","content":"…"[,"reasoning":"…"]
     //    [,"tool_calls":[{id,type,function}]]}
+    // T-070 dsh 块化：另携 "blocks"（asst_blocks 约定的 text/reasoning/
+    // tool_call 块数组，arguments 保留原始 JSON 串）与 "finish"（finish_
+    // reason；供回合收束判据 max-tokens 粘性）
     QJsonObject assistantMessage() const;
+
+    // 块数组单独取用（blocks 与 assistantMessage().blocks 同源）
+    QJsonArray blocks() const;
 
 private:
     QByteArray m_buf;               // 半行残留

@@ -18,6 +18,45 @@
 #include "app/AppServices.h"
 #include "app/FeatureRegistry.h"
 #include "core/assistant/ChatSession.h"
+
+// ---- T-070 迁移辅助：v2 语义 append（用例保留旧写法，内部转 v3 事件 API） ----
+static void v2Append(poptools::ChatSession &s, const QJsonObject &msg)
+{
+    const QString role = msg.value(QStringLiteral("role")).toString();
+    if (role == QLatin1String("user")) {
+        s.appendUserMessage(msg.value(QStringLiteral("content")).toString());
+        return;
+    }
+    if (role == QLatin1String("assistant")) {
+        QJsonArray blocks;
+        const QString content = msg.value(QStringLiteral("content")).toString();
+        if (!content.isEmpty())
+            blocks.append(poptools::asst_blocks::textBlock(content));
+        const QString reasoning = msg.value(QStringLiteral("reasoning")).toString();
+        if (!reasoning.isEmpty())
+            blocks.append(poptools::asst_blocks::reasoningBlock(reasoning));
+        const QJsonArray calls = msg.value(QStringLiteral("tool_calls")).toArray();
+        for (const QJsonValue &c : calls) {
+            const QJsonObject o = c.toObject();
+            const QJsonObject fn = o.value(QStringLiteral("function")).toObject();
+            blocks.append(poptools::asst_blocks::toolCallBlock(
+                o.value(QStringLiteral("id")).toString(),
+                fn.value(QStringLiteral("name")).toString(),
+                fn.value(QStringLiteral("arguments")).toString()));
+        }
+        s.appendAssistantBlocks(blocks, calls.isEmpty() ? QStringLiteral("stop")
+                                                        : QStringLiteral("tool_calls"));
+        return;
+    }
+    // 其余（tool/空对象/未知 role）：v2 的 append 对 tool 结果另有 API、
+    // 空/非法消息拒收——此处 no-op 保持"size 不变"断言语义
+}
+static void v2AppendToolResult(poptools::ChatSession &s, const QString &callId, const QJsonObject &result)
+{
+    s.appendToolResult(callId,
+                       QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact)),
+                       !result.value(QStringLiteral("ok")).toBool(true));
+}
 #include "core/assistant/DailyAggregator.h"
 #include "core/assistant/DailyRecordJob.h"
 #include "core/assistant/FsTool.h"
@@ -795,11 +834,11 @@ private slots:
         {
             ChatSession s(path);
             s.setSystemPrompt("v1");
-            s.append(QJsonObject{{"role", "user"}, {"content", "a"}});
+            v2Append(s, QJsonObject{{"role", "user"}, {"content", "a"}});
             // R5-C2 复审修正（P1-1）：assistant 须带 tool_calls，其后的 tool
             // 回应才是合法序列——原数据 assistant 无 tool_calls，load 时该
             // tool 被按孤儿过滤，roundtrip 断言 4 条必失败
-            s.append(QJsonObject{
+            v2Append(s, QJsonObject{
                 {"role", "assistant"},
                 {"content", "b"},
                 {"tool_calls", QJsonArray{QJsonObject{
@@ -807,7 +846,7 @@ private slots:
                     {"type", QStringLiteral("function")},
                     {"function", QJsonObject{{"name", QStringLiteral("echo")},
                                              {"arguments", QStringLiteral("{}")}}}}}}});
-            s.appendToolResult("call_1", QJsonObject{{"ok", true}, {"output", "done"}});
+            v2AppendToolResult(s, "call_1", QJsonObject{{"ok", true}, {"output", "done"}});
             s.save();
             QCOMPARE(s.size(), 4);
         }
@@ -829,7 +868,7 @@ private slots:
 
         // 历史截断：system 之外保留最近 40 条
         for (int i = 0; i < 60; ++i)
-            s2.append(QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
+            v2Append(s2, QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
         QCOMPARE(s2.size(), 41); // 1 system + 40
         QCOMPARE(s2.messages().at(1).toObject().value("content").toString(),
                  QStringLiteral("20")); // 最早 20 条被裁
@@ -870,7 +909,7 @@ private slots:
             QVERIFY(bad.open(QIODevice::ReadOnly));
             QCOMPARE(bad.readAll(), raw1); // ② 原件逐字节一致
         }
-        s1.append(QJsonObject{{"role", "user"}, {"content", "a"}});
+        v2Append(s1, QJsonObject{{"role", "user"}, {"content", "a"}});
         s1.save(); // ③ 之后 save 正常
         {
             QFile bad(path + QStringLiteral(".bad"));
@@ -883,12 +922,12 @@ private slots:
             // T-050-P2：会话文件已升级 v2 多会话格式——save 正常重写主文件
             // 后应含 version 2 与恰一个会话（内含 1 条 user 消息）
             const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
-            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 3);
             const QJsonArray sessions =
                 root.value(QStringLiteral("sessions")).toArray();
             QCOMPARE(sessions.size(), 1);
             QCOMPARE(sessions.at(0).toObject()
-                         .value(QStringLiteral("messages"))
+                         .value(QStringLiteral("events"))
                          .toArray()
                          .size(),
                      1); // 主文件已重写为合法会话
@@ -1221,8 +1260,8 @@ private slots:
         s.setSystemPrompt(QStringLiteral("sys"));
         // 20 组 user + assistant(tool_calls) + tool = 61 条，超上限 41
         for (int i = 0; i < 20; ++i) {
-            s.append(QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
-            s.append(QJsonObject{
+            v2Append(s, QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
+            v2Append(s, QJsonObject{
                 {"role", "assistant"},
                 {"content", QString()},
                 {"tool_calls", QJsonArray{QJsonObject{
@@ -1230,7 +1269,7 @@ private slots:
                     {"type", QStringLiteral("function")},
                     {"function", QJsonObject{{"name", QStringLiteral("fs_read")},
                                              {"arguments", QStringLiteral("{}")}}}}}}});
-            s.appendToolResult(QStringLiteral("c%1").arg(i), QJsonObject{{"ok", true}});
+            v2AppendToolResult(s, QStringLiteral("c%1").arg(i), QJsonObject{{"ok", true}});
         }
         // 注：trim 在每次 append 时即执行，全程保持 ≤41 条——配对完整性
         // 才是本用例的断言点
@@ -1262,7 +1301,7 @@ private slots:
         QVERIFY(dir.isValid());
         const QString path = dir.filePath("chat/sessions.json");
         ChatSession s(path);
-        s.append(QJsonObject{{"role", "user"}, {"content", "a"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "a"}});
         s.saveSoon();
         QVERIFY(!QFileInfo::exists(path)); // 防抖期内未立即落盘
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 3000); // 1s 定时器到点落盘
@@ -1365,11 +1404,11 @@ private slots:
         ChatSession s(QStringLiteral("trim-mixed-unused.json"));
         s.setSystemPrompt(QStringLiteral("sys"));
         // 人为塞一条孤儿 tool（无前置 assistant 的旧脏数据），排最旧
-        s.appendToolResult(QStringLiteral("orphan0"), QJsonObject{{"ok", true}});
+        v2AppendToolResult(s, QStringLiteral("orphan0"), QJsonObject{{"ok", true}});
         for (int i = 0; i < 5; ++i) {
-            s.append(QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
+            v2Append(s, QJsonObject{{"role", "user"}, {"content", QString::number(i)}});
             if (i % 2 == 0) { // 工具组（3 条）
-                s.append(QJsonObject{
+                v2Append(s, QJsonObject{
                     {"role", "assistant"},
                     {"content", QString()},
                     {"tool_calls", QJsonArray{QJsonObject{
@@ -1377,15 +1416,15 @@ private slots:
                         {"type", QStringLiteral("function")},
                         {"function", QJsonObject{{"name", QStringLiteral("fs_read")},
                                                  {"arguments", QStringLiteral("{}")}}}}}}});
-                s.appendToolResult(QStringLiteral("c%1").arg(i), QJsonObject{{"ok", true}});
+                v2AppendToolResult(s, QStringLiteral("c%1").arg(i), QJsonObject{{"ok", true}});
             } else { // 纯问答（2 条）
-                s.append(QJsonObject{{"role", "assistant"}, {"content", QStringLiteral("ok")}});
+                v2Append(s, QJsonObject{{"role", "assistant"}, {"content", QStringLiteral("ok")}});
             }
         }
         // 继续追加普通问答对直到溢出：总量 1(sys)+1(孤儿)+13+16×2 = 47 > 41
         for (int i = 0; i < 16; ++i) {
-            s.append(QJsonObject{{"role", "user"}, {"content", QStringLiteral("p%1").arg(i)}});
-            s.append(QJsonObject{{"role", "assistant"},
+            v2Append(s, QJsonObject{{"role", "user"}, {"content", QStringLiteral("p%1").arg(i)}});
+            v2Append(s, QJsonObject{{"role", "assistant"},
                                  {"content", QStringLiteral("r%1").arg(i)}});
         }
 
@@ -1897,7 +1936,7 @@ private slots:
 
         // 运行期入口护栏：无 role 消息拒收
         const int before = s.size();
-        s.append(QJsonObject{});
+        v2Append(s, QJsonObject{});
         QCOMPARE(s.size(), before);
     }
 
@@ -3049,8 +3088,8 @@ private slots:
         const QString path = dir.filePath("chat/sessions.json");
         {
             ChatSession s(path);
-            s.append(QJsonObject{{"role", "user"}, {"content", "hi"}});
-            s.append(QJsonObject{{"role", "assistant"},
+            v2Append(s, QJsonObject{{"role", "user"}, {"content", "hi"}});
+            v2Append(s, QJsonObject{{"role", "assistant"},
                                  {"content", "答"},
                                  {"reasoning", "推理链第一段"}});
             s.save();
@@ -3070,17 +3109,17 @@ private slots:
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         ChatSession s(dir.filePath("chat/sessions.json"));
-        s.append(QJsonObject{{"role", "user"}, {"content", "u1"}});
-        s.append(QJsonObject{{"role", "assistant"},
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "u1"}});
+        v2Append(s, QJsonObject{{"role", "assistant"},
                              {"content", "a1"},
                              {"tool_calls", QJsonArray{QJsonObject{
                                  {"id", "call_1"},
                                  {"type", "function"},
                                  {"function", QJsonObject{{"name", "echo"},
                                                           {"arguments", "{}"}}}}}}});
-        s.appendToolResult("call_1", QJsonObject{{"ok", true}});
-        s.append(QJsonObject{{"role", "user"}, {"content", "u2"}});
-        s.append(QJsonObject{{"role", "assistant"}, {"content", "a2"}});
+        v2AppendToolResult(s, "call_1", QJsonObject{{"ok", true}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "u2"}});
+        v2Append(s, QJsonObject{{"role", "assistant"}, {"content", "a2"}});
         QCOMPARE(s.size(), 5);
         // 编辑重发：inclusive 截断 u2（下标 3）→ 其后全部丢弃（含自身）
         s.truncateFrom(3, true);
@@ -3097,10 +3136,10 @@ private slots:
         QTemporaryDir dir2;
         QVERIFY(dir2.isValid());
         ChatSession s2(dir2.filePath("chat/sessions.json"));
-        s2.append(QJsonObject{{"role", "user"}, {"content", "b1"}});
-        s2.append(QJsonObject{{"role", "assistant"}, {"content", "b2"}});
-        s2.append(QJsonObject{{"role", "user"}, {"content", "b3"}});
-        s2.append(QJsonObject{{"role", "assistant"}, {"content", "b4"}});
+        v2Append(s2, QJsonObject{{"role", "user"}, {"content", "b1"}});
+        v2Append(s2, QJsonObject{{"role", "assistant"}, {"content", "b2"}});
+        v2Append(s2, QJsonObject{{"role", "user"}, {"content", "b3"}});
+        v2Append(s2, QJsonObject{{"role", "assistant"}, {"content", "b4"}});
         QVERIFY(s2.removeMessageAt(2)); // 删 b3
         QCOMPARE(s2.size(), 3);
         QCOMPARE(s2.messages().at(2).toObject().value("content").toString(),
@@ -3109,8 +3148,8 @@ private slots:
         // 之后全部"——模块按 truncateFrom(lastUser, false) 调用，保留 user，
         // 丢弃其后 assistant
         ChatSession s3(dir2.filePath("chat/other.json"));
-        s3.append(QJsonObject{{"role", "user"}, {"content", "q1"}});
-        s3.append(QJsonObject{{"role", "assistant"}, {"content", "r1"}});
+        v2Append(s3, QJsonObject{{"role", "user"}, {"content", "q1"}});
+        v2Append(s3, QJsonObject{{"role", "assistant"}, {"content", "r1"}});
         s3.truncateFrom(0, false);
         QCOMPARE(s3.size(), 1);
         QCOMPARE(s3.messages().last().toObject().value("content").toString(),
@@ -3127,14 +3166,14 @@ private slots:
         const QString id0 = s.activeSessionId();
         QVERIFY(!id0.isEmpty());
         QCOMPARE(s.size(), 0);
-        s.append(QJsonObject{{"role", "user"}, {"content", "第一句"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "第一句"}});
         QCOMPARE(s.size(), 1);
         // 新建并切换
         const QString id1 = s.createSession();
         QVERIFY(!id1.isEmpty() && id1 != id0);
         QCOMPARE(s.activeSessionId(), id1);
         QCOMPARE(s.size(), 0); // 新会话为空
-        s.append(QJsonObject{{"role", "user"}, {"content", "第二会话内容"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "第二会话内容"}});
         // 切回 id0：消息互不串
         QVERIFY(s.switchSession(id0));
         QCOMPARE(s.size(), 1);
@@ -3157,7 +3196,7 @@ private slots:
         QCOMPARE(s.sessionSummaries().size(), 3);
         // 删除当前会话 → 自动切最近活跃的余下会话
         QVERIFY(s.switchSession(id0));
-        s.append(QJsonObject{{"role", "user"}, {"content", "再活跃一下"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "再活跃一下"}});
         QVERIFY(s.deleteSession(id0));
         QVERIFY(s.activeSessionId() != id0);
         QVERIFY(s.activeSessionId() == idA || s.activeSessionId() == idB);
@@ -3196,18 +3235,18 @@ private slots:
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         ChatSession s(dir.filePath("chat/sessions.json"));
-        s.append(QJsonObject{{"role", "assistant"}, {"content", "先答"}});
+        v2Append(s, QJsonObject{{"role", "assistant"}, {"content", "先答"}});
         QVERIFY(s.sessionSummaries().first().title.isEmpty()); // 非用户消息不起题
-        s.append(QJsonObject{{"role", "user"}, {"content", "起标题的这句话"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "起标题的这句话"}});
         QCOMPARE(s.sessionSummaries().first().title,
                  QStringLiteral("起标题的这句话"));
-        s.append(QJsonObject{{"role", "user"}, {"content", "第二句不改标题"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "第二句不改标题"}});
         QCOMPARE(s.sessionSummaries().first().title,
                  QStringLiteral("起标题的这句话"));
         // 清空会话复位标题：下一条用户消息重新起题
         s.clear();
         QVERIFY(s.sessionSummaries().first().title.isEmpty());
-        s.append(QJsonObject{{"role", "user"}, {"content", "重新起题"}});
+        v2Append(s, QJsonObject{{"role", "user"}, {"content", "重新起题"}});
         QCOMPARE(s.sessionSummaries().first().title, QStringLiteral("重新起题"));
     }
 
@@ -3242,7 +3281,7 @@ private slots:
             QFile f2(path);
             QVERIFY(f2.open(QIODevice::ReadOnly));
             const QJsonObject root = QJsonDocument::fromJson(f2.readAll()).object();
-            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+            QCOMPARE(root.value(QStringLiteral("version")).toInt(), 3);
             QCOMPARE(root.value(QStringLiteral("sessions")).toArray().size(), 1);
         }
         // 未知版本（99）→ 损坏路径：.bad 备份 + 空载，绝不静默迁移

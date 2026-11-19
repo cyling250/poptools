@@ -92,6 +92,24 @@ QString LlmStreamParser::takeReasoningDelta()
     return out;
 }
 
+// T-070 dsh 块化：聚合结果组装为 asst_blocks 约定的块数组
+QJsonArray LlmStreamParser::blocks() const
+{
+    QJsonArray arr;
+    if (!m_content.isEmpty())
+        arr.append(asst_blocks::textBlock(m_content));
+    if (!m_reasoning.isEmpty())
+        arr.append(asst_blocks::reasoningBlock(m_reasoning));
+    for (int index : m_toolOrder) {
+        const ToolAccum &acc = m_toolCalls.value(index);
+        arr.append(asst_blocks::toolCallBlock(
+            acc.id.isEmpty() ? QStringLiteral("call_%1").arg(index) : acc.id,
+            acc.name,
+            acc.arguments.isEmpty() ? QStringLiteral("{}") : acc.arguments));
+    }
+    return arr;
+}
+
 QJsonObject LlmStreamParser::assistantMessage() const
 {
     QJsonObject msg{{"role", QStringLiteral("assistant")},
@@ -113,6 +131,10 @@ QJsonObject LlmStreamParser::assistantMessage() const
         }
         msg.insert(QStringLiteral("tool_calls"), arr);
     }
+    // T-070：块化输出 + finish_reason（回合收束判据）
+    msg.insert(QStringLiteral("blocks"), blocks());
+    if (!m_finishReason.isEmpty())
+        msg.insert(QStringLiteral("finish"), m_finishReason);
     return msg;
 }
 

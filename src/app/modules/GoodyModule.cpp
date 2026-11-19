@@ -539,8 +539,9 @@ void GoodyModule::ensureWindow()
         // T-050-FIX2：重新生成是同一用户消息的新回合——工具轮次计数必须
         // 复位（sendMessage :573 是唯一复位点，本路径原先漏复位），否则
         // 新回合从 N 起步，反复重生成会提前触发 8 轮上限并把半截
-        // tool_calls 塞进会话
+        // tool_calls 塞进会话。T-070：新回合开新 turn 事件（dsh 轮次边界）
         m_toolRounds = 0;
+        m_session->turnStart();
         if (m_window)
             m_window->reloadFromSession();
         runTurn(); // 既有回合循环（epoch 快照/呼吸灯/流式气泡照旧）
@@ -690,7 +691,9 @@ void GoodyModule::sendMessage(const QString &text)
     }
     m_toolRounds = 0;
     m_window->appendUserBubble(text);
-    m_session->append(QJsonObject{{"role", QStringLiteral("user")}, {"content", text}});
+    // T-070 dsh 化：会话即事件日志——回合边界与用户消息都是持久事件
+    m_session->turnStart();
+    m_session->appendUserMessage(text);
     m_session->saveSoon();
     runTurn();
 }
@@ -756,26 +759,42 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
     }
 
     // 会话一致性护栏（P0：孤儿 tool_calls 会让之后每轮请求被 API 整包
-    // 拒绝且永久卡死）：失败/中止路径的消息可能带着已聚合的半截
-    // tool_calls，且不会再有工具执行——入会话前剥离 tool_calls 字段
-    //（保留正文，维持上下文连续）
-    QJsonObject msg = assistantMessage;
+    // 拒绝且永久卡死）：失败/中止路径不会执行工具——入会话前把 blocks 里
+    // 的 tool_call 块剥除（保留 text/reasoning 正文，维持上下文连续），
+    // 对齐 dsh"中断把已流出前缀定格为 assistant 消息"
+    QJsonArray blocks = assistantMessage.value(QStringLiteral("blocks")).toArray();
+    if (!ok) {
+        QJsonArray kept;
+        for (const QJsonValue &b : blocks) {
+            if (b.toObject().value(QStringLiteral("t")).toString()
+                != QLatin1String(asst_blocks::kToolCall))
+                kept.append(b);
+        }
+        blocks = kept;
+    }
+    // finish 判据：正常取流内 finish_reason；中止/失败改写（投影不消费，
+    // 供调试与未来 UI 徽章）
+    QString finish = assistantMessage.value(QStringLiteral("finish")).toString();
     if (!ok)
-        msg.remove(QStringLiteral("tool_calls"));
-    // 本地中止标记（LlmClient 插入，无任何消费方）不随会话回传：网关对
-    // message 内非标准字段的容忍度无文档承诺，剥除后请求体只含标准字段
-    msg.remove(QStringLiteral("aborted"));
-    // T-050-P2：reasoning 字段保留在会话消息里（随消息持久化，供窗口
-    // 展示），发送请求体时由 buildChatRequestBody 统一剥离
-    m_session->append(msg);
+        finish = error == QStringLiteral("已中止") ? QStringLiteral("aborted")
+                                                   : QStringLiteral("error");
+    m_session->appendAssistantBlocks(blocks, finish);
     m_session->saveSoon();
 
     if (m_window) {
         m_window->setBusy(false);
         // 先入会话再定稿：定稿后的"重新生成"判定需要会话里已有本条回复
-        m_window->finishAssistantBubble(
-            msg.value(QStringLiteral("content")).toString(),
-            msg.value(QStringLiteral("reasoning")).toString());
+        //（T-070 块化：正文/思考从 blocks 拼回）
+        QString bubbleText, bubbleReasoning;
+        for (const QJsonValue &b : blocks) {
+            const QJsonObject blk = b.toObject();
+            const QString bt = blk.value(QStringLiteral("t")).toString();
+            if (bt == QLatin1String(asst_blocks::kText))
+                bubbleText += blk.value(QStringLiteral("text")).toString();
+            else if (bt == QLatin1String(asst_blocks::kReasoning))
+                bubbleReasoning += blk.value(QStringLiteral("text")).toString();
+        }
+        m_window->finishAssistantBubble(bubbleText, bubbleReasoning);
         if (!ok && error != QStringLiteral("已中止"))
             m_window->showErrorLine(QStringLiteral("请求失败：%1").arg(error));
     }
@@ -784,8 +803,36 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         m_toolPhase = false; // 中止收束工具执行期守卫
         if (m_window)
             m_window->setToolPhase(false);
+        // T-070：失败/中止收束回合（dsh turn/end reason 语义）
+        m_session->turnEnd(error == QStringLiteral("已中止") ? QStringLiteral("aborted")
+                                                             : QStringLiteral("error"));
+        m_session->saveSoon();
         updateWorkingState(); // T-050：失败/中止收束
         return; // 失败/中止不再走工具链
+    }
+
+    // T-070：max-tokens 粘性收束——length 截断的 tool_calls 参数可能残缺
+    // （JSON 不完整），不执行；有 tool_calls 时补错误 tool/result 防孤儿
+    if (finish == QLatin1String("length")) {
+        for (const QJsonValue &b : blocks) {
+            const QJsonObject blk = b.toObject();
+            if (blk.value(QStringLiteral("t")).toString()
+                == QLatin1String(asst_blocks::kToolCall)) {
+                m_session->appendToolResult(
+                    blk.value(QStringLiteral("id")).toString(),
+                    QStringLiteral("{\"ok\":false,\"error\":\"生成因长度截断，调用未执行\"}"),
+                    true);
+            }
+        }
+        m_session->turnEnd(QStringLiteral("max-tokens"));
+        m_session->saveSoon();
+        m_toolPhase = false;
+        if (m_window) {
+            m_window->setToolPhase(false);
+            m_window->showErrorLine(QStringLiteral("回复因长度截断，已停止本轮工具调用。"));
+        }
+        updateWorkingState();
+        return;
     }
 
     const QJsonArray toolCalls = assistantMessage.value(QStringLiteral("tool_calls")).toArray();
@@ -793,19 +840,22 @@ void GoodyModule::onTurnFinished(bool ok, const QJsonObject &assistantMessage,
         m_toolPhase = false; // 普通回答，回合结束
         if (m_window)
             m_window->setToolPhase(false);
+        m_session->turnEnd(QStringLiteral("completed"));
+        m_session->saveSoon();
         updateWorkingState(); // T-050：回合结束
         return;
     }
 
     if (++m_toolRounds > kMaxToolRounds) {
-        // 轮次超限收尾：本轮 tool_calls 已随 assistant 消息入会话，必须
+        // 轮次超限收尾：本轮 tool_calls 已随 assistant 块入会话，必须
         // 补齐 tool 结果再结束（否则留下非法序列，会话被永久拒绝）
         for (const QJsonValue &tc : toolCalls) {
             m_session->appendToolResult(
                 tc.toObject().value(QStringLiteral("id")).toString(),
-                QJsonObject{{"ok", false},
-                            {"error", QStringLiteral("工具调用轮次已达上限，已停止执行")}});
+                QStringLiteral("{\"ok\":false,\"error\":\"工具调用轮次已达上限，已停止执行\"}"),
+                true);
         }
+        m_session->turnEnd(QStringLiteral("blocked"));
         m_session->saveSoon();
         m_toolPhase = false;
         if (m_window) {
@@ -842,17 +892,24 @@ void GoodyModule::processNextToolCall()
         QJsonDocument::fromJson(fn.value(QStringLiteral("arguments")).toString().toUtf8()).object();
 
     if (m_window)
-        m_window->appendSystemLine(
-            QStringLiteral("⚙ 调用工具 %1(%2)").arg(name, summarizeToolArgs(args)));
+        m_window->toolRowStarted(id, name, summarizeToolArgs(args)); // T-070 过程行
 
+    // T-070 dsh 化：审批是会话日志里的审计事件对（approval/asked → decided），
+    // 可重放可审计；fail-closed——任何异常路径一律拒绝
     const PermissionManager::Decision decision = m_perm->decide(name, args);
     if (decision == PermissionManager::Decision::Allow) {
+        m_session->appendApprovalAsked(id, name);
+        m_session->appendApprovalDecided(id, QStringLiteral("allowed-auto"));
+        m_session->saveSoon();
         executeToolCall(id, name, args);
         return;
     }
     // 逐条确认：内联确认卡片（Ask 与 Smart 白名单外共用此路径）
+    m_session->appendApprovalAsked(id, name);
     m_perm->audit(name, args, QStringLiteral("confirm"), false);
     if (!m_window) {
+        m_session->appendApprovalDecided(id, QStringLiteral("unavailable"));
+        m_session->saveSoon();
         toolCallDone(id, QJsonObject{{"ok", false},
                                      {"error", QStringLiteral("无聊天窗交互，已拒绝")}});
         return;
@@ -869,11 +926,17 @@ void GoodyModule::processNextToolCall()
                                    }
                                    if (!allowed) {
                                        m_perm->audit(name, args, QStringLiteral("denied"), false);
+                                       m_session->appendApprovalDecided(id, QStringLiteral("rejected"));
+                                       m_session->saveSoon();
                                        toolCallDone(id, QJsonObject{
                                                             {"ok", false},
                                                             {"error", QStringLiteral("用户拒绝了本次调用")}});
                                        return;
                                    }
+                                   m_session->appendApprovalDecided(id, always
+                                                                            ? QStringLiteral("allowed-always")
+                                                                            : QStringLiteral("allowed-once"));
+                                   m_session->saveSoon();
                                    executeToolCall(id, name, args);
                                });
 }
@@ -892,15 +955,16 @@ void GoodyModule::executeToolCall(const QString &toolCallId, const QString &name
 
 void GoodyModule::toolCallDone(const QString &toolCallId, const QJsonObject &result)
 {
-    m_session->appendToolResult(toolCallId, result);
+    // T-070：工具结果入会话事件日志（content JSON 串 + isError 双通道）
+    m_session->appendToolResult(toolCallId,
+                                QString::fromUtf8(
+                                    QJsonDocument(result).toJson(QJsonDocument::Compact)),
+                                !result.value(QStringLiteral("ok")).toBool(true));
     m_session->saveSoon(); // 防抖：工具密集回合不再每个结果全量写盘
-    if (m_window) {
-        m_window->appendSystemLine(
-            (result.value(QStringLiteral("ok")).toBool(true)
-                 ? QStringLiteral("✓ 完成：%1")
-                 : QStringLiteral("✗ 失败：%1"))
-                .arg(summarizeToolResult(result)));
-    }
+    if (m_window)
+        m_window->toolRowFinished(toolCallId,
+                                  result.value(QStringLiteral("ok")).toBool(true),
+                                  summarizeToolResult(result)); // T-070 过程行收束
     if (m_pendingToolCalls.isEmpty() && m_toolPhase) {
         m_toolPhase = false; // 结果全部回填，工具执行期结束
         if (m_window)
