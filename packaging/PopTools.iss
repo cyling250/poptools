@@ -3,7 +3,7 @@
 ; 编译：ISCC.exe packaging\PopTools.iss
 
 #define MyAppName "PopTools"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "0.5.1"
 ; 构建时间戳进文件名：修复期间版本号未变，同名包易新旧混淆
 #define BuildStamp GetDateTimeString("yyyymmdd_hhnn", "", "")
 #define MyAppPublisher "PopTools"
