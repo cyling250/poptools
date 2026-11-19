@@ -83,6 +83,10 @@ private:
     QPoint logicalPos(const QPoint &physical) const; // 物理 → Qt 逻辑
     // 线程池壁纸成品回主线程（30s 定时器异步路径尾段）：装缓存 + 重绘（T-068）
     void onWallpaperComputed(const QImage &img);
+    // 壁纸重算异步踢发（duty 启动即踢一次 + 30s 定时器 + 设置重载共用）：
+    // refreshNeeded 探测（签名未变免算）→ 线程池 computeBlurred → 回主线程
+    // adoptWallpaper（T-071：壁纸重算全链离主线程，渲染取图只回缓存）
+    void kickWallpaperRefresh();
     void openEditor(const QDate &date, const QRect &cell);
     // 模态信息框（trackModal 托管，show 后再居中）
     void showInfo(const QString &title, const QString &text);

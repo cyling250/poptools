@@ -71,6 +71,28 @@ QFont CalendarRenderer::font(qreal pointSize, bool bold) const
     return f;
 }
 
+const QFontMetrics &CalendarRenderer::fontMetricsFor(const QFont &f) const
+{
+    // 键折叠与 font() 同口径（像素字号 + bold×1e6）
+    const int key = f.pixelSize() + (f.bold() ? 1000000 : 0);
+    auto it = m_fontMetricsCache.constFind(key);
+    if (it == m_fontMetricsCache.constEnd())
+        it = m_fontMetricsCache.insert(key, QFontMetrics(f));
+    return it.value();
+}
+
+QFont CalendarRenderer::struckFont(const QFont &base) const
+{
+    const int key = base.pixelSize();
+    auto it = m_strikeCache.constFind(key);
+    if (it == m_strikeCache.constEnd()) {
+        QFont f = base;
+        f.setStrikeOut(true);
+        it = m_strikeCache.insert(key, f);
+    }
+    return it.value();
+}
+
 CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas,
                                         const CalendarSettings &settings,
                                         const CalendarTaskStore &store, const QDate &today,
@@ -149,7 +171,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                 continue;
 
             const bool hasDigest = digests.daily.contains(date);
-            const QFontMetrics fm(dateFont);
+            const QFontMetrics &fm = fontMetricsFor(dateFont);
             const qreal dateTextW = fm.horizontalAdvance(QString::number(date.day()));
             const QPointF datePos(cell.left() + 8, cell.top() + 3);
             drawShadowText(g, QString::number(date.day()), dateFont,
@@ -201,10 +223,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                             t.time.isEmpty()
                                 ? QStringLiteral("%1. %2").arg(i + 1).arg(t.text)
                                 : QStringLiteral("%1. %2 %3").arg(i + 1).arg(t.time, t.text);
-                        QFont f = eventFont;
-                        if (t.done) {
-                            f.setStrikeOut(true);
-                        }
+                        const QFont f = t.done ? struckFont(eventFont) : eventFont;
                         drawShadowText(g, txt, f,
                                        t.done ? QColor(150, 150, 150, 255)
                                               : QColor(236, 236, 236, 255),
@@ -263,7 +282,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
     // 周数 + 当前周金色条
     {
         const int currentWeek = ChineseCalendar::weekNumber(today);
-        const QFontMetrics nfm(weekFont);
+        const QFontMetrics &nfm = fontMetricsFor(weekFont);
         for (int r = 0; r < layout.rows; ++r) {
             const QDate date = layout.firstCellDate.addDays(r * 7);
             const int week = ChineseCalendar::weekNumber(date);
@@ -288,7 +307,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
     // 标题
     {
         const QString title = ChineseCalendar::monthTitle(today, year, month);
-        const QFontMetrics tfm(titleFont);
+        const QFontMetrics &tfm = fontMetricsFor(titleFont);
         const qreal w = tfm.horizontalAdvance(title);
         const qreal tx = panel.left() + (panel.width() - w) / 2.0;
         const qreal ty = panel.top() + (layout.kTitleHeight - tfm.height()) / 2.0;
@@ -333,7 +352,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
             g->setPen(QPen(QColor(255, 255, 255, 52), 1));
             g->setBrush(Qt::NoBrush);
             g->drawPath(pill);
-            const QFontMetrics pfm(pillFont);
+            const QFontMetrics &pfm = fontMetricsFor(pillFont);
             const qreal w = pfm.horizontalAdvance(hint);
             drawShadowText(g, hint, pillFont, QColor(240, 240, 240, 255),
                            QPointF(pillRect.left() + (pillRect.width() - w) / 2.0,
@@ -394,7 +413,7 @@ void CalendarRenderer::drawShadow(QPainter *g, const QRect &panel)
 void CalendarRenderer::drawShadowText(QPainter *g, const QString &text, const QFont &f,
                                       const QColor &color, const QPointF &pos, qreal maxWidth)
 {
-    QFontMetrics fm(f);
+    const QFontMetrics &fm = fontMetricsFor(f); // T-071：缓存替代逐处构造
     g->setFont(f);
     if (maxWidth > 0) {
         const QString elided = fm.elidedText(text, Qt::ElideRight, maxWidth);

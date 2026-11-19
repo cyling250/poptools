@@ -19,16 +19,18 @@ namespace poptools {
 //   ① 签名免重算——候选文件签名（路径/修改时间/大小 + 壁纸风格）未变时
 //      refresh/refreshNeeded 只续 20s 时基，零解码零模糊；
 //   ② 重算可离主线程——computeBlurred 静态无状态（线程池可调），成品经
-//      adoptFrom 回装缓存（宿主 30s 定时器已改走此异步路径）。
+//      adoptFrom 回装缓存（宿主 30s 定时器/duty 启动即踢走此异步路径）。
 // ============================================================
 class DesktopWallpaperProvider
 {
 public:
     DesktopWallpaperProvider(int width, int height);
 
-    QImage blurredWallpaper(); // 缓存 20s 内直接返回
-    void refresh();
-    // 释放缓存省内存；下次 blurredWallpaper 自动重算
+    // 渲染取图：只回缓存（20s 新鲜直回；过期签名未变续时基；真变了回旧图/
+    // 空图）——绝不同步解码重算（T-068/T-071，红线①），重算走宿主 30s 定时
+    // 器的异步池路径
+    QImage blurredWallpaper();
+    // 释放缓存省内存；下次异步刷新（宿主 kick → computeBlurred）重算
     void dispose() { m_blurred = QImage(); }
 
     // 是否需要重算（缓存新鲜或签名未变 → 只续 20s 时基并返回 false）。

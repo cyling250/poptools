@@ -14,11 +14,16 @@ QString LlmStreamParser::feed(const QByteArray &bytes)
 {
     m_buf += bytes;
     QString delta;
-    int nl = -1;
-    // SSE 事件以 \n 分行；半行留在缓冲等下一块
-    while ((nl = m_buf.indexOf('\n')) >= 0) {
-        QByteArray line = m_buf.left(nl);
-        m_buf.remove(0, nl + 1);
+    // SSE 事件以 \n 分行；半行留在缓冲等下一块。
+    // T-071：读偏移扫行 + 整块消费后一次性压缩——旧路径每行
+    // m_buf.remove(0, nl+1) 把余下整段前移，单 chunk 多行时 O(chunk²)
+    int begin = 0;
+    for (;;) {
+        const int nl = m_buf.indexOf('\n', begin);
+        if (nl < 0)
+            break;
+        QByteArray line = m_buf.mid(begin, nl - begin);
+        begin = nl + 1;
         line = line.trimmed();
         if (line.isEmpty())
             continue;
@@ -82,6 +87,8 @@ QString LlmStreamParser::feed(const QByteArray &bytes)
             acc.arguments += fn.value(QStringLiteral("arguments")).toString();
         }
     }
+    if (begin > 0)
+        m_buf.remove(0, begin); // 已消费行一次性前移，半行留在原地等下一块
     return delta;
 }
 

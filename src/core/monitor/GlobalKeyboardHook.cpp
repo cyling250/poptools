@@ -2,6 +2,8 @@
 
 #include "core/monitor/MainThreadProbe.h"
 
+#include <QMetaMethod>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -14,6 +16,10 @@ namespace {
 // 单消费者（活动监控模块是唯一用户）；句柄与消费者指针为文件级静态
 GlobalKeyboardHook *g_consumer = nullptr;
 HHOOK g_hook = nullptr;
+// keyEvent 信号的预解析句柄（T-071）：LL 回调每键两次字符串式查找槽
+// 换成 start() 时一次解析、回调内直接 invoke 已解析句柄（回调内只做
+// µs 级入队转发，解析开销省在系统级热路径上）
+QMetaMethod g_keyEventMethod;
 
 LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
@@ -26,7 +32,7 @@ LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
     // 回调内只做入队转发（低级钩子回调有严格超时，耗时会被系统静默摘钩）；
     // 修饰键 down/up 也要转发（接收方维护 Shift/Ctrl/Alt 状态机才能
     // 正确翻译 Shift+a → 'A'）
-    if (nCode >= 0 && g_consumer) {
+    if (nCode >= 0 && g_consumer && g_keyEventMethod.isValid()) {
         const UINT msg = static_cast<UINT>(wParam);
         if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN
             || msg == WM_KEYUP || msg == WM_SYSKEYUP) {
@@ -38,13 +44,12 @@ LRESULT CALLBACK keyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             GUITHREADINFO gi = {};
             gi.cbSize = sizeof(gi);
             const HWND focusHwnd = GetGUIThreadInfo(0, &gi) ? gi.hwndFocus : nullptr;
-            // 字符串签名须与 keyEvent 形参表逐一对应（运行期解析，失配=事件静默丢失）
-            QMetaObject::invokeMethod(g_consumer, "keyEvent", Qt::QueuedConnection,
-                                      Q_ARG(int, static_cast<int>(info->vkCode)),
-                                      Q_ARG(int, static_cast<int>(info->scanCode)),
-                                      Q_ARG(bool, (info->flags & LLKHF_EXTENDED) != 0),
-                                      Q_ARG(bool, down),
-                                      Q_ARG(quintptr, reinterpret_cast<quintptr>(focusHwnd)));
+            g_keyEventMethod.invoke(g_consumer, Qt::QueuedConnection,
+                                    Q_ARG(int, static_cast<int>(info->vkCode)),
+                                    Q_ARG(int, static_cast<int>(info->scanCode)),
+                                    Q_ARG(bool, (info->flags & LLKHF_EXTENDED) != 0),
+                                    Q_ARG(bool, down),
+                                    Q_ARG(quintptr, reinterpret_cast<quintptr>(focusHwnd)));
         }
     }
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
@@ -84,6 +89,11 @@ void GlobalKeyboardHook::start()
     m_active = true;
 #ifdef Q_OS_WIN
     g_consumer = this;
+    // 预解析 keyEvent 信号句柄（T-071）：签名失配在安装时告警而非每键静默丢
+    g_keyEventMethod = metaObject()->method(
+        metaObject()->indexOfSignal("keyEvent(int,int,bool,bool,quintptr)"));
+    if (!g_keyEventMethod.isValid())
+        qWarning("GlobalKeyboardHook: keyEvent 信号解析失败，事件将无法转发");
     g_hook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, GetModuleHandle(nullptr), 0);
     if (!g_hook) {
         // 装钩失败（安全软件拦截/权限策略）：回退为未激活，调用方按 isRunning 判断
@@ -103,6 +113,7 @@ void GlobalKeyboardHook::stop()
 #ifdef Q_OS_WIN
     if (g_consumer == this)
         g_consumer = nullptr;
+    g_keyEventMethod = QMetaMethod(); // 句柄随消费者一并失效
     if (g_hook) {
         UnhookWindowsHookEx(g_hook);
         g_hook = nullptr;

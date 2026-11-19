@@ -180,6 +180,7 @@ void SettingsDialog::commitSettings()
         return;
 
     Settings &s = Settings::instance();
+    s.beginBatch(); // T-071：~20 个 setter 合并为一次整 INI 落盘（endBatch 收口）
     s.setApiFormat(m_formatCombo->currentData().toString());
     s.setApiBaseUrl(m_urlEdit->text().trimmed());
     s.setApiKey(m_keyEdit->text().trimmed());
@@ -204,6 +205,7 @@ void SettingsDialog::commitSettings()
     s.setAssistantAutoSummarize(m_gdyAutoSwitch->isChecked());
     s.setAssistantBallEnabled(m_gdyBallSwitch->isChecked()); // T-050
     s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
+    s.endBatch(); // 批量写收口：一次整 INI sync（其后日历 JSON 与广播不变）
 
     // 桌面日历：load→改→save 只覆写本页暴露的 7 个字段；几何(x/y/width/height)
     // 与 showNextMonthPill 取磁盘最新值。写入 JSON 后经能力槽通知宿主重载重绘

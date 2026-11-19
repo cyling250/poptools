@@ -74,28 +74,34 @@ void CalendarPanel::onDutyStarted()
     if (!m_wallpaperTimer) {
         m_wallpaperTimer = new QTimer(this);
         m_wallpaperTimer->setInterval(30000);
-        connect(m_wallpaperTimer, &QTimer::timeout, this, [this] {
-            // T-068：壁纸重算（磁盘整图解码 + 两遍盒模糊，100~200ms 级）挪线程
-            // 池——主线程挂着 WH_MOUSE_LL/WH_KEYBOARD_LL 低级钩子，主线程停摆
-            // =全系统鼠标排队（用户感知"拖动卡一下再瞬移"）；签名未变时
-            // refreshNeeded 内部已续时基免算，只有真换壁纸才进线程池
-            if (!m_renderer || m_wallpaperBusy)
-                return;
-            if (!m_renderer->wallpaperRefreshNeeded())
-                return;
-            m_wallpaperBusy = true;
-            const QSize sz = m_renderer->wallpaperSize();
-            QPointer<CalendarPanel> self(this);
-            QThreadPool::globalInstance()->start([self, sz] {
-                const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
-                    if (self)
-                        self->onWallpaperComputed(img);
-                }, Qt::QueuedConnection);
-            });
-        });
+        connect(m_wallpaperTimer, &QTimer::timeout, this,
+                [this] { kickWallpaperRefresh(); });
     }
     m_wallpaperTimer->start();
+    kickWallpaperRefresh(); // duty 启动即踢一次（冷启动首帧异步取壁纸，
+                            // 渲染取图只回缓存，不再同步重算——T-071）
+}
+
+// 壁纸重算异步踢发（T-068 定时器体抽方法 + T-071 duty 启动/设置重载共用）：
+// 重算（磁盘整图解码 + 两遍盒模糊，100~200ms 级）全链离主线程——主线程挂着
+// WH_MOUSE_LL/WH_KEYBOARD_LL 低级钩子，主线程停摆=全系统鼠标排队；签名未变时
+// refreshNeeded 内部已续时基免算，只有真换壁纸才进线程池
+void CalendarPanel::kickWallpaperRefresh()
+{
+    if (!m_renderer || m_wallpaperBusy)
+        return;
+    if (!m_renderer->wallpaperRefreshNeeded())
+        return;
+    m_wallpaperBusy = true;
+    const QSize sz = m_renderer->wallpaperSize();
+    QPointer<CalendarPanel> self(this);
+    QThreadPool::globalInstance()->start([self, sz] {
+        const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
+            if (self)
+                self->onWallpaperComputed(img);
+        }, Qt::QueuedConnection);
+    });
 }
 
 // 线程池壁纸成品回主线程：装缓存并整帧重绘（30s 定时器异步路径的尾段）
@@ -148,8 +154,7 @@ void CalendarPanel::reloadSettings()
     // 应用设置页保存日历设置后的入口：重读 JSON、应用几何钳制、重绘
     m_settings = CalendarSettings::load();
     clampSettings();
-    if (m_renderer)
-        m_renderer->refreshWallpaper();
+    kickWallpaperRefresh(); // T-071：同步 refresh 已删，重载走异步踢发
     render();
 }
 

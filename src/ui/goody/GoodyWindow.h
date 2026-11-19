@@ -128,6 +128,7 @@ private:
     void onBubbleAction(MessageBubble *bubble, int action);
     void updateClearBtnState();        // busy/工具期联合刷新「清空」等（B-2/C-N2）
     void updateSessionUiLocked();      // busy/工具期联合禁侧栏操作
+    void scheduleSessionRefresh();     // 侧栏刷新 200ms 合帧（工具期每事件一次重建，T-071）
     // applyTheme 拆分（T-062）：窗口级 QSS 与控件调色板钉扎两段各归其位，
     // 气泡重抛/侧栏刷新留主干——纯函数分解，调用顺序不变
     // （T-070：配色整体切 GoodyTheme，dsh WebUI 形态）
@@ -157,6 +158,7 @@ private:
     QPushButton *m_newChatBtn = nullptr;
     QListWidget *m_sessionList = nullptr;
     bool m_sessionListDirty = false;   // 流式期间侧栏刷新推迟标记
+    QTimer *m_sessionRefreshTimer = nullptr; // 侧栏刷新合帧定时器（200ms 单发，T-071）
 
     // 对话区
     QScrollArea *m_scroll = nullptr;

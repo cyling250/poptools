@@ -21,23 +21,17 @@ DesktopWallpaperProvider::DesktopWallpaperProvider(int width, int height)
 
 QImage DesktopWallpaperProvider::blurredWallpaper()
 {
-    if (!m_blurred.isNull() && m_lastRefresh.msecsTo(QDateTime::currentDateTimeUtc()) < 20000)
+    // T-071：渲染取图路径绝不解码/重算（T-068 漏网点——缓存过期且壁纸已换
+    // 时，旧路径在渲染调用栈内同步全量重算 ~160ms；主线程挂着 LL 钩子，停摆
+    // 即全系统输入排队）。新鲜回缓存；过期但签名未变只续时基（stat 级探测，
+    // 主线程可安全调用）；真变了回旧图/空图，重算交给宿主 30s 定时器的异步
+    // 池路径（refreshNeeded → computeBlurred → adoptFrom）
+    if (!m_blurred.isNull()
+        && m_lastRefresh.msecsTo(QDateTime::currentDateTimeUtc()) < 20000)
         return m_blurred;
-    refresh();
-    return m_blurred;
-}
-
-// 强制刷新（绕过 20s 缓存）。T-068：壁纸未变（签名一致）时只续时基零重算——
-// 此前每轮全量"磁盘整图解码 + 降采样 + 两遍盒模糊 + 放大"在主线程执行
-// ~160ms，与 30s 定时器叠加即"拖动卡顿瞬移"根因；真变了才全量重算
-void DesktopWallpaperProvider::refresh()
-{
-    const QString sig = wallpaperSignature();
-    if (!m_blurred.isNull() && sig == m_lastSignature) {
+    if (!m_blurred.isNull() && wallpaperSignature() == m_lastSignature)
         m_lastRefresh = QDateTime::currentDateTimeUtc();
-        return;
-    }
-    adoptFrom(computeBlurred(m_w, m_h));
+    return m_blurred;
 }
 
 // 是否需要重算：缓存新鲜或签名未变都只续时基返回 false。签名探测零解码

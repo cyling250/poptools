@@ -135,11 +135,19 @@ public:
     QString updateIgnoredVersion() const;
     void setUpdateIgnoredVersion(const QString &version);
 
+    // ---- 批量静默写（T-071）----
+    // 区间内所有 setter 不落盘，endBatch 时整 INI 一次性 sync（设置页一次
+    // 提交 ~20 个 setter，旧路径逐个整文件重写且全在 GUI 线程）。计数支持
+    // 嵌套；区间须在同一调用栈内配对收口
+    void beginBatch();
+    void endBatch();
+
 private:
     Settings();
     // 落盘并检查可写性（安装到无写权限目录时 sync 静默失败，首次失败告警一次）
     void syncChecked();
     QSettings m_s;
+    int m_batchDepth = 0; // 批量静默写嵌套计数
 };
 
 } // namespace poptools

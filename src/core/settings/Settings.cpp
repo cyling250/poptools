@@ -35,9 +35,12 @@ Settings &Settings::instance()
 }
 
 // 落盘并检查可写性：QSettings::sync 在目录无写权限（如 Program Files）时
-// 静默失败，用户改过的设置全部不保存且毫无感知——首次失败时告警一次
+// 静默失败，用户改过的设置全部不保存且毫无感知——首次失败时告警一次。
+// 批量区间（beginBatch/endBatch）内延后，由 endBatch 统一一次落盘
 void Settings::syncChecked()
 {
+    if (m_batchDepth > 0)
+        return; // 批量中：延后到 endBatch
     m_s.sync();
     if (m_s.status() == QSettings::AccessError) {
         static bool warned = false;
@@ -46,6 +49,21 @@ void Settings::syncChecked()
             qWarning("PopTools.ini 不可写（目录权限不足？），设置将无法保存");
         }
     }
+}
+
+// 批量静默写（T-071）：设置页一次提交连拨 ~20 个控件，旧路径每个 setter
+// 尾部一次整 INI 重写（全部在 GUI 线程）。区间内 sync 延后到 endBatch 一次
+// 落盘；计数支持嵌套。风险口径：区间异常退出丢的是本次提交（毫秒级跨度），
+// 与旧路径单 setter 粒度相比可忽略
+void Settings::beginBatch()
+{
+    ++m_batchDepth;
+}
+
+void Settings::endBatch()
+{
+    if (m_batchDepth > 0 && --m_batchDepth == 0)
+        syncChecked();
 }
 
 quint32 Settings::captureHotKeyVk() const

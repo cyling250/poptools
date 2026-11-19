@@ -84,27 +84,32 @@ void BoxPanel::onDutyStarted()
     if (!m_wallpaperTimer) {
         m_wallpaperTimer = new QTimer(this);
         m_wallpaperTimer->setInterval(30000);
-        connect(m_wallpaperTimer, &QTimer::timeout, this, [this] {
-            // T-068：壁纸重算挪线程池（与 CalendarPanel 同款——主线程挂低级钩子，
-            // 重算 ~160ms 即全系统鼠标排队）；签名未变时免算零开销
-            if (!m_renderer || m_wallpaperBusy)
-                return;
-            if (!m_renderer->wallpaperRefreshNeeded())
-                return;
-            m_wallpaperBusy = true;
-            const QSize sz = m_renderer->wallpaperSize();
-            QPointer<BoxPanel> self(this);
-            QThreadPool::globalInstance()->start([self, sz] {
-                const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
-                    if (self)
-                        self->onWallpaperComputed(img);
-                }, Qt::QueuedConnection);
-            });
-        });
+        connect(m_wallpaperTimer, &QTimer::timeout, this,
+                [this] { kickWallpaperRefresh(); });
     }
     m_wallpaperTimer->start();
+    kickWallpaperRefresh(); // duty 启动即踢一次（冷启动首帧异步取壁纸——T-071）
     refreshEntries();
+}
+
+// 壁纸重算异步踢发（T-068 定时器体抽方法 + T-071 duty 启动共用）：重算全链
+// 离主线程（与 CalendarPanel::kickWallpaperRefresh 同款，见彼处注释）
+void BoxPanel::kickWallpaperRefresh()
+{
+    if (!m_renderer || m_wallpaperBusy)
+        return;
+    if (!m_renderer->wallpaperRefreshNeeded())
+        return;
+    m_wallpaperBusy = true;
+    const QSize sz = m_renderer->wallpaperSize();
+    QPointer<BoxPanel> self(this);
+    QThreadPool::globalInstance()->start([self, sz] {
+        const QImage img = DesktopWallpaperProvider::computeBlurred(sz.width(), sz.height());
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, img] {
+            if (self)
+                self->onWallpaperComputed(img);
+        }, Qt::QueuedConnection);
+    });
 }
 
 // 线程池壁纸成品回主线程：装缓存并整帧重绘（30s 定时器异步路径的尾段）

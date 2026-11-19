@@ -306,7 +306,11 @@ void MessageBubble::appendReasoningDelta(const QString &delta)
     if (!m_reasonSection->isVisible())
         m_reasonSection->setVisible(true); // 首增量：折叠区出现（默认仍折叠）
     m_reasoningText += delta;
-    m_reasonBody->setPlainText(m_reasoningText);
+    // T-071：光标尾部追加增量——旧路径每拍 setPlainText(全文) 整文档重建
+    // 排版，长思考期随长度 O(n²) 累计（正文流式 appendStreamText 同思路）
+    QTextCursor c(m_reasonBody->document());
+    c.movePosition(QTextCursor::End);
+    c.insertText(delta);
     updateReasoningHeader();
 }
 

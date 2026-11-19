@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDate>
+#include <QFontMetrics>
 #include <QHash>
 #include <QImage>
 #include <QPainterPath>
@@ -48,11 +49,10 @@ public:
                           const QPoint &hover, const QString &hoverHint, bool adjusting,
                           const CalendarDigestView &digests = CalendarDigestView());
 
-    void refreshWallpaper() { m_wallpaper.refresh(); }
-
     // T-068 异步壁纸三件套：尺寸查询（线程池任务入参）/ 是否需重算（签名未变
     // 免算）/ 主线程收成品。重算本体 DesktopWallpaperProvider::computeBlurred
-    // 是静态函数，由面板的 30s 定时器经线程池调度
+    // 是静态函数，由面板经线程池调度（T-071：同步 refresh 已删，重算一律
+    // 走宿主 kick 的异步池路径，渲染取图只回缓存）
     QSize wallpaperSize() const { return m_wallpaper.canvasSize(); }
     bool wallpaperRefreshNeeded() { return m_wallpaper.refreshNeeded(); }
     void adoptWallpaper(const QImage &img) { m_wallpaper.adoptFrom(img); }
@@ -60,6 +60,11 @@ public:
 private:
     // C# 字号是磅值（96dpi 下 px = pt*4/3），画布为物理像素，再乘 DPR 折算（缓存）
     QFont font(qreal pointSize, bool bold = false) const;
+    // 按字体的像素字号取缓存 QFontMetrics（T-071：一次渲染 ~100 处
+    // QFontMetrics(f) 逐处构造 → 按键复用；键折叠同 font()）
+    const QFontMetrics &fontMetricsFor(const QFont &f) const;
+    // 完成态日程的删除线派生字体（按像素字号缓存，免逐行 detach 重解析）
+    QFont struckFont(const QFont &base) const;
     // 面板外扩 9 圈描边模拟投影（配方与收纳盒同族，见 box-r1 C-03）
     void drawShadow(QPainter *g, const QRect &panel);
     // 带阴影文字：pos 为文字左上角（GDI+ DrawString 锚点语义）；maxWidth>0 走
@@ -89,6 +94,8 @@ private:
     int m_height = 0;
     qreal m_dpr = 1.0;
     mutable QHash<qreal, QFont> m_fontCache;
+    mutable QHash<int, QFontMetrics> m_fontMetricsCache; // 键同 font() 折叠（T-071）
+    mutable QHash<int, QFont> m_strikeCache;             // 键 = 像素字号（T-071）
 };
 
 } // namespace poptools

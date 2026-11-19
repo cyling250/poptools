@@ -23,6 +23,7 @@
 #include <QScrollBar>
 #include <QSizeGrip>
 #include <QStyleHints>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -121,6 +122,15 @@ GoodyWindow::GoodyWindow(QWidget *parent)
     buildChatPane();
     body->addWidget(m_scroll, 1);
     lay->addLayout(body, 1);
+
+    // 侧栏刷新合帧（T-071）：工具期 changed() 每事件一次侧栏全量重建
+    //（clear + 逐行 new + 逐行 QSS），200ms 单发合帧足够跟手；会话切换
+    // 路径不经此定时器（立即刷新）
+    m_sessionRefreshTimer = new QTimer(this);
+    m_sessionRefreshTimer->setSingleShot(true);
+    m_sessionRefreshTimer->setInterval(200);
+    connect(m_sessionRefreshTimer, &QTimer::timeout, this,
+            &GoodyWindow::refreshSessionList);
 
     // ---- 权限确认卡片（默认隐藏；工具确认链路样式进新卡片设计） ----
     m_permBar = new QWidget(card);
@@ -330,8 +340,15 @@ void GoodyWindow::onSessionDataChanged()
         reloadFromSession();
         refreshSessionList();
     } else {
-        refreshSessionList();
+        scheduleSessionRefresh(); // T-071：200ms 合帧（非流式期每事件一次
+                                  // 侧栏全量重建 → 合并为至多 5 次/秒）
     }
+}
+
+void GoodyWindow::scheduleSessionRefresh()
+{
+    if (!m_sessionRefreshTimer->isActive())
+        m_sessionRefreshTimer->start();
 }
 
 // 单条侧栏行装配（T-062 抽取）：标题/元信息/删除钮 + P-023 双通道配色 +

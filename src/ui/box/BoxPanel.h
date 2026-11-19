@@ -59,6 +59,9 @@ private:
     void refreshEntries(); // 重列绑定目录 → 自动定尺寸 → 重绘
     // 线程池壁纸成品回主线程（30s 定时器异步路径尾段）：装缓存 + 重绘（T-068）
     void onWallpaperComputed(const QImage &img);
+    // 壁纸重算异步踢发（duty 启动即踢一次 + 30s 定时器共用），T-071 同
+    // CalendarPanel::kickWallpaperRefresh
+    void kickWallpaperRefresh();
     void ensureVisibleIcons(const BoxLayout &layout); // 对当前页可见条目补发图标请求
     void renderFrame(const QRect &commitDirty); // 实绘 + 按提交脏矩形合成发布（空=整帧）
     void renderDuringAdjust();

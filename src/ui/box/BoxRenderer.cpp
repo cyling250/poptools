@@ -54,6 +54,16 @@ QFont BoxRenderer::font(qreal pointSize, bool bold) const
     return f;
 }
 
+const QFontMetrics &BoxRenderer::fontMetricsFor(const QFont &f) const
+{
+    // 键折叠与 font() 同口径（像素字号 + bold×1e6）
+    const int key = f.pixelSize() + (f.bold() ? 1000000 : 0);
+    auto it = m_fontMetricsCache.constFind(key);
+    if (it == m_fontMetricsCache.constEnd())
+        it = m_fontMetricsCache.insert(key, QFontMetrics(f));
+    return it.value();
+}
+
 // 面板外圈多层圆角描边模拟柔和投影（由外向内、alpha 恒 6 叠深；与日历同一配方）
 void BoxRenderer::drawShadow(QPainter *g, const QRect &panel)
 {
@@ -70,7 +80,7 @@ void BoxRenderer::drawShadow(QPainter *g, const QRect &panel)
 void BoxRenderer::drawShadowText(QPainter *g, const QString &text, const QFont &f,
                                  const QColor &color, const QPointF &pos)
 {
-    QFontMetrics fm(f);
+    const QFontMetrics &fm = fontMetricsFor(f); // T-071：缓存替代逐处构造
     g->setFont(f);
     g->setPen(QColor(0, 0, 0, 120));
     g->drawText(QPointF(pos.x() + 1, pos.y() + 1), text);
@@ -165,8 +175,8 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
 
     // 标题（盒名，单行省略）
     {
-        QFontMetrics tfm(titleFont);
-        const QString title = QFontMetrics(titleFont).elidedText(
+        const QFontMetrics &tfm = fontMetricsFor(titleFont);
+        const QString title = tfm.elidedText(
             def.name, Qt::ElideRight, layout.titleRect.width());
         drawShadowText(g, title, titleFont, QColor(250, 250, 250, 255),
                        QPointF(layout.titleRect.left(),
@@ -226,7 +236,7 @@ BoxLayout BoxRenderer::render(QPainter *g, const BoxDef &def, const BoxLayout &l
         // 标签（单行省略，阴影字）。基线 = 图标底 + 间距 + ascent（T-061：旧式
         // “iconSize+14” 漏了图标顶偏移与 ascent，文字顶叠进图标底缘）；
         // 极端 DPI 兜底：文字底（含 descent）不许压出格子
-        QFontMetrics lfm(labelFont);
+        const QFontMetrics &lfm = fontMetricsFor(labelFont);
         const QString label = lfm.elidedText(e.name, Qt::ElideRight, cell.width() - 10);
         const qreal lw = lfm.horizontalAdvance(label);
         const qreal baseline =
