@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-20 02:40（T-071 夜间批次落码完成：P0 修复 T-070 提交态编译损坏 + ChatSession 热路径四项/分散效率批/UI 收编批/日历悬停脏矩形，6 提交 5887ee9..78abd32 每步独立构建 0 警告+ctest 99 绿，待真机验收；P-070/P-071 入账；陈旧验收块 T-059/T-060/T-064/T-062 无损搬移 archive/current-superseded-1117-1118.md） · Agent_20261120005535
 > 最后更新：2026-11-19 19:25（T-070 落码完成：Goody 按 deepseek-harness 形式重构——后端 ChatSession v3 会话事件日志/块化消息/审批审计对/投影派生模型历史（v1/v2 迁移），前端 dsh WebUI 形态（文档流气泡/ProcessRow 过程行/composer 大圆角卡/侧栏 280），提交 4e153c6，ctest 99 绿，未真机验收；dsh 源码研读存 temp_scripts/dl_dsh/） · Agent_20261119172053
 > 最后更新：2026-11-19 17:20（T-069 落码完成：UI 现代化改版 M0-M3 全流程——Fluent token 底座 theming 库 + 设置界面 SettingCard/ToggleSwitch/即时生效 + Goody 头像行/卡片描边/自适应输入 + 全局配色统一 Fluent token（ThemeColors 表退役），构建+ctest 绿，未提交待用户目测验收；方案 docs/design/20261119-ui-fluent-restyle-proposal.md） · Agent_20261119172053
 > 最后更新：2026-11-18 16:00（T-067 落码完成：Goody 起居注式日摘要（静默自主）+ 月度滚动月报（开机重写【月报更新】）+ 桌面日历摘要链接展示（双击面板后可点/notepad），textlog 接入日总结（T-066b 收口），ctest 97 绿，未提交待真机验收） · Agent_20261118130500
@@ -14,7 +15,7 @@
 - **项目名称**：PopTools（前身为 Snipaste，2026-09-02 更名；更早为 MySnipaste）
 - **一句话描述**：Windows 全局实用小工具箱（常驻托盘、热键唤起、功能模块可拔插）——当前内置区域截图 + 本地离线 OCR（RapidOCR）+ 大模型翻译（OpenAI 兼容 / Anthropic 双协议）+ 贴图 + 活动监控（键入/时间线/OCR 快照本地日志）+ Goody 大模型管家（T-045）+ 桌面日历（T-054 起，照搬 E:\rlqd 注入机制），持续新增小工具
 - **开源协议**：GPL-3.0（2026-09-02 由 Apache-2.0 变更；衍生作品必须同协议开源，闭源商用不被允许）
-- **当前版本**：0.5.0。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
+- **当前版本**：0.5.1。版本号在**三处**需同步改：`CMakeLists.txt` 的 `project(... VERSION ...)`、`packaging/PopTools.iss` 的 `#define MyAppVersion`、`src/app/MainWindow.cpp` 托盘「关于」对话框的硬编码文案（v0.2.0 起记入第三处）
 - **技术栈**：
   - C++17，代码统一在 `poptools` 命名空间
   - Qt 6.8.3 LTS（LGPL 动态链接，本地免安装套件 `tools/qt/6.8.3/msvc2022_64`，不依赖全局 Qt）
@@ -58,13 +59,13 @@
   - 安装依赖（新机器必做，需代理）：`python scripts/install_qt.py`、`python scripts/install_rapidocr.py`、`python scripts/install_zxing.py`（**代理端口实测已变：现监听 127.0.0.1:17890**（2026-11-16 实测，GitHub API 200；AGENTS.md 记的 7897 已失效，开机后先测端口再走代理））
   - 配置：`cmake -S . -B build -G "Visual Studio 18 2026" -A x64`（本机 VS 2026，见坑 P-013；换生成器前必须删除 build/）
   - 构建：`cmake --build build --config Release`（POST_BUILD 自动 windeployqt / 剔 D3D 三件 / 部署 VC 运行库 / 拷 paddleocr/。**构建前先结束 PopTools.exe 与 RapidOCR-json.exe 两个进程**，见坑 P-008）
-  - 测试：`ctest -C Release --test-dir build --output-on-failure`（95 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控镜像与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v2/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
+  - 测试：`ctest -C Release --test-dir build --output-on-failure`（99 用例：域逻辑 QtTest——标注画板/日历农历与布局与存储/监控镜像与状态机/上屏 diff/SSE 与 reasoning/权限与会话 v3/工具注册表/记忆/MCP 配置/悬浮球手势/渲染节流等，全清单见 tests/domain_tests.cpp 用例名；**跑前先查 GetAsyncKeyState 无 Ctrl/Alt 残留**，见 P-046）
   - 运行：`build/Release/PopTools.exe`
   - 性能基线：`python scripts/perf_baseline.py`（启动耗时+内存采样，追加 temp_scripts/out/perf_baseline.jsonl；发版前跑一次对照历史）
   - 打包：`"D:\Inno Setup 6\ISCC.exe" packaging\PopTools.iss`（ISCC 6.7.3；输出 `dist/PopTools-Setup-<版本>.exe`）
   - Python 环境：项目根 `.venv`（Python 3.12，uv 管理；本机 Git Bash 无全局 python/cmake/uv，需用绝对路径 `D:\CMake\bin`、`D:\uv` 或临时 PATH）
   - UI 实拍冒烟脚本：`temp_scripts/script_ui_review_20261101.py`（模拟 F1 + 拖选区 + ESC，存 out/*.png）
-- **当前状态**：**v0.5.0 已发布**（2026-11-18，GitHub Release id 448376550）；**T-066 已结算**（UIA 文本镜像替代字母键序流，真机验收达标，ctest 95 绿）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
+- **当前状态**：**v0.5.1 已发布**（2026-11-19，Release id 451052105，含探针验收期保留）；**T-071 夜间批次已落码待真机验收**（6 提交 5887ee9..78abd32，见当前任务）；无 CI；OCR 引擎缺失时不阻断构建（运行时提示不可用）
 
 ## 历史任务
 
@@ -93,6 +94,34 @@
 ## 当前任务
 
 > 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
+
+**T-071 夜间批次：全面 UI 收编 + 代码效率优化（6 提交 5887ee9..78abd32，待真机验收，2026-11-20 凌晨）**：
+- 需求单 requirements/20261120-ui-efficiency-nightshift.md（用户睡眠授权全权代决"自己完成"；
+  双子代理盘点证据存 temp_scripts/night_20261120/；各提交正文即技术细节档）
+- **5887ee9 P0 前置**：修复 T-070 提交态编译损坏（GoodyWindow.h signals: 段成员变量/
+  setBusy 新旧混行/setToolPhase+namespace 重复/缺声明）——4e153c6 起树无法编译（P-070）
+- **1bd70c9 行为修复**：ProcessRow 补写 goodySummary 属性（主题切换清空过程行摘要真 bug）；
+  日历编辑器删每键整窗 update()
+- **fe65610 ChatSession 四项**（v3 格式与外部行为不变）：投影增量化（旧每事件全量重投影
+  O(n²)）/ trim 批量定前缀+单次重投影 / 侧栏计数缓存 / 防抖落盘挪 IO 池（save 同步语义
+  保留）
+- **8fc5236 分散效率批**：壁纸 blurredWallpaper 只回缓存（T-068 漏网点同步重算 ~160ms）
+  +两面板 kickWallpaperRefresh（duty 启动即踢）/ Goody 侧栏 200ms 合帧 / reasoning 光标
+  增量 / SSE 读偏移 / Settings beginBatch 批量 sync / 键盘钩子 QMetaMethod 预解析 /
+  渲染器 QFontMetrics+删除线字体缓存
+- **538598c UI 收编批**（零视觉重设计）：散写橙三处→overlay::warmAccent()；文字基线
+  ascent 锚定（P-064 口径）；编辑器/ESC 胶囊接深套 token；FluentTheme.h 纪律注定案三类
+  豁免（GoodyTheme 表/内容惯例色/回退渐变）
+- **78abd32 日历悬停脏矩形**：renderFrame 增 commitDirty，悬停级改动免整屏发布（BoxPanel
+  先例，红线④收尾）；onLeave 补复位两链接悬停标记（原漏复位）
+- **质量线**：每提交独立构建 0 警告+ctest 99/99 绿
+- **晨验清单**：①Goody 对话/工具/审批/主题切换（过程行摘要不清空/侧栏计数正常）②duty
+  开启 ~0.2s 内出壁纸底、换壁纸 30s 内跟上③日历悬停不闪不残留（含重进同一链接）④设置
+  页拨开关即时生效仍正常⑤ESC 胶囊/调整覆盖层文字不漂
+- **不修项（含理由）**：日历/盒渲染器配色重收敛（视觉已定稿待验收，验收后立专项）；全局
+  弹窗 palette（与 P-023 钉扎交互）；截图画布拖选脏矩形（核心交互无法夜验）；工具结果
+  摘要 fromJson（低频）；气泡逐条 setStyleSheet（P-023 刻意为之）
+- 坑：P-070 ｜ P-071
 
 **T-070 Goody 按 deepseek-harness 形式重构（已提交 4e153c6，待真机验收，2026-11-19）**：
 - 需求单 requirements/20261119-goody-dsh-restyle.md（用户拍板"就按照 dsh 的来"全权委托；
@@ -201,32 +230,8 @@
 - 诚实边界：格内链接条带固定像素不随 fontScale（对齐 headerButtons 先例）；notepad 抢
   焦点会使编辑器失焦关闭（WindowDeactivate 既有链路，交互可接受）
 
-**T-060 更新自查在途（已提交未推送，2026-11-17）**：
-- 已落地：core/update/UpdateChecker（releases/latest 异步 + 三段数值比较，版本宏 POPTOOLS_VERSION 由 CMake project VERSION 注入）；启动延迟 5s 静默检查（仅新版提示：前往下载/跳过此版本/关闭，跳过记 update/ignoredVersion）；关于对话框加"检查更新"；版本 bump 0.5.0（CMake+iss，关于对话框随宏自动）
-- 已构建：dist/PopTools-Setup-0.5.0-20261117_1619.exe（53MB，旧包已清）
-- 待办：①开代理后 git push（2 提交：f6dde5a T-059 / 3a460a6 T-060）②打 tag v0.5.0 推送 ③GitHub Release 创建+上传安装包（gh CLI 缺失，需 token 走 curl API 或用户网页手动）
-- 提交：3a460a6 feat(update) T-060
-
-**T-059 待交互回归（未提交，2026-11-17）**——单屏化+花屏根修+拖动跟手根治后用户需验证：
-- ①**先重启 explorer**（explorer 驻留旧 DLL 代码，重编译不会自动生效；任务管理器→Windows 资源管理器→重新启动，PopTools watchdog 2s 自动重注入），日志 `%TEMP%\PopToolsCalendarHook.log` 的 mapped 行带 `(build 20261117b)` 且 dib 行带 `(build 20261117c dblbuf)` 才是新代码；②副屏无日历无花屏（用户实拍已确认 ✅）；③日历头部「调整」→ 拖动：**日历预览画在覆盖层虚线框内跟手移动（桌面层拖动期间隐藏，✓/× 确认/取消后回到桌面新位置）**、跨过屏幕边界整体跳屏；④悬停头部按钮不闪（T-058 修复未回归）；⑤双击单元格编辑器弹在日历所在屏；⑥试验遗留：settings.json 在副屏 (2450,100)，可「调整」拖回主屏
-- 异常排查同 T-054 清单（注入日志 + crash/）；细节见 [handover/t059_calendar_single_screen.md](handover/t059_calendar_single_screen.md)
-
-**T-064 启动更新自查（已提交未推送，2026-11-18）**：
-- 已落地：core/update/UpdateChecker（releases/latest 异步 10s 超时 + 三段数值比较，版本宏
-  POPTOOLS_VERSION 由 CMake project VERSION 注入 core/app 双目标）；启动延迟 5s 静默检查
-  （仅新版提示：前往下载/跳过此版本/关闭；跳过记 update/ignoredVersion；失败不打扰）；关于
-  对话框加"检查更新"手动入口（标准按钮 setButtonText 判 exec 返回值）；版本 bump 0.4.0→0.5.0
-  （CMake+iss，关于对话框文本随宏自动）
-- 已发布：Release v0.5.0（id 448376550，git 凭据走 API 创建+上传），资产
-  PopTools-Setup-0.5.0-20261117_1708.exe（56MB，合并后代码重打包，含 T-063/T-064 全部内容；
-  旧包已删）
-
-**待用户真机验收：T-059/T-060/T-061 收纳盒（已提交 1a9c548）＋ T-062 全仓库代码卫生夜间批次（9 提交 e9a1232..8b41161，2026-11-17 凌晨自动完成）**：
-- 收纳盒（T-059/T-060/T-061）：core/box 四件 + ui/box 四件 + BoxModule；DesktopSurfaceHost 通用面板宿主（SHM v3 六槽位）；标签间距根修（QFontMetrics 定位 + kCellH 112）+ 悬停按语义目标重绘 + 脏矩形提交。需求单 requirements/20261116-desktop-box.md
-- T-062 夜间批次（用户睡眠授权：先提交→逐模块卫生→每模块一提交→只代码审查不做视觉验收）：9 模块 ×（R1 审查→F 修改→R2 复审→[F2→R3] 直到 PASS）串行子代理流水线；审查报告全档 temp_scripts/hygiene/*.md；每模块构建+ctest 全绿后才提交
-- **真机验收重点**（T-062 行为面修复，全带 `T-062 修复:` 标注）：①设置对话框二次打开不再崩溃（B-1 连接时序）②截图"过小选区"不再吞掉已画标注、武装态右键退出恢复生效、取色悬停残影消失③划词翻译按住 Alt/Shift 也能成功复制④按住 F3 一秒只出一张贴图⑤Goody 白名单词边界（gotrojan 类命令会被拦）⑥退出 PopTools 后桌面注入正确解除（不再残留）
-- **收纳盒验收清单**：①标签与图标有清晰间距；②滑过格子高亮逐格即时跟随、离开面板即消；③单击固定选中、双击启动、翻页/圆点/管理对话框正常；④盒子加高后自动行数/翻页/调整拖拽正常；⑤日历悬停按钮/翻页无回归
-- 异常排查：`%TEMP%\PopToolsCalendarHook.log`（注入侧）+ build/Release/crash/（崩溃自诊）
+> 更早当前任务验收块（T-059/T-060/T-064/T-062+收纳盒，已被 v0.5.0/v0.5.1 发版覆盖）→
+> [handover/archive/current-superseded-1117-1118.md](handover/archive/current-superseded-1117-1118.md)
 
 **已定待开工：T-050 阶段三（管家总览 + 全历史检索）**——需求单 requirements/20261111-goody-ui.md 附录 A（体量 M）：
 - HistorySearchTool：monitor 五流 + goody/daily + 聊天史 + memory 索引统一检索；域侧已就绪
@@ -261,6 +266,25 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-070 提交时树无法编译，交接"实测全绿"与提交态不符（P-038 重演）
+- **关联任务**：T-070/T-071 ｜ 记录智能体：Agent_20261120005535
+- **现象**：拉取 4e153c6 后基线构建即炸——GoodyWindow.h 第二处 `signals:` 段放了成员
+  变量、cpp setBusy 签名与函数体间混入旧实现行且体内新旧两版并存、setToolPhase 函数头
+  整行重复、文件尾 namespace 收尾重复、maxBubblePaneWidth 有定义无声明
+- **原因**：上一会话在最终编辑后未重新构建即提交；交接"ctest 99 绿"对应的是提交前
+  某状态（扫描确认损坏范围封闭在 GoodyWindow 两文件内）
+- **解决**：T-071 夜战前置修复（5887ee9）。教训重申 P-038：**提交前必须当轮完整构建
+  +ctest 复验；引用移交文档"全绿"结论前先复跑**
+
+### P-071 重写区间删除逻辑把"删中段"写成"留尾段"，头部 system 连带丢失
+- **关联任务**：T-071 ｜ 记录智能体：Agent_20261120005535
+- **现象**：ChatSession trim 批量重写后 3 个会话用例红——system 消息整体消失、截断
+  多删一条
+- **原因**：新实现只保留 [cutEnd, end) 尾段；原实现语义是删 [blockStart, blockEnd)
+  中段、头部 system 前缀原样保留——"删哪段/留哪段"没逐行对齐
+- **解决**：保留段补回首块起点之前全部事件（78abd32 前的 fe65610 修正轮）。教训：
+  **重写区间增删逻辑必须逐行对齐原实现的保留语义；既有测试就是护栏，改完必跑**
 
 ### P-069 删公共 API 前的残留审计漏 tests/：编译在最后一环才炸
 - **关联任务**：T-069 ｜ 记录智能体：Agent_20261119172053
@@ -366,97 +390,7 @@
 - **原因**：InvalidateRect(NULL) 失效整桌面——壁纸重画+全屏混合，违反红线 4（脏矩形）
 - **解决**：失效范围收窄到 SHM 头日历矩形 ±24px（覆盖投影 ±18 与发光外扩 ±11），头部缺失兜底全失效。教训：**跨进程位图上屏的失效通知必须带脏矩形，勿整窗**
 
-### P-031 桌面层嵌窗两条弯路：SetParent 不被合成与点击激活横跳
-- **关联任务**：T-043（已清档）｜ 记录智能体：Agent_20261108204000
-- **现象**：实现「贴桌面小组件」时——①把窗口 SetParent 进 Progman/WorkerW（Wallpaper Engine / Rainmeter 经典技法）：窗口存在、可见标志为真、鼠标交互正常（右键能弹菜单），但**内容永远不被 DWM 合成**（完全透明不可见）；②改用顶层窗口 Z 序贴底后，又出现「盖住应用 ↔ 被应用盖住」每秒横跳
-- **原因**：
-  1. **本机（Win11 24H2+ 26300 + Wallpaper Engine）外来 GDI 子窗口在桌面层不被合成**。逐层排查：Progman 直接子级、WorkerW 子级、不透明化（摘 WA_TranslucentBackground）、摘 WS_EX_LAYERED、清 QWindow alpha surface format——全部交互正常但渲染失败。对照实验：WE 自己的壁纸窗口走 `WS_EX_NOREDIRECTIONBITMAP + DirectComposition`（独立合成路径，能显示），普通/分层 GDI 子窗口的重定向表面在该层均不出图。且 WE 会周期性重建/占用壁纸层窗口（网络资料证实），SetParent 路线与其结构性冲突。另注意：`setWindowFlags(原值)` 是空操作（flags 相同不重建窗口），强制重建需 `QWindow::destroy()` 后 show
-  2. **Windows 默认点击激活**：鼠标点任何背景窗口都会把它提到前面（WM_MOUSEACTIVATE → MA_ACTIVATE），贴底窗口每被点一次就浮到应用之上，1s 守护又压回去——横跳
-- **解决**：放弃 SetParent，改**顶层窗口 + Z 序贴底**（`glueToDesktop`：Z 序紧贴 Progman 正上方，一切普通窗口天然在其上；1s 守护归位、就位时零开销）+ 固定模式 `WM_MOUSEACTIVATE → MA_NOACTIVATE`（点击不抬窗）+ 打字场景显式 activateWindow 临时唤起。桌面层探针脚本（temp_scripts/ 下窗口层次/贴底检查类）在本机排查中价值极高，建议保留复用
-- **教训**：桌面层嵌窗在 24H2 + 壁纸引擎环境下不可依赖 SetParent；「贴桌面」用顶层 + Z 序锚定 Progman 是稳定解。用户 2026-11-08 明确规矩：**AI 不做自主验收**——本坑前两轮修复都因 AI 自行截图判断"应该好了"而多绕一圈，最终靠用户目测一次定位
-
-### P-029 匿名命名空间自由函数裸调 connect 编译失败
-- **关联任务**：T-042（已清档）｜ 记录智能体：Agent_20261108204000
-- **现象**：cpp 匿名命名空间里的自由函数（构造临时 QDialog 的 pickDate 助手）内写 `connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept)`，MSVC 报 C2660 "connect: 函数不接受 4 个参数"
-- **原因**：非限定名 `connect` 在 QObject 派生类的**成员函数**里能命中基类静态成员，但在**自由函数**里只能靠 ADL——而 `QObject::connect` 是类静态成员而非自由函数，ADL 查不到，编译器只能找到别的重载集报参数不匹配。同类隐患：file-local 嵌套类（无 Q_OBJECT）里不能声明 `signals:`（moc 不处理，connect 运行期失败），回调要用 `std::function` 成员
-- **解决**：自由函数中显式 `QObject::connect(...)`；嵌套 helper 类的对外通知一律 std::function 回调
-
-### P-025 SmartRectDetector Worker 带 parent 致 moveToThread 静默失败
-- **关联任务**：T-036
-- **现象**：智能框选在浏览器/Electron 大页面上悬停高亮卡顿（预算 800ms 的 UIA 下行直接阻塞覆盖层）；代码里有完整的工作线程设计却形同虚设，且引出连环 COM 引用错误长期潜伏（元素双重 Release、批量下行漏 Release、cleanup 在 CoUninitialize 后释放 marshaled 代理属 UB）
-- **原因**：`m_worker(new Worker(this))` 带 parent——Qt 规定 moveToThread 对有 parent 的对象**静默失败**（仅 qWarning），queued drain 全部落回 GUI 线程执行；线程化从未发生，也没有任何断言能暴露
-- **解决**：Worker 改无 parent 构造，析构 quit/wait 后显式 delete；四处 COM 引用契约修复。教训：**moveToThread 失败无断言**，线程化代码要验证"确实在别的线程跑"（如 QThread::currentThreadId 打点），不能只看代码结构
-
-### P-021 QToolButton 高分屏图标裁剪：DPR 元数据被绘制路径忽略
-- **关联任务**：T-030
-- **现象**：屏幕缩放≥150% 的机器上工具栏图标只剩左上角（横竖笔画）；100%/125% 正常。探针（`QT_SCALE_FACTOR` + 参数化 dpr 对比）定位：经 `setDevicePixelRatio` 打标的位图加入 QIcon 后，QToolButton 绘制路径按**物理像素**尺寸绘制（元数据被忽略），物理尺寸（size×dpr）超过按钮即裁剪；同一位图在 dpr=1.0/1.25 下因物理尺寸恰小于按钮而"侥幸正常"，极具迷惑性。
-- **解决**：图标位图改 4x 超采样、**不设 DPR 元数据**，交给 QIcon 缩放到 iconSize（探针对比过的显式 iconSize、iconSize=物理尺寸等方案均无效，仅此方案稳妥）。教训：Qt 6.8.3 的 QToolButton 上，带 DPR 元数据的 QIcon 位图不可信；自绘图标一律超采样无元数据。
-
-### P-022 QSS 类型选择器对命名空间类静默失效
-- **关联任务**：T-030（第三次踩，首次见 [T-017] ToolBar.cpp 内注释）
-- **现象**：`TranslateCard {...}` / `OcrPanel {...}` 样式从未生效，卡片底色/边框随系统调色板回落——暗色系统碰巧看不出问题，浅色系统才暴露。
-- **原因**：项目所有类在 `poptools` 命名空间，`QMetaObject::className()` 返回 "poptools::TranslateCard"，QSS 类型选择器 `TranslateCard` 按类名匹配失败且**无任何警告**。
-- **解决**：setStyleSheet 前给控件 setObjectName，样式表用 ID 选择器（`#translateCard {...}`）。教训：本项目凡对自定义类写 QSS，一律 ID 选择器；类型选择器只用于 QLabel/QPushButton 等非命名空间 Qt 类。
-
-### P-023 浮窗关键颜色必须内联样式+调色板双通道，父级 QSS 继承不可信
-- **关联任务**：T-030
-- **现象**：划词卡片源文本正文颜色由卡片级样式表 `QTextEdit { color: ... }` 定义，开发机（Win11）渲染正确，故障机（Win10）渲染为灰；而同卡片内**控件内联样式**的错误文字（红）始终渲染正确。背景色等部分属性走父级样式表又能生效——失效是选择性的、按机器差异表现，极难凭本机现象推断。
-- **解决**：关键颜色一律双通道——① 直接写在控件自身内联样式（`edit->setStyleSheet(主题规则)`），② 调色板 Text/Base 角色 Active/Inactive/Disabled 三组全钉（卡片是 `WA_ShowWithoutActivating` 不激活窗口，部分渲染路径走 Inactive 组）；③ 应用层强制 Fusion 风格消除 Win10/Win11 原生风格差异。父级 QSS 仅作布局类声明。
-- **教训**：跨机器交付的 Qt 界面，"本机渲染正确"不是充分证据；颜色这类关键视觉属性要在**最贴近控件的层**声明。
-
-### P-008 运行中的实例会锁住 build/Release 产物导致构建失败
-- **关联任务**：T-013
-- **现象**：重新构建时报错失败——不只是交接中已知的 PaddleOCR-json.exe 残留占锁，Snipaste.exe 本体（如上次调试/冒烟测试后未退出）也会锁住 `build/Release/Snipaste.exe` 及其加载的 Qt/OpenCV DLL，导致链接与 POST_BUILD 部署步骤失败
-- **原因**：Windows 文件锁：运行中的进程以独占方式映射其 exe 与已加载 DLL
-- **解决**：构建前 `tasklist | grep -i "Snipaste\|PaddleOCR"` 检查，有则 `taskkill /F` 全部结束再构建（本任务实操验证：结束 PID 后构建一次通过）
-
-### P-032 AUTOMOC 对 .cpp 内 QObject 的 include 约定
-- **关联任务**：T-045
-- **记录智能体**：Agent_20261109024000
-- **现象**：`ActivityStore.cpp`（worker 类定义在源文件内）构建报 `contains a "Q_OBJECT" macro, but does not include "ActivityStore.moc"`，AutoMoc 直接失败。
-- **原因**：较新 CMake 的 AUTOMOC 对**源文件内**定义的 QObject 生成 `<basename>.moc`，约定 include 的是 `.moc` 后缀；旧项目/旧文档写的 `#include "moc_<basename>.cpp"` 已不被接受。
-- **解决**：源文件末尾 `#include "ActivityStore.moc"`（与 `domain_tests.cpp` 末尾的 `domain_tests.moc` 同理）。
-
-### P-033 QThread quit-before-exec 竞态吞掉排队任务
-- **关联任务**：T-045
-- **记录智能体**：Agent_20261109024000
-- **现象**：`ActivityStore` 启动时以 QueuedConnection 排入 worker 的保留期清理，在测试中 `stop()` 紧随 `start()` 时被整体跳过，过期日目录未删。
-- **原因**：worker 线程尚未进入 `exec()` 时调用 `quit()`，事件循环直接退出，**先排队的任务也不会执行**。
-- **解决**：启动路径上"必须发生"的任务改 `BlockingQueuedConnection`（启动清理量极小，毫秒级阻塞可接受）；纯尽力而为的任务才允许 Queued。
-
-### P-034 LL 键盘钩子拿不到输入法上屏中文
-- **关联任务**：T-045
-- **记录智能体**：Agent_20261109024000
-- **现象**：WH_KEYBOARD_LL 只能看到原始键序（拼音字母、候选数字键），任何 IME 上屏后的中文都不存在于键盘事件流。
-- **原因**：IME 组合与上屏发生在目标进程内部（composition 由 IMM 注入目标窗口），系统级钩子无旁路；跨线程 `ImmGetContext` 亦不可用。
-- **解决**（用户拍板方案）：启发式检测疑似上屏（CJK 布局 + 近 3s 有字母 + 空格/数字/回车确认键，`ImeCommitDetector`）→ 防抖限流截前台窗口 → RapidOCR → 与同窗上次文本增量 diff → 只记新增文字（`SnapshotOcrPipeline`）；键入流里的拼音字母原样保留作证据，由日总结提示词过滤噪声。密码框聚焦时整链禁拍。
-
-### P-035 F1 截图覆盖层糊屏（150% DPI 双重重采样）
-- **关联任务**：T-049/R6-B1 ｜ 记录智能体：Agent_20261111234632
-- **现象**：150% DPI 下按 F1，冻结屏幕背景显示模糊；截图输出图片不糊
-- **原因**：`CaptureWindow.cpp:436-439` 物理分辨率截图被 scaled 到逻辑尺寸缓存，绘制时又被 1.5x DPR 放大回屏幕——双重重采样
-- **解决**：修法已给（QPixmap 带 DPR 元数据 1:1 直绘，见细档 t049_r6_plan.md §1），待 R6 实施并用户目测。教训：**上屏路径禁止 scaled() 二次加工，物理像素图一律带 DPR 元数据直绘**（P-021 是图标类镜像教训：图标位图恰恰不能带 DPR 元数据）
-- **结算**：✅ 已随 R6-B1 落地（2026-11-12 夜，另含 R6-B1a 混合 DPR 多屏回退），150% 一致性待用户目测
-
-### P-038 移交文档"已实测全绿"记载与实测不符
-- **关联任务**：T-049 ｜ 记录智能体：Agent_20261112003400
-- **现象**：t049_r6_plan.md 记"R5 改动 ctest 全绿可直接提交"；夜间实测 chat_session_roundtrip 必红（R5-C2 过滤器把测试数据判孤儿 tool 丢弃）
-- **原因**：上一会话的实测先于 C2 落码或未看用例级结果；文档结论未经当轮复验
-- **解决**：独立构建+ctest 复验后再提交。教训：引用移交文档的"已验证"结论前先复跑（分钟级成本）
-
-### P-039 QSettings IniFormat 未引号逗号值裂变 QStringList
-- **关联任务**：T-050 ｜ 记录智能体：Agent_20261112003400
-- **现象**：手改 ini 写 assistant/ballPos=777,777（无引号）→ 读回成双元素 QStringList，toString() 得空串，位置回默认
-- **原因**：IniFormat 对含逗号的未引号标量按列表解析
-- **解决**：getter 双形态兼容（双元素列表 join 还原）。教训：ini 键值含逗号/特殊字符时写入端带引号、读取端双形态容错
-
-### P-046 键盘合成 ctest 对"物理修饰键卡下"敏感，SendInput 泄漏会假红
-- **关联任务**：原夜间注入实验（任务已清档）｜ 记录智能体：Agent_20261114020000
-- **现象**：夜间脚本注入键序泄漏 Ctrl/Alt 卡下（GetAsyncKeyState=0x8000），3 个 keyboard_composer 用例全红（键被"组合键不记录"守卫吞掉）；释放后即全绿
-- **原因**：KeyboardTextComposer 构造时按系统实时状态初始化修饰键（设计如此）；测试进程忠实读到卡下的物理键
-- **解决**：跑测试前先补发修饰键 KEYUP 或重启输入会话；教训：**注入键序后必查 GetAsyncKeyState 无残留**，否则 ctest 红不一定是代码红
-
-> 冷坑索引：P-001~P-020、P-024、P-026~P-027 → [handover/archive/pits-001-028.md](handover/archive/pits-001-028.md)
+> 冷坑索引：P-001~P-020、P-024、P-026~P-027 → [handover/archive/pits-001-028.md](handover/archive/pits-001-028.md) ｜ P-008、P-021~P-023、P-025、P-029、P-031~P-035、P-038、P-039、P-046 → [handover/archive/pits-008-046.md](handover/archive/pits-008-046.md)
 
 ## 修改台账
 
@@ -466,6 +400,8 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-20 02:45 | Agent_20261120005535 | 头部 / 当前任务 / 踩坑记录 / 项目快照 / ui+goody+core+settings+monitor 源码 / 需求单 / 归档 | T-071 夜战收口：UI 收编批+日历悬停脏矩形（538598c/78abd32）；新增 P-070/P-071；陈旧验收块无损搬移 archive/current-superseded-1117-1118.md；快照 0.5.1/99 用例 | 6 提交全绿待晨验；推送走代理尝试 |
+| 2026-11-20 01:05 | Agent_20261120005535 | 头部 / 当前任务 / 踩坑记录 / goody+core 源码 / 测试 / 需求单 | T-071 夜战立项+P0 修复+批次 A/ChatSession 四项/分散效率批（5887ee9/1bd70c9/fe65610/8fc5236）；新增 P-070 | 用户睡眠授权全权代决；双子代理盘点取证；每提交独立构建+ctest 99 绿 |
 | 2026-11-16 10:45 | Agent_20261116003308 | 踩坑记录 / 细档 / hook 源码 / CMake | 用户首次拉起：注入静默失败（P-056）——钩子 DLL 改静态 CRT + SendMessage 强触发；explorer 侧日志确认注入成功（双子类化 + DIB 1920×1080） | 日历首次真实上屏，用户目测进行中 |
 | 2026-11-16 16:59 | Agent_20261116165900 | 头部 / 历史任务 / 踩坑记录 / 项目快照 / 修改台账 | 新增 T-055、P-057；快照 scripts 行补全脚本清单并把代理端口对齐 17890 | 净克隆环境重建（tools 三件套 + .venv + build + ctest 96 绿）；脚本双修复未提交待用户 |
 | 2026-11-16 17:50 | Agent_20261116165900 | 头部 / 历史任务 / 当前任务 / 踩坑记录 / 修改台账 | 新增 T-056、P-058、P-059；当前任务补 T-056 回归重点 | 日历首轮目测 4 问题修复（表头对齐/今日单框/删账户/弹窗卡死根因+副屏），ctest 96 绿，未提交待用户 |
