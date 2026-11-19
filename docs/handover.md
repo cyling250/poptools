@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-19 16:35（T-068 结算：三类主线程停摆根治+探针验证归零，发版 v0.5.1（Release 451052105），探针随验收期保留；细档 t068_mouse_stall.md） · Agent_20261119101500
 > 最后更新：2026-11-18 16:00（T-067 落码完成：Goody 起居注式日摘要（静默自主）+ 月度滚动月报（开机重写【月报更新】）+ 桌面日历摘要链接展示（双击面板后可点/notepad），textlog 接入日总结（T-066b 收口），ctest 97 绿，未提交待真机验收） · Agent_20261118130500
 > 最后更新：2026-11-18 00:30（合并并行会话：本地「桌面日历单屏化+多屏花屏根修+拖动体验闭环」重编号 T-063（原本地草稿编号 T-059，与远端收纳盒 T-059 冲突）、「启动更新自查」T-064（原 T-060）、P-066（原 P-063）；特性已移植到远端槽位协议 CLK4 架构（虚拟桌面并集画布+双缓冲帧翻转+覆盖层预览拖动）） · Agent_20261117164000
 > 最后更新：2026-11-17 16:45（T-059：桌面日历单屏化+多屏花屏/复制根修——协议 v2 增所在屏矩形、DLL 擦除两遍法限定日历屏、宿主坐标体系升级虚拟桌面、跨屏拖动；用户实拍副屏初验通过） · Agent_20261117164000
@@ -70,6 +71,13 @@
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261117004800
 
+### T-068 鼠标拖动「卡顿→瞬移」取证+根治+发版 v0.5.1
+- **执行智能体**：Agent_20261119101500
+- **结果**：✅ 探针实锤三类主线程停摆（30s 壁纸重算 ~160-170ms 主犯/IME 截屏/开机月报
+  拼接 380ms），三处全挪离主线程+签名免重算，验证 30s 停摆归零；发版 v0.5.1
+  （Release id 451052105，资产 56MB）；提交 9ffa3b4(fix)+2cb237b(bump)
+- **相关坑**：P-068 ｜ 细档：[handover/t068_mouse_stall.md](handover/t068_mouse_stall.md)
+
 ### T-066 UIA 文本镜像输入监听（字母键序流完全替换）
 - **执行智能体**：Agent_20261118130500
 - **结果**：✅ TextMirrorMonitor 上线——UIA 焦点控件影子差分（输入/退格/替换以最终文本
@@ -138,48 +146,13 @@
 - **结果**：✅ ①UIA-first 取文：UiaTextReader（STA worker，TextPattern→ValuePattern，IsPassword 精确判密，进程号对号防串窗，elPid 救回浏览器场景）+ uia/ocr 双基线隔离 + 滑动窗口 diff，失败回落截图+RapidOCR（ocrtext.jsonl 增 source 字段）；②clipboard.jsonl 新流（300ms 防抖、OwnWriteGuard 9 写入点自写排除、高熵打码、前 64KB 哈希去重 repeat 冲账、图片仅元数据）；③OCR rec 切 v4（A/B 实测小字 CER 5.17%→2.59%、时延 +11%、零回归——**T-041 悬置的 ch v4 去留就此结算**；v4 det 劣化与 2x 上采样均不采用）。密码三流全静默（500ms TTL 共享缓存）。ctest 77→86 绿；真机走查留用户
 - **相关坑**：无新增（复审 P2×2+P3×8 当轮修毕）｜ 细档：[handover/t047_048_050_night_batch.md](handover/t047_048_050_night_batch.md) §2
 
-### T-046 代码审查修复四连 R1~R4（T-045 代码全量复审，共修复 63 项）
-- **执行智能体**：未登记（2026-11-11 凌晨会话，成果仅存于 git；本条目为交接文档会话依提交痕迹回填）
-- **结果**：✅ 四轮「审查→修复→复审」闭环共修复 63 项（R1 全部 P0/P1×14 → R2 复审新发现 P1×2+P2×14+P3×6 → R3 旧代码区 P1×1+P2×5+P3×16 → R4 复审 P0×1+P2×2+P3×2），波及 monitor/assistant/goody/ocr/pin/annotation/settings/memory；提交 5b1de29 → 42d5c58 → a8b84b2 → 480877d
-- **相关坑**：无新增 ｜ 细档：缺（细节以四个提交的 diff 为准）；R5 轮已于 2026-11-12 夜结算（7 项+复审修正，d1eeaf2，ctest 60 绿；B3/B4/C4 三项 P3 有意跳过——见 [handover/t047_048_050_night_batch.md](handover/t047_048_050_night_batch.md) §0）
-
-### T-045 活动监控 + Goody 大模型管家（监控层 / LLM 全栈 / 每日记录 / 记忆 / MCP）
-- **完成日期**：2026-11-09（用户夜间授权全自动开发， Morning 睡醒验收）
-- **执行智能体**：Agent_20261109024000
-- **背景**：用户三大需求——①全局键盘监听原样落盘（知道"写了什么"，便于 AI 做日志）；②全局鼠标监听；③内置大模型管家 **goody**：多轮对话 / 完全掌控本软件 / 完全掌控计算机 / 每日本日工作记录 / 瞬时+长期记忆 / 权限管理与 MCP（"把 ZCode 核心搬进来"）。关键对齐决策（用户拍板）：密码框自动打码；中文上屏用内置 OCR 补齐（LL 钩子拿不到 IME 上屏，见 P-034）；鼠标**不逐条落盘**、只做输入状态机；权限三模式（ask/smart/auto，类 ZCode）；调试模型 `deepseek-v4-flash`；**监控开启期钩子常驻（红线 2 豁免，用户批准）**；API Key 只进本机 PopTools.ini 不入仓库。
-- **结果**（全部落地，ctest 17→40 用例全绿；渲染/交互按协作纪律留用户目测验收）：
-  1. **监控层** `src/core/monitor/`（8 对文件）：`GlobalKeyboardHook`（WH_KEYBOARD_LL，回调只入队）→ `KeyboardTextComposer`（修饰键状态机 + ToUnicodeEx 按前台布局翻译、密码框 ● 占位、空闲 3s/满 512 字/切窗分批）+ `InputActivityMonitor`（切窗/空闲超时/同窗 60s 切片三段闭合的活跃度时间线）+ `ForegroundTracker`（EVENT_SYSTEM_FOREGROUND）+ `ActivityStore`（worker QThread JSONL 追加、按日轮转、保留期清理、meta.json 补账索引）。落盘 `%LOCALAPPDATA%\PopTools\monitor\<日期>\{timeline,keys,ocrtext}.jsonl`。
-  2. **中文上屏 OCR 快照**：`ImeCommitDetector`（CJK 布局门 + 字母后空格/数字/回车启发）→ `SnapshotOcrPipeline`（防抖 800ms + 限流 + 密码框禁拍 → 截前台窗口 → RapidOCR → 同窗文本增量 diff → 只记新增、图即弃）。增量 diff 纯函数 `diffAdded` 单测覆盖。
-  3. **goody 全栈** `src/core/assistant/`（13 对文件）+ `src/ui/goody/GoodyWindow` + `GoodyModule`：`LlmClient`（DeepSeek OpenAI 兼容 SSE 流式 + `LlmStreamParser` 纯逻辑解析、tool_calls 按 index 聚合、中止/错误统一 finished）→ 工具回合循环（GoodyModule，单消息上限 8 轮防失控）；`PermissionManager`（ask/smart/auto + "总是允许此类"持久化 + 审计 `goody/audit.jsonl`）；`ChatSession`（QSaveFile 持久化 + system 每轮重建 + 40 条截断）；人格提示词（专业温暖小管家，只做电脑整理/电脑问题/记录，越界温和拒绝）+ 每轮注入时间/未结任务/记忆索引。
-  4. **工具系统**：`ToolRegistry`（OpenAI function-calling schema；`AppServices.toolRegistry` 共享槽，模块 init 里贡献）——内置 `time.now` / `fs.list/read/write/move/delete`（删除走回收站 SHFileOperation）/ `shell.run`（PowerShell QProcess 异步 + 超时看门狗 + UTF-8 输出）/ `monitor.query`（线程池读日志）/ `app.generate_daily_record`；模块贡献 `app.capture`（Capture）、`app.pin_clipboard`（Pin）。
-  5. **每日工作记录**：`DailyAggregator`（JSONL → 合并时间线 + 分窗摘录，12K 字符预算）+ `Scheduler`（60s 心跳、每日到点一次）+ `DailyRecordJob`（启动 5s 补账历史日 + 每日 22:00 含今天 + 工具手动；四节式 MD 写 `goody/daily/<date>.md` 并置 meta `summarized:true`）。
-  6. **记忆系统**：长期记忆引用层叠 `MemoryStore`（`memory/longterm/index.json` 只存引用+标签+命中统计，正文 `entries/*.md` 按需读；L1 事实/L2 项目/L3 外部引用不复制内容；检索即 touch）；瞬时工作记忆 `WorkingMemory`（`task.start` 标题相近即**缓存命中**续用；`task.complete` 归档 `memory/archive/` 并释放上下文；工作集每轮注入系统提示词）。
-  7. **MCP**：`McpStdioClient`（JSON-RPC 2.0 over stdio、initialize 握手、请求 id 匹配 + 30s 看门狗）桥接 `goody/mcp.json` → 工具名 `mcp__<server>__<tool>`，外部能力一律走权限确认。无配置文件零开销。
-  8. 设置两新页「活动监控」「Goody 管家」；托盘一键启停（活动监控）；`Ctrl+Alt+G` 呼出聊天窗（可配）。
-- **关键改动**：`src/core/monitor/*`（8 对）、`src/core/assistant/*`（13 对）、`src/ui/goody/GoodyWindow.{h,cpp}`、`src/app/modules/{ActivityMonitorModule,GoodyModule}.{h,cpp}`、既有模块的工具贡献段、`Settings.{h,cpp}`（`monitor/*` 与 `assistant/*` 键）、`SettingsDialog.{h,cpp}`、`AppServices.h`（toolRegistry 槽）、`MainWindow.{h,cpp}`（ToolRegistry 装配 + 两模块注册）、CMake ×3、`tests/domain_tests.cpp`（+23 用例）、`README.md`
-- **相关坑**：[P-032](#p-032-automoc-对-cpp-内-qobject-的-include-约定)、[P-033](#p-033-qthread-quit-before-exec-竞态吞掉排队任务)、[P-034](#p-034-ll-键盘钩子拿不到输入法上屏中文)
-- **待用户**：真机验收——①设置开监控 → 打字/切窗/中文输入 → 查 monitor/<日期>/ JSONL 与密码打码；②填 DeepSeek Key → Ctrl+Alt+G 对话 + 工具确认卡片链路；③次日看 `goody/daily/` 自动生成；④可选自编 `goody/mcp.json` 验证 MCP 桥接。API Key（用户提供的测试 key）已写入本机 `build/Release/PopTools.ini`，不入仓库。
-
-### T-041 OCR 多语言裁剪 + v0.4.0 版本发布
-- **完成日期**：2026-11-02
-- **执行智能体**：Agent_20261102000004
-- **背景**：T-040 遗留三项决策，用户一次拍板：①裁剪 4 套多语言 rec 模型；②立即走 0.4.0 发版（T-034~T-040 全部改动随版发出）；③UI 现代化第二批批准（后置，先出范围提案）。用户明确**跳过真机回归**，以自动化基线代替冒烟。
-- **前提核查**：RapidOcrService 启动参数固定简中 v3 配置（`src/core/ocr/RapidOcrService.cpp:147-150`），cht/japan/korean/cyrillic 四套 rec 从未被引擎加载，裁剪零功能损失；核查中发现 **ch v4 det/rec 模型对（约 15.5MB）同样未被引用**，未裁（待用户拍板）。
-- **结果**：
-  1. `scripts/install_rapidocr.py` 新增幂等裁剪步骤（TRIM_REC_MODELS 表，对已有安装同样生效）；`tools/rapidocr` 92 → 53MB。
-  2. 全量重建后部署目录 121 → 83MB；**安装包 80.8 → 46.9MB（`PopTools-Setup-0.4.0-20261101_2359.exe`，49,158,586 字节，-42%）**。
-  3. 版本三处同步 0.4.0（CMakeLists / PopTools.iss / 关于对话框；.iss 内两处 PaddleOCR 旧注释顺带更名 RapidOCR）；exe 二进制核验含 v0.4.0 无 0.3.2 残留。
-  4. ctest 1/1 通过；基线：启动 72ms / 主进程 35.4MB / OCR 子进程懒启动 0MB（性能红线守住）。
-  5. dist 删 0.3.2 包仅留最新；GitHub Release 直发（安装包资产）。
-- **提交**：`a1236fc`（perf 裁剪）、docs 与版本翻转提交见 git log（tag `v0.4.0`）
-- **相关坑**：①本会话 Git Bash PATH 无 cmake，实测改用 `D:\CMake\bin` 绝对路径（本机环境技能待更新，非项目问题）；②temp_scripts/gh-cli 在机器搬迁（F:\→E:\）中丢失、gh 登录态随之失效——已重装 gh 2.103.3 便携版至原路径，认证用 `git credential fill` 取 github.com 令牌注入 `GH_TOKEN`（T-033 的「认证走凭据管理器」记载已过时，此为当前有效做法）
-- **待用户**：①ch v4 模型对去留（裁掉安装包约再省 14MB → ~33MB）；②UI 第二批范围提案（待下一会话产出）；③T-034~T-040 交互项未真机回归（用户明示跳过），日常使用发现问题按普通缺陷报。
-
-> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md)
+> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md)
 
 ## 当前任务
 
-**T-067 Goody 起居注 + 日历摘要展示（已落码未提交待真机验收，2026-11-18）**：
+> 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
+
+**T-067 Goody 起居注 + 日历摘要展示（已提交 d3c926d，待真机验收，2026-11-18）**：
 - 需求单 requirements/20261118-goody-calendar-summary.md（用户四拍板：起居注静默自主、
   日链接双击开面板后才可点、月报开机滚动重算【月报更新】往月冻结仅对话触发、notepad）
   范围界定：起居注只是 Goody 一项职责，其对话/工具/记忆/权限/MCP 角色不变
@@ -262,6 +235,12 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-068 低级钩子装在主线程：任何主线程停摆都以全系统鼠标瞬移呈现
+- **关联任务**：T-068 ｜ 记录智能体：Agent_20261119101500
+- **现象**：拖动中鼠标隔一会卡一下再瞬移；关 PopTools 无此现象。30s 壁纸重算 160ms 被感知为"隔一会卡一下"
+- **原因**：WH_MOUSE_LL/WH_KEYBOARD_LL 装在 Qt 主线程，RIT 派发钩子要等主线程泵出回调——主线程一停摆全系统输入排队；且等待期 RIT 连 Raw Input 一并停摆，监听侧"冻结期输入仍在到达"的预设判定全程失效（v2 已改"冻结前有输入"）
+- **解决**：三处主线程重活全挪离（壁纸异步+签名免重算/截屏 GDI 直出 QImage 进池/月报拼接进池）。教训：**钩子进程的停摆后果比"UI 卡"重一级——主线程任何 100ms 级重活都会顶成全系统输入停摆；新增定时器/重路径必须自查执行线程**
 
 ### P-067 监控落盘路径交接记载少一层：实为 PopTools\PopTools 双层嵌套
 - **关联任务**：T-066 ｜ 记录智能体：Agent_20261118130500
@@ -487,3 +466,6 @@
 | 2026-11-18 15:21 | Agent_20261118130500 | 头部 / 历史任务 / 当前任务 / 项目快照 / 踩坑记录 / monitor+settings+模块源码 / 测试 | T-066 结算入历史任务（feat 提交：镜像上线+字母流完全替换）；当前任务留 T-066b 候修；快照勘误（版本 0.5.0/ctest 95/monitor 描述）；新增 P-067 落盘路径勘误坑 | 真机验收达标（退格原文/拼音→汉字 replace 实证）；诊断定位 RuntimeId 重建吞增量并以同窗口续接修复；KeyboardTextComposer+打码开关全链移除 |
 | 2026-11-18 16:00 | Agent_20261118130500 | 头部 / 当前任务 / assistant+calendar+ui+模块源码 / AppServices / CMake / 测试 / 需求单 | T-067 三阶段落码：聚合器【输入原文摘录】段（T-066b 收口）+ DailyRecordJob 起居注刷新 + MonthlyRecordJob 新建 + GoodyModule 接线（静默化移除成文气泡）+ AppServices 双槽/信号 + 日历链接全链（布局热区/渲染/面板分发/钩子豁免/notepad）；探查代理绘接入点地图（后台） | 需求单四拍板（起居注静默/双击面板后可点/月报开机滚动/系统 notepad）；ctest 97 绿（+2 用例），未提交待真机验收 |
 | 2026-11-18 14:12 | Agent_20261118130500 | 头部 / 当前任务 / monitor 源码 / 模块源码 / CMake / 测试 | T-066 UIA 文本镜像落码：新增 TextMirrorMonitor（影子差分+churn 护栏+密码影子重置）、UiaTextReader 增 RuntimeId、ClipboardListener 增 clipboardUpdated 信号、模块接线三触发源+textlog.jsonl；新用例入 domain_tests（97 用例全绿） | 未提交待真机验收（验收清单在当前任务块）；字母流移除排验收后 |
+| 2026-11-19 10:16 | Agent_20261119101500 | 头部 / 当前任务 / monitor+hotkey 源码 / MainWindow / CMake / 需求单 / temp_scripts | T-068 立项并部署取证桩：MainThreadProbe 探针（三钩子 RAII 打点+主线程心跳+worker 落盘）+ 系统侧 Raw Input/光标/CPU 被动监听；构建 ctest 100% 绿，双路日志上线并录得启动期 380ms 泵停摆首条线索 | 用户报拖动卡顿瞬移；不动鼠标纯被动取证，跨会话待日志回查；取证代码未提交 |
+| 2026-11-19 12:32 | Agent_20261119101500 | 头部 / 当前任务 / 踩坑记录 / wallpaper+capture+monitor+assistant 源码 / temp_scripts | T-068 定案+根治：根因三类主线程停摆（30s 壁纸重算 160-170ms 主犯 / IME 快照截屏 / 开机月报拼接 380ms）；三处全挪离主线程（签名免重算+GDI 直出 QImage 进池+聚合进池），ctest 100% 绿；探针验证 30s 停摆归零；新增 P-068 | 用户报"刚刚就卡了"触发日志回查，30s 严格周期定位主犯；修复未提交待真机验收 |
+| 2026-11-19 16:35 | Agent_20261119101500 | 头部 / 历史任务 / 当前任务 / 细档 / 版本三处 / dist | T-068 结算入历史任务（9ffa3b4 fix + 2cb237b bump，tag v0.5.1 已推）；细档 t068_mouse_stall.md；发版 GitHub Release id 451052105 + 上传安装包 56MB（旧 0.5.0 包已清）；perf 基线追加（启动 324ms/主进程 159MB，快照待复核） | 用户指令提交+推送+发版；探针随验收期保留在版本内，体感确认后删探针收口 |
