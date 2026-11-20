@@ -96,6 +96,8 @@ void GoodyModule::init(AppServices &services)
     m_refreshTimer = new QTimer(this);
     m_refreshTimer->setInterval(20 * 60 * 1000); // 起居注心跳：20min 一判
     connect(m_refreshTimer, &QTimer::timeout, this, [this] {
+        if (auto *p = MainThreadProbe::instance())
+            p->mark("goody_heartbeat"); // T-070b：后台停摆归因打点
         m_recordJob->maybeRefreshToday([this](bool changed) {
             if (changed && m_services)
                 emit m_services->goodySummariesChanged(); // 静默：只发数据变更
@@ -695,6 +697,8 @@ void GoodyModule::sendMessage(const QString &text)
     m_session->turnStart();
     m_session->appendUserMessage(text);
     m_session->saveSoon();
+    if (auto *p = MainThreadProbe::instance())
+        p->mark("goody_send");
     runTurn();
 }
 
@@ -719,6 +723,8 @@ void GoodyModule::runTurn()
     m_activeTurnEpoch = m_toolEpoch; // 回合代数快照：清空后迟到回包按失配丢弃
     m_window->setBusy(true);
     m_window->beginAssistantBubble();
+    if (auto *p = MainThreadProbe::instance())
+        p->mark("goody_turn_begin");
     m_session->setSystemPrompt(buildSystemPrompt());
     const Settings &s = Settings::instance();
     const bool ok = m_client->chat(s.assistantApiBaseUrl(), s.assistantApiKey(),

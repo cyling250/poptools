@@ -1,5 +1,7 @@
 #include "ChatSession.h"
 
+#include "core/monitor/MainThreadProbe.h" // T-070b 落盘打点
+
 #include <algorithm>
 
 #include <QDateTime>
@@ -349,6 +351,10 @@ void ChatSession::load()
 
 void ChatSession::save()
 {
+    // T-070b：全量写盘打点（会话事件日志随使用增长，QSaveFile 全量写是
+    // 后台停摆候选——探针 mark 归因）
+    if (auto *p = MainThreadProbe::instance())
+        p->mark("chat_save_begin");
     m_saveTimer->stop(); // 显式落盘即清挂起的防抖（退出 flush 用）
     m_ioPool.waitForDone(); // 排空在途/排队的异步快照，保证本同步写最后提交
     QDir().mkpath(QFileInfo(m_path).absolutePath());
@@ -373,6 +379,8 @@ void ChatSession::save()
     f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
     if (!f.commit())
         qWarning("会话落盘失败（提交）：%s", qUtf8Printable(m_path));
+    if (auto *p = MainThreadProbe::instance())
+        p->mark("chat_save_end");
 }
 
 // 防抖到期（T-071）：序列化 + 写盘挪 IO 池——工具密集回合旧路径每秒一次
