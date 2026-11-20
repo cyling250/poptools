@@ -19,6 +19,7 @@
 #include "core/assistant/Scheduler.h"
 #include "core/assistant/WorkingMemory.h"
 #include "core/monitor/ActivityStore.h"
+#include "core/monitor/MainThreadProbe.h" // T-070b 后台停摆归因打点
 #include "core/assistant/FsTool.h"
 #include "core/assistant/LlmClient.h"
 #include "core/assistant/MonitorQueryTool.h"
