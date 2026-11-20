@@ -169,8 +169,13 @@
   （各模块 shutdown 撤槽防悬垂）；设置页补等价入口：通用页「收纳盒」组（管理+
   显示开关）、日历页「启用桌面日历」总开关（duty 语义）+「调整桌面日历位置和
   大小」按钮（关闭设置页让路）、Goody 页「打开 Goody 管家」卡
-- 待办：用户日常使用数天 → 回查 probe 日志定位 F1 卡顿根因（重点：
-  tray_menu_show 与 cap_* 的时间竞争、cap_grabbed 段耗时=ScreenCapturer 抓屏）
+- 待办（**2026-11-20 首批实测已入账**）：F1 五段链路三次采样——抓屏段
+  （cap_begin→cap_grabbed，ScreenCapturer::capture 多屏拼图）稳定 43~52ms
+  为延迟主段，热键分发 <2ms、建窗显示 ~7ms；与托盘菜单动画竞争时叠加为
+  可感知卡顿（用户报的 BUG 机理吻合）。**用户拍板"继续服役再看"**：抓屏
+  挪 worker 优化挂起，打桩继续攒数据；另录得一次 299ms 后台泵停摆
+  （fg=ZCode，~20:00，根因未定位，mark 未覆盖后台场景——复现再扩打点）。
+  回查入口：%LOCALAPPDATA%\PopTools\PopTools\probe\probe-*.jsonl
 - 代决：「启用桌面日历」=desktopSurface duty 语义（重启不记忆，同原托盘行为）；
   mark 截断 31 字符全量落盘；收纳盒显隐=任一可见→全隐藏
 
