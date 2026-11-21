@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-21 22:45（T-074 删除批收口：旧 Goody 域全量退役（assistant 15 类/UI 六件/ToolRegistry 链/Settings 废弃键），domain_tests 3688→1770 行 52 用例全绿；旧记忆空零损失，dsh-home/AGENTS.md 人格基线写入；bc9abb9 融合批+8270ab3 删除批已提交） · Agent_20261121184000
 > 最后更新：2026-11-21 21:40（T-074 M1 融合批落码：DshWindow 常驻窗+sidecar 开机即拉+悬浮球/热键直达 dsh+设置页收窄+API Key 启动环境注入，构建 0 编译警告+ctest 99 绿，node 常驻实证，未提交待目测；存量验收块 T-067~T-072 无损剪切 archive/current-pending-acceptance-1118-1121.md） · Agent_20261121184000
 > 最后更新：2026-11-21 21:10（T-074 M1 落码：WebView2 嵌入+dsh sidecar PoC 全链就绪——安装脚本两件/Node 24.22.3/dsh 0.2.2-rc.5/侧车冒烟出 URL 成功/dsh_poc.exe 构建 0 警告已拉起待目测） · Agent_20261121184000
 > 最后更新：2026-11-21 18:50（T-073 界面美化精修落码：设置导航指示条/标题层次/留白 + Goody IME Enter 守卫/空态欢迎卡/行高/间距/滚动条/过程行光环，构建 0 编译警告+ctest 99 绿，未提交待目测） · Agent_20261121184000
@@ -150,11 +151,18 @@
   applyBounds；controller put_IsVisible(TRUE)）；嵌入层文件级调试日志暂留
   （%LOCALAPPDATA%/PopTools/webview2_debug.log）；日志实证 rc=1080×720
   visible=yes + dsh 页导航完成，构建 0 编译警告
-- 待办：用户目测融合批（悬浮球直达 dsh+发消息真对话）→ 融合批提交 → 下一批：删旧
-  Goody 域（GoodyWindow 全家/ChatSession/LlmClient/PermissionManager/记忆/MCP client/
-  回合链）+ domain_tests 手术（assistant 域用例同步删，P-069 教训：审计覆盖 tests）+
-  旧记忆整理并入 dsh 指令 + M2 MCP 桥（活动数据/日报写入工具——日历摘要链路经
-  goody/daily 文件约定路径续命）
+- **删除批已收口（bc9abb9 融合批用户目测通过后 → 8270ab3）**：src/core/assistant 全域
+  退役（15 类）+ ui/goody 六件退役（悬浮球保留）+ ToolRegistry 共享链拆除
+  （AppServices/MainWindow/Capture、PinModule 贡献块）+ GoodyModule 瘦身 984→178 行
+  （DshWindow/悬浮球/热键/日历摘要槽四件事）+ Settings 废弃键拆除（热键/悬浮球键保留）
+  + domain_tests 3688→1770 行（45 用例随域删，52 用例全绿，残留审计 src+tests 零命中）
+- **记忆迁移完成**：旧记忆目录为空（MemoryStore 建成未积累，零损失）；
+  dsh-home/AGENTS.md 已写入管家人格基线（dsh 原生 agent-instructions 机制=
+  DSH_HOME/AGENTS.md，盘点报告 c 节），dsh 对话自带人设
+- 待办（M2 MCP 能力桥）：C++ MCP server（stdio/本地 socket）暴露——①活动数据工具
+  （按天键入镜像/窗口时间线/剪贴板流，dsh schedule 定时跑日报取数）②日报/月报写入
+  goody/daily|monthly 约定路径（日历摘要链路续命）③截图/贴图/OCR/日历读写工具；
+  dsh mcp-manager 配置接入；审批对齐 dsh permission presets（fail-closed）
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
@@ -346,6 +354,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-21 22:45 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / assistant+goody+settings+app 源码 / CMake / tests / dsh-home AGENTS.md | T-074 删除批：旧 Goody 域全量退役+domain_tests 手术+记忆迁移（空）+AGENTS.md 人格基线 | 构建 0 编译警告 ctest 52 用例全绿；bc9abb9+8270ab3 提交 |
 | 2026-11-21 21:40 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / settings 源码 / app 模块 / ui 源码 / CMake / 归档 | T-074 M1 融合批：DshWindow 常驻窗+GoodyModule 切路由+设置页收窄+WebView2Loader 部署；存量验收块 T-067~T-072 剪切归档；用户三拍板入账 | 构建 0 编译警告 ctest 99 绿；node 常驻实证待目测 |
 | 2026-11-21 21:10 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / scripts / tools / src(ui/dsh+dsh_poc) / CMake | T-074 M1：安装脚本两件+Node/dsh 落 tools+WebView2Host/DshRuntime/dsh_poc 落码+CMake gated 块；侧车冒烟出启动 URL 成功 | dsh_poc.exe 构建 0 编译警告已拉起待目测；interface 宏坑当场修 |
 | 2026-11-21 20:05 | Agent_20261121184000 | 头部 / 历史任务 / 当前任务 / 台账 / 需求单 / 设计文档 | T-074 M0：dsh 全量盘点（子代理重下载）+sidecar 定案+三文档落盘；T-073 入历史（UI 否决，行为修复保留） | npm/Node/WebView2 渠道全验证；M1 待开工 |
