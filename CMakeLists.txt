@@ -150,6 +150,33 @@ if(EXISTS "${RAPIDOCR_DIR}/RapidOCR-json.exe")
     )
 endif()
 
+# ---- M2 MCP 能力桥服务器（T-074）：dsh mcp-manager 经 stdio 拉起，桌面能力
+# 以工具面暴露（活动数据/日报月报落盘/截图/OCR）。工具本体在 poptools_mcpserver
+# 静态库（纯函数可单测），exe 只做 MCP 协议框架；console 子系统（stdio 通信）
+add_library(poptools_mcpserver STATIC
+    src/mcpserver/McpTools.cpp
+    src/mcpserver/McpTools.h
+)
+target_link_libraries(poptools_mcpserver PUBLIC Qt6::Core Qt6::Gui)
+target_include_directories(poptools_mcpserver PUBLIC "${CMAKE_SOURCE_DIR}/src")
+
+add_executable(poptools_mcp_server
+    src/mcpserver/main.cpp
+)
+target_link_libraries(poptools_mcp_server PRIVATE
+    poptools_mcpserver
+    poptools_core # RapidOcrService（OCR 工具异步引擎子进程）
+    Qt6::Core
+    Qt6::Gui
+)
+if(EXISTS "${QT_BIN_DIR}/windeployqt.exe")
+    add_custom_command(TARGET poptools_mcp_server POST_BUILD
+        COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release -no-translations
+            "$<TARGET_FILE:poptools_mcp_server>"
+        COMMENT "Deploying Qt runtime for poptools_mcp_server"
+    )
+endif()
+
 # ---- M1 dsh 嵌入 PoC（T-074）：独立验证窗（poptools_ui_dsh 已正式入
 # src/ui 聚合并被 GoodyModule 链接；本 target 仅作开发调试工具保留） ----
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/include/WebView2.h")

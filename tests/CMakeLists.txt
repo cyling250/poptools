@@ -9,6 +9,7 @@ target_link_libraries(poptools_domain_tests PRIVATE
     poptools_app_infra  # AppServices/FeatureRegistry（链接库目标，不再手抄源文件）
     poptools_core
     poptools_ui_goody   # GoodyBallLogic（悬浮球手势/位置钳制用例）
+    poptools_mcpserver  # MCP 能力桥工具（活动数据/日报月报落盘用例）
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

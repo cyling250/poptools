@@ -18,6 +18,7 @@
 #include "core/calendar/CalendarLayout.h"
 #include "core/box/BoxLayout.h"
 #include "core/box/BoxCatalog.h"
+#include "mcpserver/McpTools.h"
 #include "core/calendar/CalendarSettings.h"
 #include "core/calendar/CalendarTaskStore.h"
 #include "core/calendar/ChineseCalendar.h"
@@ -1763,7 +1764,79 @@ private slots:
         }
         BoxCatalog::setDataDirOverride(QString());
     }
+
+    // ---- MCP 能力桥工具（T-074 M2）：活动数据读取 / 日报月报落盘往返 ----
+    void mcp_activity_daily_streams_and_whitelist()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString monitor = dir.filePath("monitor");
+        const QString date = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+        QVERIFY(QDir(monitor + "/" + date).mkpath("."));
+        {
+            QFile f(monitor + "/" + date + "/timeline.jsonl");
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            f.write("{\"app\":\"editor\",\"secs\":120}\n");
+            f.write("{\"app\":\"browser\",\"secs\":300}\n");
+            f.close();
+        }
+        // 单流读取
+        poptools::McpToolResult r = poptools::runActivityDaily(
+            monitor, QJsonObject{{"stream", QStringLiteral("timeline")}, {"date", date}});
+        QCOMPARE(r.isError, false);
+        QCOMPARE(r.payload.value("ok").toBool(), true);
+        QCOMPARE(r.payload.value("streams").toObject().value("timeline")
+                     .toObject().value("lines").toArray().size(), 2);
+        // 白名单外拒绝（防路径穿越）
+        r = poptools::runActivityDaily(
+            monitor, QJsonObject{{"stream", QStringLiteral("../secret")}});
+        QCOMPARE(r.isError, true);
+        // 日期格式非法拒绝
+        r = poptools::runActivityDaily(
+            monitor, QJsonObject{{"date", QStringLiteral("../evil")}});
+        QCOMPARE(r.isError, true);
+    }
+
+    void mcp_digest_daily_monthly_roundtrip()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString goody = dir.filePath("goody");
+
+        // 日报写入 → 读取往返；日历约定路径核对（goody/daily/<date>.md）
+        const QString date = QStringLiteral("2026-11-21");
+        poptools::McpToolResult r = poptools::runWriteDailyDigest(
+            goody, QJsonObject{{"date", date},
+                               {"markdown", QStringLiteral("# 日报\n写了代码")}});
+        QCOMPARE(r.isError, false);
+        const QString written = r.payload.value("path").toString();
+        QVERIFY(written.endsWith(QStringLiteral("/daily/2026-11-21.md"))); // QDir::filePath 恒正斜杠
+        r = poptools::runReadDailyDigest(goody, QJsonObject{{"date", date}});
+        QCOMPARE(r.isError, false);
+        QCOMPARE(r.payload.value("exists").toBool(), true);
+        QCOMPARE(r.payload.value("markdown").toString().contains(QStringLiteral("写了代码")), true);
+
+        // 未写日期 → exists=false（合法结果非错误）
+        r = poptools::runReadDailyDigest(goody, QJsonObject{{"date", QStringLiteral("2026-11-22")}});
+        QCOMPARE(r.isError, false);
+        QCOMPARE(r.payload.value("exists").toBool(), false);
+
+        // 月报写入 → 读取往返（goody/monthly/<yyyy-MM>.md）
+        r = poptools::runWriteMonthlyDigest(
+            goody, QJsonObject{{"year", 2026}, {"month", 11},
+                               {"markdown", QStringLiteral("# 11 月月报")}});
+        QCOMPARE(r.isError, false);
+        r = poptools::runReadMonthlyDigest(goody, QJsonObject{{"year", 2026}, {"month", 11}});
+        QCOMPARE(r.isError, false);
+        QCOMPARE(r.payload.value("markdown").toString().contains(QStringLiteral("月报")), true);
+
+        // 非法月份拒绝
+        r = poptools::runWriteMonthlyDigest(
+            goody, QJsonObject{{"year", 2026}, {"month", 13}, {"markdown", QStringLiteral("x")}});
+        QCOMPARE(r.isError, true);
+    }
 };
+
 
 QTEST_MAIN(DomainTests)
 #include "domain_tests.moc"
