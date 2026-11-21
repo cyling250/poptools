@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-22 00:15（T-074 M2 能力桥收口：poptools_mcp_server 挂进 dsh 端到端实证（node→mcp-manager→子进程存活），六工具=活动数据/日报月报落盘/截图/OCR，ca05a55 提交；P-073 dsh-home 双层路径坑入账，孤儿测试 home 已清） · Agent_20261121184000
 > 最后更新：2026-11-21 22:45（T-074 删除批收口：旧 Goody 域全量退役（assistant 15 类/UI 六件/ToolRegistry 链/Settings 废弃键），domain_tests 3688→1770 行 52 用例全绿；旧记忆空零损失，dsh-home/AGENTS.md 人格基线写入；bc9abb9 融合批+8270ab3 删除批已提交） · Agent_20261121184000
 > 最后更新：2026-11-21 21:40（T-074 M1 融合批落码：DshWindow 常驻窗+sidecar 开机即拉+悬浮球/热键直达 dsh+设置页收窄+API Key 启动环境注入，构建 0 编译警告+ctest 99 绿，node 常驻实证，未提交待目测；存量验收块 T-067~T-072 无损剪切 archive/current-pending-acceptance-1118-1121.md） · Agent_20261121184000
 > 最后更新：2026-11-21 21:10（T-074 M1 落码：WebView2 嵌入+dsh sidecar PoC 全链就绪——安装脚本两件/Node 24.22.3/dsh 0.2.2-rc.5/侧车冒烟出 URL 成功/dsh_poc.exe 构建 0 警告已拉起待目测） · Agent_20261121184000
@@ -159,10 +160,21 @@
 - **记忆迁移完成**：旧记忆目录为空（MemoryStore 建成未积累，零损失）；
   dsh-home/AGENTS.md 已写入管家人格基线（dsh 原生 agent-instructions 机制=
   DSH_HOME/AGENTS.md，盘点报告 c 节），dsh 对话自带人设
-- 待办（M2 MCP 能力桥）：C++ MCP server（stdio/本地 socket）暴露——①活动数据工具
-  （按天键入镜像/窗口时间线/剪贴板流，dsh schedule 定时跑日报取数）②日报/月报写入
-  goody/daily|monthly 约定路径（日历摘要链路续命）③截图/贴图/OCR/日历读写工具；
-  dsh mcp-manager 配置接入；审批对齐 dsh permission presets（fail-closed）
+- **M2 能力桥已收口（ca05a55，端到端实证）**：src/mcpserver（McpTools 纯函数库
+  可单测 + MCP stdio 协议 exe）——工具六件：activity_daily（五流读取+白名单防
+  穿越）/ write·read_daily_digest（goody/daily 约定路径）/ write·read_monthly_digest /
+  capture_screenshot（虚拟桌面拼图）/ ocr_image（RapidOcrService 异步 120s）；
+  dsh 接入=profiles/web/cordis.patch.yml 注入 mcp-manager 条目（stdio eager）+
+  AGENTS.md 日报/月报工作流指令；domain_tests +2 用例=54 全绿；协议管道冒烟+
+  端到端（node→mcp-manager→子进程存活）双实证
+- 坑：P-073（dsh-home 双层路径漏算，P-067 同款——调试 home 与产品 home 分叉，
+  配置不生效；孤儿测试 home 已清，教训：dsh-home 调试一律走产品
+  AppLocalDataLocation=PopTools/PopTools 双层口径）
+- 待办（M3 产品融合）：①单实例守卫（3080 端口 EADDRINUSE→第二实例 dsh 启动失败，
+  蓝图风险④实证）②安装包形态（dsh 运行时随包/tools 定位；WebView2Loader 部署）③
+  悬浮球呼吸绑定 dsh 工具调用态（MCP server 侧信号）④日报定时建议用户在 dsh 对话
+  里说「每天 22 点写日报」由 schedule 承载（AGENTS.md 已指引）⑤webview2_debug.log
+  与 MCP 无关的调试日志稳定后撤
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
@@ -207,6 +219,17 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-073 dsh-home 双层路径漏算：调试配置写错家 → MCP 配置「不生效」假象
+- **关联任务**：T-074 ｜ 记录智能体：Agent_20261121184000
+- **现象**：MCP patch 写入 %LOCALAPPDATA%/PopTools/dsh-home 后，手动跑 dsh 能 spawn
+  服务器、产品链路（PopTools 拉起）始终不 spawn；两实例 settings/describe 结果不一致
+- **原因**：P-067 同款——AppLocalDataLocation 是 org/app 双层（PopTools/PopTools），
+  产品 DSH_HOME=…/PopTools/PopTools/dsh-home，而调试 home 用了单层
+  …/PopTools/dsh-home，两个家互不相通
+- **解决**：patch/AGENTS.md 归位产品双层口径；孤儿测试 home 删除。教训：**调试
+  dsh-home 相关配置一律先核对产品实例的实际 DSH_HOME（PopTools/PopTools 双层）**，
+  别按记忆的单层路径写
 
 ### P-072 隐藏期 winId() 预建原生子窗：Qt 永不同步几何/可见性 → WebView2 黑框
 - **关联任务**：T-074 ｜ 记录智能体：Agent_20261121184000
@@ -354,6 +377,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-22 00:15 | Agent_20261121184000 | 头部 / 当前任务 / 踩坑记录 / 台账 / src(mcpserver) / CMake / tests / dsh-home 配置 | T-074 M2：MCP 服务器六工具+协议框架+dsh patch 注入+AGENTS.md 工作流+2 用例 | 构建 0 编译警告 ctest 54 绿；端到端实证（mcp 子进程存活）；P-073 入账 |
 | 2026-11-21 22:45 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / assistant+goody+settings+app 源码 / CMake / tests / dsh-home AGENTS.md | T-074 删除批：旧 Goody 域全量退役+domain_tests 手术+记忆迁移（空）+AGENTS.md 人格基线 | 构建 0 编译警告 ctest 52 用例全绿；bc9abb9+8270ab3 提交 |
 | 2026-11-21 21:40 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / settings 源码 / app 模块 / ui 源码 / CMake / 归档 | T-074 M1 融合批：DshWindow 常驻窗+GoodyModule 切路由+设置页收窄+WebView2Loader 部署；存量验收块 T-067~T-072 剪切归档；用户三拍板入账 | 构建 0 编译警告 ctest 99 绿；node 常驻实证待目测 |
 | 2026-11-21 21:10 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / scripts / tools / src(ui/dsh+dsh_poc) / CMake | T-074 M1：安装脚本两件+Node/dsh 落 tools+WebView2Host/DshRuntime/dsh_poc 落码+CMake gated 块；侧车冒烟出启动 URL 成功 | dsh_poc.exe 构建 0 编译警告已拉起待目测；interface 宏坑当场修 |
