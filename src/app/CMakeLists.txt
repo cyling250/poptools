@@ -97,6 +97,7 @@ add_library(poptools_module_goody STATIC
 target_link_libraries(poptools_module_goody PUBLIC
     poptools_app_infra
     poptools_ui_goody
+    poptools_ui_dsh # T-074：dsh 常驻窗（旧 GoodyWindow 的对话界面替代）
 )
 
 # ---- 聚合目标：可执行只链接 poptools_modules ----

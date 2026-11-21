@@ -201,6 +201,31 @@ target_link_libraries(poptools_ui_box PUBLIC
 )
 target_include_directories(poptools_ui_box PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# ---- dsh 常驻窗（T-074：dsh 原样移植——WebView2 宿主 + sidecar 运行时） ----
+# WebView2 loader dll 经 QLibrary 动态解析（exe 同目录或 tools/webview2/x64）；
+# 依赖 tools/webview2 头文件与 tools/node+tools/dsh 运行时（install 脚本装入）
+add_library(poptools_ui_dsh STATIC
+    dsh/WebView2Host.cpp
+    dsh/WebView2Host.h
+    dsh/DshRuntime.cpp
+    dsh/DshRuntime.h
+    dsh/DshWindow.cpp
+    dsh/DshWindow.h
+)
+target_link_libraries(poptools_ui_dsh PUBLIC
+    poptools_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    user32
+)
+target_include_directories(poptools_ui_dsh PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# WebView2Host.h 直接含 <WebView2.h>（COM 类型在头成员里），include 路径
+# PUBLIC 传递；SYSTEM 压掉 MIDL 生成头的编译警告
+target_include_directories(poptools_ui_dsh SYSTEM PUBLIC
+    "${CMAKE_SOURCE_DIR}/tools/webview2/include")
+target_compile_definitions(poptools_ui_dsh PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+
 # ---- 设置界面（跨功能配置 UI，由外壳使用） ----
 # 2026-11-19 Fluent 改版 M1：SettingCard/ToggleSwitch 为 Win11 设置卡片组件
 add_library(poptools_ui_settings STATIC
@@ -231,6 +256,7 @@ target_link_libraries(poptools_ui INTERFACE
     poptools_ui_calendar
     poptools_ui_box
     poptools_ui_goody
+    poptools_ui_dsh
     poptools_ui_settings
     poptools_ui_shared
 )

@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-21 21:40（T-074 M1 融合批落码：DshWindow 常驻窗+sidecar 开机即拉+悬浮球/热键直达 dsh+设置页收窄+API Key 启动环境注入，构建 0 编译警告+ctest 99 绿，node 常驻实证，未提交待目测；存量验收块 T-067~T-072 无损剪切 archive/current-pending-acceptance-1118-1121.md） · Agent_20261121184000
 > 最后更新：2026-11-21 21:10（T-074 M1 落码：WebView2 嵌入+dsh sidecar PoC 全链就绪——安装脚本两件/Node 24.22.3/dsh 0.2.2-rc.5/侧车冒烟出 URL 成功/dsh_poc.exe 构建 0 警告已拉起待目测） · Agent_20261121184000
 > 最后更新：2026-11-21 18:50（T-073 界面美化精修落码：设置导航指示条/标题层次/留白 + Goody IME Enter 守卫/空态欢迎卡/行高/间距/滚动条/过程行光环，构建 0 编译警告+ctest 99 绿，未提交待目测） · Agent_20261121184000
 > 最后更新：2026-11-20 02:40（T-071 夜间批次落码完成：P0 修复 T-070 提交态编译损坏 + ChatSession 热路径四项/分散效率批/UI 收编批/日历悬停脏矩形，6 提交 5887ee9..78abd32 每步独立构建 0 警告+ctest 99 绿，待真机验收；P-070/P-071 入账；陈旧验收块 T-059/T-060/T-064/T-062 无损搬移 archive/current-superseded-1117-1118.md） · Agent_20261120005535
@@ -105,10 +106,15 @@
 
 > 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
 
-**T-074 DeepSeek Harness 全量照搬——dsh 原样移植 + C++ 壳（M0 定稿待开工，2026-11-21）**：
+**T-074 DeepSeek Harness 全量照搬——dsh 原样移植 + C++ 壳（M1 融合批落码待目测，2026-11-21）**：
 - 用户拍板：界面/内核/插件架构全量照搬 dsh 且**跟随上游更新**（批注锁定「原样移植+
   给他套个壳」，不做内核语义重写）；全系统插件化=「桌面端智能管家，其余皆插件」；
-  界面载体 WebView2 嵌真 dsh 前端（用户问卡不卡→答不卡，认可）
+  界面载体 WebView2 嵌真 dsh 前端；**管家职责收敛**（2026-11-21 三拍板）：日报/月报
+  →dsh 原生定时任务（C++ 聚合器留作 MCP 工具后端、定时触发撤）、旧记忆→整理并入
+  dsh 全局指令（一次性迁移）、窗口→原生标题栏+sidecar 常驻（PopTools 开着就在后台，
+  弹出即用无"点了才启动"，PoC 包装边框撤掉）；API Key 由用户提供，写入本机
+  PopTools.ini [dsh]（DshRuntime 经启动环境注入 DEEPSEEK_API_KEY——dsh 官方
+  sidecar 供 Key 路径），不入仓库
 - M0 三文档落盘：需求单 requirements/20261121-dsh-full-port.md + 盘点报告
   docs/design/20261121-dsh-inventory-report.md（96 万行/190 包/Cordis 2.9k/事件词表
   63 型/session-controller API 全列）+ 蓝图 docs/design/20261121-dsh-port-blueprint.md
@@ -117,177 +123,45 @@
   加载 localhost:3080；桥接面唯一=MCP 能力桥/进程生命周期/展示路由；分期 M1 壳与
   运行时→M2 MCP 能力桥→M3 产品融合→M4 全系统插件化；回退=核心契约层五件套
   C++ 语义移植（报告 f 节矩阵，≈1.5-2 万行）
-- 已验证：npm @deepseek-ai/dsh@0.2.2-rc.5（91 依赖，engines node>=24.9）/GitHub
-  Release 无二进制/nodejs.org zip 渠道/WebView2 运行时本机 157.x 存在/dsh 源码副本
-  temp_scripts/dl_dsh_20261121/
-- **M1 已落码（2026-11-21 21:10）**：①scripts/install_webview2.py（NuGet 1.0.4370.26
-  →tools/webview2，头文件+loader dll）②scripts/install_dsh.py（Node v24.22.3→
-  tools/node/current + npm @deepseek-ai/dsh→tools/dsh 1.3G；全局 .npmrc 旧代理端口
-  7897 经 CLI 旗标覆盖——npm 配置优先级 CLI>env>user npmrc）③src/ui/dsh/ 新库
-  poptools_ui_dsh（WebView2Host：QLibrary 动态解析 loader 免 .lib/CRT 纠缠 +
-  DshRuntime：QProcess 托管 `node bin.js web --no-open`，stdout 解析「dsh web:
-  <url>」启动行即登录态）④src/dsh_poc/main.cpp 独立验证窗（启动 sidecar/本地页
-  测试/停止 + 日志）⑤根 CMakeLists 尾部 gated 块（tools/webview2 缺席跳过）
-- 侧车冒烟通过：`node bin.js web --dump-config` 出完整装配树；真启动 stdout 单行
-  `dsh web: http://127.0.0.1:3080/?token=…`（与设计一致，token=进程级登录态，首访
-  种 30 天 cookie）；DSH_HOME 指向 %LOCALAPPDATA%/PopTools/dsh-home 生效
-- dsh_poc.exe 构建 0 编译警告（坑：SDK 10 的 interface 宏在 combaseapi.h，
-  WIN32_LEAN_AND_MEAN 排除 objbase 链致 MIDL 前向声明炸——显式 include 修复；
-  ICoreWebView2 取 URI 是 get_Source 非 get_Uri）——已拉起待用户目测：本地页测试
-  →启动 dsh sidecar→dsh 原版界面
-- 待办：用户目测 PoC 链路；dsh 首发需在 dsh 设置页配自家 API Key（credentials-local
-  自管，PopTools 不经手）；M1 收尾（T-073 未提交 9 文件随下批提交处置）→ M2
-  MCP 能力桥
+- **M1 已落码+提交（eb7034d，2026-11-21）**：install_webview2.py（NuGet 1.0.4370.26）+
+  install_dsh.py（Node v24.22.3 + dsh 0.2.2-rc.5 1.3G；全局 .npmrc 旧代理端口 7897 经
+  CLI 旗标覆盖——npm 优先级 CLI>env>user npmrc）+ src/ui/dsh（WebView2Host：
+  QLibrary 动态解析 loader + DshRuntime：QProcess 托管 `node bin.js web --no-open`，
+  stdout 解析「dsh web: <url>」启动行即进程级 token 登录态）+ dsh_poc 验证窗
+- **M1 融合批已落码（21:40，未提交）**：①新 DshWindow（原生标题栏+WebView2 填满+
+  状态覆盖层，关闭=hide 回后台不杀服务，几何记忆 dsh/windowGeometry）常驻语义=
+  GoodyModule init 即 configure+start（PopTools 存续期 sidecar 一直在）+ WebView2Host
+  增 initialize() 预热②GoodyModule 切路由：openChat/悬浮球/热键/设置页全走 DshWindow，
+  呼吸光效=sidecar Starting 态；旧 GoodyWindow 回合链保留编译但 m_window 恒空（域删除
+  与测试手术下批）；DailyRecordJob/MonthlyRecordJob 保留为工具后端，心跳/22:00/启动
+  补账撤（goodySummariesChanged 心跳信号不再发）③设置页 Goody 组清到最小（悬浮球+
+  打开入口，模型/权限/总结交 dsh 自身设置页；commitSettings/instantControls 同步收窄，
+  Settings 新增 dshApiKey/dshWindowGeometry）④CMake：poptools_ui_dsh 正式入 ui 聚合
+  （poptools_core PUBLIC）+goody 模块链接+PopTools POST_BUILD 部署 WebView2Loader.dll，
+  dsh_poc 留根 CMake gated
+- 侧车冒烟通过：`--dump-config` 出装配树；真启动 stdout 单行出 URL；DSH_HOME 指向
+  %LOCALAPPDATA%/PopTools/dsh-home 生效；融合批构建 0 编译警告+ctest 99 绿；新版
+  已拉起（node.exe 常驻实证）待目测：悬浮球/Ctrl+Alt+G → dsh 窗直达 → 真对话
+- 坑（当场修）：SDK 10 的 interface 宏在 combaseapi.h 被 WIN32_LEAN_AND_MEAN 排除
+  → 显式 include objbase.h；ICoreWebView2 取 URI 是 get_Source 非 get_Uri；
+  npm 全局 .npmrc 旧端口压过环境变量
+- 黑框根修（P-072）：隐藏期预建原生子窗 Qt 永不同步几何/可见性——WebView2 原生
+  初始化推迟到首次 openWindow 后（openWindow show→initialize；showEvent 补
+  applyBounds；controller put_IsVisible(TRUE)）；嵌入层文件级调试日志暂留
+  （%LOCALAPPDATA%/PopTools/webview2_debug.log）；日志实证 rc=1080×720
+  visible=yes + dsh 页导航完成，构建 0 编译警告
+- 待办：用户目测融合批（悬浮球直达 dsh+发消息真对话）→ 融合批提交 → 下一批：删旧
+  Goody 域（GoodyWindow 全家/ChatSession/LlmClient/PermissionManager/记忆/MCP client/
+  回合链）+ domain_tests 手术（assistant 域用例同步删，P-069 教训：审计覆盖 tests）+
+  旧记忆整理并入 dsh 指令 + M2 MCP 桥（活动数据/日报写入工具——日历摘要链路经
+  goody/daily 文件约定路径续命）
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
-**T-072 日程编辑器按用户反馈双修（已提交 f4f0f4f，待目测验收，2026-11-21）**：
-- 用户两截图批注：①编辑器底部五图标（插时间/重复/提醒/地点/颜色，后四项 rlqd
-  占位）语义不明+150% DPI 显示不全+无提示，「数据保存在本机」页脚 → 两块全撤
-  （唯一有功能的"插时间"一并撤，用户拍板），窗高 430→340，残留审计零残留；
-  ②弹出位置原钉格子左上角 → 改以所点日期格心居中（屏钳制不变，T-062 G-02
-  物理口径不变）
-- 构建零警告 ctest 99 绿；新版已拉起（用户目测：双击日期格看位置与编辑器形态）
-
-**T-071 夜间批次：全面 UI 收编 + 代码效率优化（6 提交 5887ee9..78abd32，待真机验收，2026-11-20 凌晨）**：
-- 需求单 requirements/20261120-ui-efficiency-nightshift.md（用户睡眠授权全权代决"自己完成"；
-  双子代理盘点证据存 temp_scripts/night_20261120/；各提交正文即技术细节档）
-- **5887ee9 P0 前置**：修复 T-070 提交态编译损坏（GoodyWindow.h signals: 段成员变量/
-  setBusy 新旧混行/setToolPhase+namespace 重复/缺声明）——4e153c6 起树无法编译（P-070）
-- **1bd70c9 行为修复**：ProcessRow 补写 goodySummary 属性（主题切换清空过程行摘要真 bug）；
-  日历编辑器删每键整窗 update()
-- **fe65610 ChatSession 四项**（v3 格式与外部行为不变）：投影增量化（旧每事件全量重投影
-  O(n²)）/ trim 批量定前缀+单次重投影 / 侧栏计数缓存 / 防抖落盘挪 IO 池（save 同步语义
-  保留）
-- **8fc5236 分散效率批**：壁纸 blurredWallpaper 只回缓存（T-068 漏网点同步重算 ~160ms）
-  +两面板 kickWallpaperRefresh（duty 启动即踢）/ Goody 侧栏 200ms 合帧 / reasoning 光标
-  增量 / SSE 读偏移 / Settings beginBatch 批量 sync / 键盘钩子 QMetaMethod 预解析 /
-  渲染器 QFontMetrics+删除线字体缓存
-- **538598c UI 收编批**（零视觉重设计）：散写橙三处→overlay::warmAccent()；文字基线
-  ascent 锚定（P-064 口径）；编辑器/ESC 胶囊接深套 token；FluentTheme.h 纪律注定案三类
-  豁免（GoodyTheme 表/内容惯例色/回退渐变）
-- **78abd32 日历悬停脏矩形**：renderFrame 增 commitDirty，悬停级改动免整屏发布（BoxPanel
-  先例，红线④收尾）；onLeave 补复位两链接悬停标记（原漏复位）
-- **质量线**：每提交独立构建 0 警告+ctest 99/99 绿
-- **晨验清单**：①Goody 对话/工具/审批/主题切换（过程行摘要不清空/侧栏计数正常）②duty
-  开启 ~0.2s 内出壁纸底、换壁纸 30s 内跟上③日历悬停不闪不残留（含重进同一链接）④设置
-  页拨开关即时生效仍正常⑤ESC 胶囊/调整覆盖层文字不漂
-- **不修项（含理由）**：日历/盒渲染器配色重收敛（视觉已定稿待验收，验收后立专项）；全局
-  弹窗 palette（与 P-023 钉扎交互）；截图画布拖选脏矩形（核心交互无法夜验）；工具结果
-  摘要 fromJson（低频）；气泡逐条 setStyleSheet（P-023 刻意为之）
-- 坑：P-070 ｜ P-071
-
-**T-070 Goody 按 deepseek-harness 形式重构（已提交 4e153c6，待真机验收，2026-11-19）**：
-- 需求单 requirements/20261119-goody-dsh-restyle.md（用户拍板"就按照 dsh 的来"全权委托；
-  dsh=deepseek-ai/deepseek-harness 官方 agent harness，源码已下载解压
-  temp_scripts/dl_dsh/src/，MIT 许可可借鉴；双子代理研读报告：后端 agent-loop/
-  会话事件日志、前端 WebUI 布局规格）
-- 已落码（15 文件 +1184/-488，ctest 99 绿，提交 4e153c6）：
-  ①后端 **ChatSession v3「会话即事件日志」**：事件词表 turn/start|end(system/user/
-  assistant/tool result/approval asked|decided（审计对 fail-closed），模型历史由
-  **投影派生**（"模型可见即已记录"），**消息块化**（text/reasoning/tool_call 块，
-  arguments 保原始 JSON 串）；v1/v2 无损迁移；trim 按完整回合块淘汰（不拆
-  tool_call/result 对，dsh compaction 切点纪律）；四件套按投影消息下标截断事件
-  ②LlmClient：assistant 消息携 blocks+finish（finish_reason 判据）
-  ③GoodyModule loop：turn 边界事件化（completed/max-tokens/aborted/error/blocked
-  五种收束；max-tokens 粘性——截断的 tool_calls 不执行补错误 result）；审批
-  asked/decided 审计事件
-  ④前端 **dsh WebUI 形态**：GoodyTheme token（neutral-bluish 色板/deepseek 蓝/
-  圆角 8-24/字号 11-15），**气泡→文档流**（user 淡蓝 20px 圆角泡右对齐/assistant
-  全宽无框无头像——M2 头像行撤除），**ProcessRow 过程行**（状态徽章点+工具名+
-  摘要折叠行，替代 ⚙/✓✗ 文本行，GoodyModule 经 toolRowStarted/Finished 接入），
-  composer 大圆角卡（自适应 44~200px），发送/停止同位钮（↑/■），侧栏 280，
-  消息列 880 居中，审批卡 warning 描边
-- 待真机验收：①旧会话数据无损迁移（v2 文件载入新格式）②对话/工具调用审批链
-  视觉（淡蓝气泡/过程行徽章/审批卡）③深浅主题切换 ④悬浮球/侧栏多会话不回归
-- 诚实边界：①Cordis 插件体系/HMR/compaction LLM 摘要器不搬（单应用不需要，
-  超限裁剪为回合块淘汰）②消息时间戳仍未实现（schema 之外）③过程行深浅切换
-  徽章色不重抛（finish 态色深浅同值可接受）④代码块 banner（语言标签）未做，
-  悬浮复制钮保留
-- 坑：**临时 QJsonArray range-for 是 UB 陷阱**（"断组"过滤失效/starts 幻影 -1
-  全由此起——Qt 容器临时对象 range-for 悬垂），全部改具名变量遍历；**QtTest
-  -maxwarnings 默认 2000 条**，海量 qWarning 插桩会静默吞掉后续输出（探针失败
-  误判"未执行"），调试用 QFAIL 携带信息
-
-**T-069b 托盘菜单精简 + F1 卡顿打桩（已提交 8ebd1cd，验收期监控中，2026-11-19）**：
-- 需求单 requirements/20261119-tray-menu-f1-probe.md（用户报三件事：①托盘菜单拉起
-  时 F1 卡顿 ②偶发 F1 卡顿无法复现要打桩监控 ③菜单精简到 设置/关于/退出）
-- 已落码：①**打桩**：MainThreadProbe 增 mark(tag) 通用链路标记（全量落盘
-  probe-*.jsonl 的 k:"mark" 行，QPC/tick/前台PID）；F1 全链路五点 f1_hotkey→
-  f1_start→cap_begin→cap_grabbed（ScreenCapturer::capture 抓屏分段）→cap_shown
-  + 托盘菜单 tray_menu_show/hide（MainWindow aboutToShow/Hide）——用户日常用
-  数天后按日志定位（与钩子延迟/泵卡顿记录同钟对齐）；②**菜单精简**：五模块九项
-  托盘入口全撤（Capture/ActivityMonitor/Goody/Calendar×4/Box×2），m_trayAction
-  成员与文案更新链路同删；AppServices 新槽 calendarAdjust/calendarDutyStopped/
-  calendarSetDuty/goodyOpenChat/boxOpenManager/boxAnyVisible/boxSetVisible
-  （各模块 shutdown 撤槽防悬垂）；设置页补等价入口：通用页「收纳盒」组（管理+
-  显示开关）、日历页「启用桌面日历」总开关（duty 语义）+「调整桌面日历位置和
-  大小」按钮（关闭设置页让路）、Goody 页「打开 Goody 管家」卡
-- 待办（**2026-11-20 首批实测已入账**）：F1 五段链路三次采样——抓屏段
-  （cap_begin→cap_grabbed，ScreenCapturer::capture 多屏拼图）稳定 43~52ms
-  为延迟主段，热键分发 <2ms、建窗显示 ~7ms；与托盘菜单动画竞争时叠加为
-  可感知卡顿（用户报的 BUG 机理吻合）。**用户拍板"继续服役再看"**：抓屏
-  挪 worker 优化挂起，打桩继续攒数据；另录得一次 299ms 后台泵停摆
-  （fg=ZCode，~20:00，根因未定位，mark 未覆盖后台场景——复现再扩打点）。
-  回查入口：%LOCALAPPDATA%\PopTools\PopTools\probe\probe-*.jsonl
-- 代决：「启用桌面日历」=desktopSurface duty 语义（重启不记忆，同原托盘行为）；
-  mark 截断 31 字符全量落盘；收纳盒显隐=任一可见→全隐藏
-
-**T-069 UI 现代化改版 Win11 Fluent（已提交 2cbd47d，待用户目测验收，2026-11-19）**：
-- 需求单 requirements/20261119-ui-fluent-restyle.md（用户三拍板：Win11 Fluent 风/全部
-  界面整体改版/方案确认后落码；D1 设置去 OK/Cancel 即时生效、D2 主色保留品牌蓝
-  #2B6FF2、D3 贴桌面面板保留 12px 圆角——均已按默认拍板实施）；方案与选型
-  docs/design/20261119-ui-fluent-restyle-proposal.md（选型结论：零新依赖自研
-  Fluent 视觉层，Mica 直调 DWM；开源 C++ Fluent 库均 2026 新库未采）
-- 已落码（M0-M3 全流程，构建+ctest 全绿）：①M0 底座：src/ui/theming/FluentTheme
-  （FluentTokens/fluentTheme 明暗双套+fluentInput/Button/ScrollBarQss 生成器+
-  applyFluentWindowChrome 深色标题栏+Mica 尝试；ui/theming 新静态库
-  poptools_ui_theming 全功能库 PUBLIC 链接）+游离暗色小窗收编（CalendarSearchForm/
-  CalendarDatePicker/BoxManagerDialog 接 token 随明暗切换；CalendarEventEditor/
-  capture ToolBar 常暗语境钉深色 token）+main.cpp 全局字体栈（Segoe UI Variable→
-  Segoe UI→雅黑）；②M1 设置界面：SettingsDialog 全重写（SettingCard 分组卡片+
-  ToggleSwitch 自研 Win11 开关+左导航胶囊选中+页内滚动+Mica/深浅标题栏+
-  即时生效：控件变更即写 Settings 并 notifySettingsChanged 广播，文本框 400ms
-  防抖 done 冲刷，MainWindow Accepted 后统一广播移除）；③M2 Goody：气泡改
-  Fluent 卡片（bgCard+cardStroke 描边+8px 圆角）+头像行（GoodyAvatar 自绘：
-  assistant "G" 玻璃球/user "我" 圆牌，逐帧取 token 免重抛）+输入框 1~6 行自适应
-  （44~120px）+token 对齐（气泡/侧栏/输入区/权限条）；④M3：OcrPanel/TranslateCard/
-  GoodyFloatingBall 接 token；ThemeColors.h 退役（只余 overlay 语义色+
-  systemSchemeDark，struct/uiThemeColors 删除）；domain_tests 主题用例迁移
-  FluentTokens；capture ToolBar/TextEditingController 字面量收编
-- 待用户目测验收：设置界面（导航/卡片/开关/即时生效）/Goody（气泡描边/头像/输入
-  自适应）/日历搜索/选日期/收纳盒管理（浅色系统下不再恒暗）/截图工具条/悬浮球/
-  OcrPanel/TranslateCard 明暗切换
-- 诚实边界：①Mica 在 Qt 不透明 backing store 下不可见，实际呈现=Mica 回退固色
-  （官方等值观感），真云母需 WA_TranslucentBackground（对话风险未做）；②消息逐条
-  时间戳暂缓（ChatSession 消息无逐条 ts 字段，需动存储 schema，超视觉改版边界）；
-  ③导航无图标（暂无合适 qrc 图标源，文字导航已可用）；④Win10 无 Segoe UI Variable
-  自动回退 Segoe UI+雅黑
-- 红线：样式一律取 fluentTheme() 禁止窗口内写十六进制字面量（半透明玻璃描边除外，
-  注释声明）；新窗口主题接法见 FluentTheme.h 头注释
-
-**T-067 Goody 起居注 + 日历摘要展示（已提交 d3c926d，待真机验收，2026-11-18）**：
-- 需求单 requirements/20261118-goody-calendar-summary.md（用户四拍板：起居注静默自主、
-  日链接双击开面板后才可点、月报开机滚动重算【月报更新】往月冻结仅对话触发、notepad）
-  范围界定：起居注只是 Goody 一项职责，其对话/工具/记忆/权限/MCP 角色不变
-- 已落码：①DailyAggregator 新增【输入原文摘录】段（textlog 按窗分组：insert/replace 进
-  正文、delete 计删字"删N字"）+ isPendingDay 扩 textlog（T-066b 就此收口）；②
-  DailyRecordJob::maybeRefreshToday（当日五流字节指纹 + 60min 节流 + 首次成文优先，
-  GoodyModule 20min 心跳驱动，全程静默）；③MonthlyRecordJob（开机重写当月滚动月报，
-  提示词含【月报更新】，goody/monthly/<yyyy-MM>.md，整月 MD 拼接 24k 预算）+ 对话工具
-  app.generate_monthly_record（重算任意月，无按钮）；④AppServices goodyDailyDigestPath/
-  goodyMonthlyDigestPath 查询槽 + goodySummariesChanged 信号；⑤日历：CalendarLayout
-  月报链接(monthLink)/格内摘要条带(cellSummaryLinkRect) 热区、Renderer 链接绘制（激活
-  高亮/悬停底色/日程行让位一行）、CalendarPanel 编辑器开启期间链接分发（eventsAccepted
-  前置 pre-gate）+ 外点钩子豁免（点链接不关面板，UP 走面板路径防双弹）+ notepad 弹出
-  （md 原文写 %TEMP%）+ CalendarModule 槽注入与信号接线；⑥22:00 成文的托盘气泡移除
-  （起居注纪律）
-- 待真机验收（PopTools 拉起新构建）：①打字后等心跳/重启 → textlog 进日摘要；②有摘要
-  日期格显示「»摘要」链接；③双击开面板 → 点该日链接 → notepad 弹当日摘要；④未双击时
-  点链接无效；⑤左上角「MM月工作摘要»」点击弹月报；⑥对 Goody 说"重新生成 10 月月报"→
-  goody/monthly/2026-10.md 更新
-- 诚实边界：格内链接条带固定像素不随 fontScale（对齐 headerButtons 先例）；notepad 抢
-  焦点会使编辑器失焦关闭（WindowDeactivate 既有链路，交互可接受）
+> 已提交待验收（验收清单原文 → [handover/archive/current-pending-acceptance-1118-1121.md](handover/archive/current-pending-acceptance-1118-1121.md)）：T-072 日程编辑器双修
+>（f4f0f4f）｜ T-071 UI 收编+效率批（5887ee9..78abd32）｜ T-070 Goody 按 dsh 形式重构（4e153c6）｜ T-069b 托盘精简+F1 打桩（8ebd1cd）｜ T-069 Win11 Fluent 改版（2cbd47d）｜
+> T-067 Goody 起居注+日历摘要（d3c926d）——注：其中 T-070 的 GoodyWindow 前端与 T-067 的
+> 定时成文链路已被 T-074 dsh 原样移植改道（对话/日报走 dsh），验收项相应作废。
 
 > 更早当前任务验收块（T-059/T-060/T-064/T-062+收纳盒，已被 v0.5.0/v0.5.1 发版覆盖）→
 > [handover/archive/current-superseded-1117-1118.md](handover/archive/current-superseded-1117-1118.md)
@@ -325,6 +199,19 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-072 隐藏期 winId() 预建原生子窗：Qt 永不同步几何/可见性 → WebView2 黑框
+- **关联任务**：T-074 ｜ 记录智能体：Agent_20261121184000
+- **现象**：常驻窗隐藏期预初始化 WebView2（winId 预建原生子 HWND），弹出后整块黑——
+  GetClientRect 恒 100×30（构造默认）、WS_VISIBLE 未设，而 Qt 控件本身已 1080×720
+- **原因**：Qt 对"顶层窗可见前经 winId() 提前 native 化的子控件"不回填原生几何/
+  可见性（WA_DontCreateNativeAncestors 更是把父链一并跳过）；controller 边界又只在
+  创建回调刷一次，显示后无 resize 不刷新
+- **解决**：原生初始化整体推迟到首次显示（openWindow/show 后再 initialize——官方
+  示例标准路径）+ showEvent 补 applyBounds + controller 显式 put_IsVisible(TRUE)；
+  嵌入层加文件级调试日志（%LOCALAPPDATA%/PopTools/webview2_debug.log，稳定后撤）
+  + 启动 12s 自动弹窗钩子免鼠标自证后已撤。教训：**嵌原生子窗（WebView2/Chromium）
+  必须等顶层可见后再建，隐藏期预热只做进程/网络层**
 
 ### P-070 提交时树无法编译，交接"实测全绿"与提交态不符（P-038 重演）
 - **关联任务**：T-070/T-071 ｜ 记录智能体：Agent_20261120005535
@@ -459,6 +346,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-21 21:40 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / settings 源码 / app 模块 / ui 源码 / CMake / 归档 | T-074 M1 融合批：DshWindow 常驻窗+GoodyModule 切路由+设置页收窄+WebView2Loader 部署；存量验收块 T-067~T-072 剪切归档；用户三拍板入账 | 构建 0 编译警告 ctest 99 绿；node 常驻实证待目测 |
 | 2026-11-21 21:10 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / scripts / tools / src(ui/dsh+dsh_poc) / CMake | T-074 M1：安装脚本两件+Node/dsh 落 tools+WebView2Host/DshRuntime/dsh_poc 落码+CMake gated 块；侧车冒烟出启动 URL 成功 | dsh_poc.exe 构建 0 编译警告已拉起待目测；interface 宏坑当场修 |
 | 2026-11-21 20:05 | Agent_20261121184000 | 头部 / 历史任务 / 当前任务 / 台账 / 需求单 / 设计文档 | T-074 M0：dsh 全量盘点（子代理重下载）+sidecar 定案+三文档落盘；T-073 入历史（UI 否决，行为修复保留） | npm/Node/WebView2 渠道全验证；M1 待开工 |
 | 2026-11-21 18:50 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / ui(settings+goody) 源码 | T-073：界面美化精修（设置导航指示条/标题层次/留白 + Goody IME Enter 守卫/空态欢迎卡/行高 150%/消息间距/composer 焦点描边/细滚动条/过程行光环） | 构建 0 编译警告 ctest 99 绿；未提交待目测 |

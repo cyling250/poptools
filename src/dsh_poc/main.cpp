@@ -102,7 +102,14 @@ int main(int argc, char *argv[])
     web->setUserDataDir(dataRoot + "/WebView2PoC");
 
     const auto logLine = [log](const QString &text) {
-        log->appendPlainText(QTime::currentTime().toString("HH:mm:ss ") + text);
+        const QString line = QTime::currentTime().toString("HH:mm:ss ") + text;
+        log->appendPlainText(line);
+        // 调试：同步落文件（黑框排查——GUI 日志窗不可远程读取）
+        QFile debugLog(QCoreApplication::applicationDirPath() + "/dsh_poc_debug.log");
+        if (debugLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            debugLog.write(line.toUtf8() + "\n");
+            debugLog.close();
+        }
     };
 
     if (root.isEmpty()) {

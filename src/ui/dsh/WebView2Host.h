@@ -37,6 +37,7 @@ public:
 
     void setUserDataDir(const QString &dir); // 浏览器用户数据目录（须绝对路径；多进程勿共用）
     void navigate(const QString &url);       // 未就绪时暂存，ready 后补导航
+    void initialize();                       // 显式预初始化（常驻窗在未显示时预热内核）
     bool isReady() const { return m_ready; }
 
 signals:

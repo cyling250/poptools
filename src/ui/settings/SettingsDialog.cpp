@@ -23,12 +23,10 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QRegularExpressionValidator>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyleHints>
-#include <QTime>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -119,8 +117,7 @@ SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
     const std::initializer_list<QWidget *> instantControls = {
         m_formatCombo, m_urlEdit, m_keyEdit, m_modelEdit, m_domainEdit, m_termsEdit,
         m_dirEdit, m_monEnabledSwitch, m_monOcrSwitch, m_monIdleSpin, m_monRetentionSpin,
-        m_gdyKeyEdit, m_gdyUrlEdit, m_gdyModelEdit, m_gdyPermCombo, m_gdyTimeEdit,
-        m_gdyAutoSwitch, m_gdyBallSwitch, m_gdyAppendix,
+        m_gdyBallSwitch,
         m_calLunarSwitch, m_calWeekNumSwitch, m_calEventsSwitch, m_calGlassSwitch,
         m_calGuideSwitch, m_calListSwitch, m_calFontSpin,
     };
@@ -192,19 +189,9 @@ void SettingsDialog::commitSettings()
     s.setMonitorOcrSnapshot(m_monOcrSwitch->isChecked());
     s.setMonitorIdleThresholdSec(m_monIdleSpin->value());
     s.setMonitorRetentionDays(m_monRetentionSpin->value());
-    s.setAssistantApiKey(m_gdyKeyEdit->text().trimmed());
-    s.setAssistantApiBaseUrl(m_gdyUrlEdit->text().trimmed());
-    s.setAssistantApiModel(m_gdyModelEdit->text().trimmed());
-    s.setAssistantPermMode(m_gdyPermCombo->currentData().toString());
-    // T-062 修复: HH:mm 校验器允许 Intermediate 残留（如“2:”），无效时刻
-    // 不落盘，保留磁盘上的最近有效值（读侧另有 22:00 回退兜底）
-    const QString summaryTime = m_gdyTimeEdit->text().trimmed();
-    s.setAssistantSummaryTime(QTime::fromString(summaryTime, QStringLiteral("HH:mm")).isValid()
-                                  ? summaryTime
-                                  : Settings::instance().assistantSummaryTime());
-    s.setAssistantAutoSummarize(m_gdyAutoSwitch->isChecked());
-    s.setAssistantBallEnabled(m_gdyBallSwitch->isChecked()); // T-050
-    s.setAssistantPersonaAppendix(m_gdyAppendix->toPlainText());
+    // Goody 模型/权限/总结配置已随 dsh 常驻服务交由其自身设置管理（T-074），
+    // 此页只写悬浮球开关
+    s.setAssistantBallEnabled(m_gdyBallSwitch->isChecked());
     s.endBatch(); // 批量写收口：一次整 INI sync（其后日历 JSON 与广播不变）
 
     // 桌面日历：load→改→save 只覆写本页暴露的 7 个字段；几何(x/y/width/height)
@@ -559,81 +546,28 @@ QWidget *SettingsDialog::buildMonitorPage()
     return page;
 }
 
-// Goody 管家页：独立 API 卡片组 + 权限/每日记录 + 悬浮球 + 人格附言
+// Goody 管家页（T-074 改造）：对话/模型/权限/总结已整体交由 dsh 常驻服务
+//（其设置在 dsh 界面自身的管理页），此处只留悬浮球开关与打开入口
 QWidget *SettingsDialog::buildGoodyPage()
 {
     auto *page = newPage(QStringLiteral("Goody 管家"));
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    // ---- 大模型 API ----
-    auto *apiGroup = new SettingCardGroup(QStringLiteral("大模型 API（OpenAI 兼容）"), page);
-    lay->addWidget(apiGroup);
-
-    auto *keyCard = new SettingCard(QStringLiteral("API Key"),
-                                    QStringLiteral("只保存在本机 PopTools.ini"), page);
-    m_gdyKeyEdit = new QLineEdit(keyCard);
-    m_gdyKeyEdit->setEchoMode(QLineEdit::Password);
-    m_gdyKeyEdit->setPlaceholderText(QStringLiteral("sk-…"));
-    m_gdyKeyEdit->setText(Settings::instance().assistantApiKey());
-    m_gdyKeyEdit->setMinimumWidth(300);
-    keyCard->setTrailingWidget(m_gdyKeyEdit);
-    apiGroup->addCard(keyCard);
-
-    auto *urlCard = new SettingCard(QStringLiteral("Base URL"), QString(), page);
-    m_gdyUrlEdit = new QLineEdit(urlCard);
-    m_gdyUrlEdit->setText(Settings::instance().assistantApiBaseUrl());
-    m_gdyUrlEdit->setMinimumWidth(300);
-    urlCard->setTrailingWidget(m_gdyUrlEdit);
-    apiGroup->addCard(urlCard);
-
-    auto *modelCard = new SettingCard(QStringLiteral("模型"),
-                                      QStringLiteral("调试推荐 deepseek-v4-flash（便宜快）；正式总结可换 deepseek-chat"), page);
-    m_gdyModelEdit = new QLineEdit(modelCard);
-    m_gdyModelEdit->setText(Settings::instance().assistantApiModel());
-    m_gdyModelEdit->setMinimumWidth(300);
-    modelCard->setTrailingWidget(m_gdyModelEdit);
-    apiGroup->addCard(modelCard);
-
-    // ---- 权限与每日记录 ----
-    auto *permGroup = new SettingCardGroup(QStringLiteral("权限与每日记录"), page);
-    lay->addWidget(permGroup);
-
-    auto *permCard = new SettingCard(QStringLiteral("权限模式"), QString(), page);
-    m_gdyPermCombo = new QComboBox(permCard);
-    m_gdyPermCombo->addItem(QStringLiteral("逐条确认（写文件/执行命令前都问我）"),
-                            QStringLiteral("ask"));
-    m_gdyPermCombo->addItem(QStringLiteral("智能自动（安全命令白名单内自动执行）"),
-                            QStringLiteral("smart"));
-    m_gdyPermCombo->addItem(QStringLiteral("全自动（不再询问，风险自负）"), QStringLiteral("auto"));
-    const QString permMode = Settings::instance().assistantPermMode();
-    for (int i = 0; i < m_gdyPermCombo->count(); ++i)
-        if (m_gdyPermCombo->itemData(i).toString() == permMode)
-            m_gdyPermCombo->setCurrentIndex(i);
-    permCard->setTrailingWidget(m_gdyPermCombo);
-    permGroup->addCard(permCard);
-
-    auto *timeCard = new SettingCard(
-        QStringLiteral("每日总结时刻"),
-        QStringLiteral("每天到点后检查活动日志，为有记录但未总结的日子生成「本日工作记录」"), page);
-    m_gdyTimeEdit = new QLineEdit(timeCard);
-    m_gdyTimeEdit->setText(Settings::instance().assistantSummaryTime());
-    m_gdyTimeEdit->setPlaceholderText(QStringLiteral("22:00"));
-    m_gdyTimeEdit->setMinimumWidth(110);
-    // 输入即校验 HH:mm（R3 #15）；Intermediate 残留（如“2:”）提交侧不落坏值
-    //（见 commitSettings），读侧另有 22:00 回退兜底
-    m_gdyTimeEdit->setValidator(
-        new QRegularExpressionValidator(QRegularExpression(QStringLiteral(
-            "^([01]?\\d|2[0-3]):[0-5]\\d$")), m_gdyTimeEdit));
-    timeCard->setTrailingWidget(m_gdyTimeEdit);
-    permGroup->addCard(timeCard);
-
-    auto *autoCard = new SettingCard(QStringLiteral("自动生成每日工作记录"),
-                                     QStringLiteral("启动时补账 + 每日定时"), page);
-    m_gdyAutoSwitch = new ToggleSwitch(autoCard);
-    m_gdyAutoSwitch->setChecked(Settings::instance().assistantAutoSummarize());
-    autoCard->setTrailingWidget(m_gdyAutoSwitch);
-    permGroup->addCard(autoCard);
+    // ---- 对话窗（T-069b 菜单精简：托盘「Goody 管家」的等价入口） ----
+    auto *openGroup = new SettingCardGroup(QStringLiteral("对话窗"), page);
+    lay->addWidget(openGroup);
+    auto *openCard = new SettingCard(
+        QStringLiteral("打开 Goody 管家"),
+        QStringLiteral("呼出方式：Ctrl+Alt+G、桌面悬浮球单击，或点右侧按钮。"
+                       "模型与权限等在管家的设置页内配置"), page);
+    auto *openBtn = new QPushButton(QStringLiteral("打开"), openCard);
+    connect(openBtn, &QPushButton::clicked, this, [this] {
+        if (m_services && m_services->goodyOpenChat)
+            m_services->goodyOpenChat();
+    });
+    openCard->setTrailingWidget(openBtn);
+    openGroup->addCard(openCard);
 
     // ---- 桌面悬浮球（T-050） ----
     auto *ballGroup = new SettingCardGroup(QStringLiteral("桌面悬浮球"), page);
@@ -646,35 +580,9 @@ QWidget *SettingsDialog::buildGoodyPage()
     ballCard->setTrailingWidget(m_gdyBallSwitch);
     ballGroup->addCard(ballCard);
 
-    // ---- 人格附言 ----
-    auto *personaGroup = new SettingCardGroup(QStringLiteral("人格附言"), page);
-    lay->addWidget(personaGroup);
-    auto *personaCard = new SettingCard(QStringLiteral("追加内容"),
-                                        QStringLiteral("追加到 Goody 系统提示词末尾，例如：称呼我为“老板”；记录风格口语化一点…"), page);
-    m_gdyAppendix = new QPlainTextEdit(personaCard);
-    m_gdyAppendix->setPlaceholderText(QStringLiteral("例如：称呼我为\"老板\"；记录风格口语化一点…"));
-    m_gdyAppendix->setFixedHeight(80);
-    m_gdyAppendix->setMinimumWidth(400);
-    m_gdyAppendix->setPlainText(Settings::instance().assistantPersonaAppendix());
-    personaCard->setTrailingWidget(m_gdyAppendix);
-    personaGroup->addCard(personaCard);
-
-    // ---- 打开对话窗（T-069b 菜单精简：托盘「Goody 管家」的等价入口） ----
-    auto *openGroup = new SettingCardGroup(QStringLiteral("对话窗"), page);
-    lay->addWidget(openGroup);
-    auto *openCard = new SettingCard(
-        QStringLiteral("打开 Goody 管家"),
-        QStringLiteral("呼出方式：Ctrl+Alt+G、桌面悬浮球单击，或点右侧按钮"), page);
-    auto *openBtn = new QPushButton(QStringLiteral("打开"), openCard);
-    connect(openBtn, &QPushButton::clicked, this, [this] {
-        if (m_services && m_services->goodyOpenChat)
-            m_services->goodyOpenChat();
-    });
-    openCard->setTrailingWidget(openBtn);
-    openGroup->addCard(openCard);
-
     lay->addWidget(makeHint(QStringLiteral(
-        "Key 只保存在本机 PopTools.ini，不会随仓库提交。")));
+        "后台服务随 PopTools 常驻运行：关闭管家窗口只是回到托盘，"
+        "定时任务与在途回答不会中断。")));
     lay->addStretch();
     return page;
 }

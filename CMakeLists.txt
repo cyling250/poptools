@@ -150,25 +150,9 @@ if(EXISTS "${RAPIDOCR_DIR}/RapidOCR-json.exe")
     )
 endif()
 
-# ---- M1 dsh 嵌入 PoC（T-074）：WebView2 宿主 + dsh sidecar 运行时 + 独立验证窗 ----
-# 依赖 tools/webview2（scripts/install_webview2.py）与 tools/node + tools/dsh
-#（scripts/install_dsh.py）。webview2 缺失时整体跳过，不阻断主构建（RapidOCR 同惯例）。
-# 正式收编进产品窗口在 M3；届时本节随旧 GoodyWindow 退役一并归位
+# ---- M1 dsh 嵌入 PoC（T-074）：独立验证窗（poptools_ui_dsh 已正式入
+# src/ui 聚合并被 GoodyModule 链接；本 target 仅作开发调试工具保留） ----
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/include/WebView2.h")
-    add_library(poptools_ui_dsh STATIC
-        src/ui/dsh/WebView2Host.cpp
-        src/ui/dsh/WebView2Host.h
-        src/ui/dsh/DshRuntime.cpp
-        src/ui/dsh/DshRuntime.h
-    )
-    target_include_directories(poptools_ui_dsh PUBLIC "${CMAKE_SOURCE_DIR}/src")
-    # WebView2Host.h 直接含 <WebView2.h>（COM 类型在头成员里），include 路径须
-    # PUBLIC 传递；SYSTEM 压掉 MIDL 生成头的编译警告
-    target_include_directories(poptools_ui_dsh SYSTEM PUBLIC
-        "${CMAKE_SOURCE_DIR}/tools/webview2/include")
-    target_compile_definitions(poptools_ui_dsh PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(poptools_ui_dsh PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets user32)
-
     add_executable(dsh_poc WIN32 src/dsh_poc/main.cpp)
     target_link_libraries(dsh_poc PRIVATE poptools_ui_dsh Qt6::Widgets)
     add_custom_command(TARGET dsh_poc POST_BUILD
@@ -180,7 +164,18 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/include/WebView2.h")
         COMMENT "Deploying WebView2Loader.dll + Qt runtime for dsh_poc"
     )
 else()
-    message(STATUS "tools/webview2 缺失：跳过 poptools_ui_dsh 与 dsh_poc（运行 scripts/install_webview2.py）")
+    message(STATUS "tools/webview2 缺失：跳过 dsh_poc（运行 scripts/install_webview2.py）")
+endif()
+
+# WebView2Loader.dll（PopTools 主程序）：poptools_ui_dsh 经 QLibrary 动态解析，
+# exe 目录优先，兜底源码树 tools/webview2/x64——部署到主程序旁保证安装包形态可用
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/x64/WebView2Loader.dll")
+    add_custom_command(TARGET PopTools POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/tools/webview2/x64/WebView2Loader.dll"
+            "$<TARGET_FILE_DIR:PopTools>"
+        COMMENT "Deploying WebView2Loader.dll for PopTools"
+    )
 endif()
 
 # 安装规则（可选）

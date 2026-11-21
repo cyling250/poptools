@@ -93,15 +93,9 @@ private:
     QSpinBox *m_monIdleSpin = nullptr;
     QSpinBox *m_monRetentionSpin = nullptr;
 
-    // Goody 管家
-    QLineEdit *m_gdyKeyEdit = nullptr;
-    QLineEdit *m_gdyUrlEdit = nullptr;
-    QLineEdit *m_gdyModelEdit = nullptr;
-    QComboBox *m_gdyPermCombo = nullptr;
-    QLineEdit *m_gdyTimeEdit = nullptr;
-    ToggleSwitch *m_gdyAutoSwitch = nullptr;
+    // Goody 管家（T-074：模型/API/权限/总结时刻等已随 dsh 常驻服务交由
+    // dsh 自身设置页管理，此处只留悬浮球与打开入口）
     ToggleSwitch *m_gdyBallSwitch = nullptr; // T-050：桌面悬浮球开关
-    QPlainTextEdit *m_gdyAppendix = nullptr;
 
     // 桌面日历（CalendarSettings JSON 存储；T-056 起日历面版只留翻页+调整）
     ToggleSwitch *m_calDutySwitch = nullptr;    // 桌面日历总开关（T-069b，即时槽不走 commit）

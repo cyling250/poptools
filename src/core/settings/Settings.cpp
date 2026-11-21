@@ -486,6 +486,24 @@ void Settings::setAssistantBallPos(const QString &xy)
     syncChecked();
 }
 
+// ---- dsh 常驻服务（T-074） ----
+
+QString Settings::dshApiKey() const
+{
+    return m_s.value("dsh/apiKey", "").toString();
+}
+
+QByteArray Settings::dshWindowGeometry() const
+{
+    return m_s.value("dsh/windowGeometry").toByteArray();
+}
+
+void Settings::setDshWindowGeometry(const QByteArray &state)
+{
+    m_s.setValue("dsh/windowGeometry", state);
+    syncChecked();
+}
+
 QString Settings::updateIgnoredVersion() const
 {
     return m_s.value("update/ignoredVersion", QString()).toString();

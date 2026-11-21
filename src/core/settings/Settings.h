@@ -129,6 +129,14 @@ public:
     QString assistantBallPos() const;
     void setAssistantBallPos(const QString &xy);
 
+    // ---- dsh 常驻服务（T-074：dsh 原样移植，旧 Goody 对话界面的替代） ----
+    // DeepSeek API Key：本机 ini [dsh] apiKey（DshRuntime 经启动环境注入
+    // DEEPSEEK_API_KEY——dsh 官方 sidecar 供 Key 路径）；不入仓库
+    QString dshApiKey() const;
+    // dsh 常驻窗几何（base64 序列化；空 = 未记忆，取默认尺寸）
+    QByteArray dshWindowGeometry() const;
+    void setDshWindowGeometry(const QByteArray &state);
+
     // ---- 更新自查 ----
     // 用户选择"跳过此版本"的 Release 版本号（如 "v0.5.0"）；启动自动检查时
     // 命中则静默，不再弹提示。手动检查不受此键影响

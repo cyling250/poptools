@@ -14,6 +14,7 @@ namespace poptools {
 class ActivityStore;
 class ChatSession;
 class DailyRecordJob;
+class DshWindow;
 class GoodyFloatingBall;
 class GoodyWindow;
 class LlmClient;
@@ -56,6 +57,7 @@ signals:
 
 private:
     void ensureWindow();
+    void ensureDshWindow();      // T-074：dsh 常驻窗懒建（init 即建即启动 sidecar）
     void ensureBall();           // T-050：悬浮球懒建（开关开且未建时）
     void applyBallSettings();    // T-050：球开关/位置重应用（init 与设置变更共用）
     void applyPermissionSettings(); // 权限三参数从 Settings 重应用（init 装配与设置变更共用）
@@ -84,7 +86,11 @@ private:
     PermissionManager *m_perm = nullptr;
     LlmClient *m_client = nullptr;
     ChatSession *m_session = nullptr;
-    GoodyWindow *m_window = nullptr;
+    // T-074：对话窗已切 dsh 常驻窗（用户 2026-11-21 拍板）。旧 GoodyWindow
+    // 全家（气泡/侧栏/回合链）保留编译但不再实例化（m_window 恒空），
+    // 域代码删除与测试手术在下一批
+    DshWindow *m_dshWindow = nullptr; // dsh 常驻窗（sidecar 常驻 + WebView2 内容）
+    GoodyWindow *m_window = nullptr;  // 旧聊天窗（已退役，恒空；下批删）
     // 桌面悬浮球：无父窗口，进程退出由 OS 回收（析构不执行）——球无关键
     // 落盘（位置在拖动时即时持久化），无析构依赖
     GoodyFloatingBall *m_ball = nullptr; // T-050

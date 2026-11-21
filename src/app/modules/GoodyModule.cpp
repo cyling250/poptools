@@ -19,7 +19,7 @@
 #include "core/assistant/Scheduler.h"
 #include "core/assistant/WorkingMemory.h"
 #include "core/monitor/ActivityStore.h"
-#include "core/monitor/MainThreadProbe.h" // T-070b 后台停摆归因打点
+#include "core/monitor/MainThreadProbe.h" // T-070b 停摆归因打点（旧回合链路死代码仍在用，域删除批一并清）
 #include "core/assistant/FsTool.h"
 #include "core/assistant/LlmClient.h"
 #include "core/assistant/MonitorQueryTool.h"
@@ -30,6 +30,7 @@
 #include "core/hotkey/GlobalHotKey.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
+#include "ui/dsh/DshWindow.h"
 #include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyFloatingBall.h"
 #include "ui/goody/GoodyWindow.h"
@@ -51,6 +52,20 @@ QString monitorDir()
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
         + QStringLiteral("/monitor");
+}
+
+// dsh 运行时定位（T-074）：源码树形态从 exe 目录向上找 tools/（node/dsh 由
+// scripts/install_dsh.py 装入）；安装包形态的运行时随包分发在 M3 定案
+QString toolsDir()
+{
+    QDir dir(QCoreApplication::applicationDirPath());
+    for (int i = 0; i < 4; ++i) {
+        if (dir.exists(QStringLiteral("tools/node/current/node.exe")))
+            return dir.absolutePath() + QStringLiteral("/tools");
+        if (!dir.cdUp())
+            break;
+    }
+    return QString();
 }
 } // namespace
 
@@ -89,21 +104,13 @@ void GoodyModule::init(AppServices &services)
     registerBuiltinTools();
     setupMcp();
 
-    // ---- 本日工作记录 + 月度摘要（T-067）：启动补账 + 每日到点 + 静默
-    // 起居注刷新 + 开机滚动月报 + 工具手动触发 ----
+    // ---- 工作记录任务对象（T-074 改造）：DailyRecordJob/MonthlyRecordJob
+    // 保留为「本日工作记录」工具的后端（app.generate_daily_record 等仍可经
+    // 注册表调用）；旧 GoodyModule 心跳/22:00 定时/启动补账全撤——日报/月报
+    // 成文改由 dsh 原生定时任务驱动（用户 2026-11-21 拍板），M2 经 MCP 桥
+    // 暴露活动数据与写入工具
     m_recordJob = new DailyRecordJob(monitorDir(), goodyDir(), this);
     m_monthlyJob = new MonthlyRecordJob(goodyDir(), this);
-    m_scheduler = new Scheduler(this);
-    m_refreshTimer = new QTimer(this);
-    m_refreshTimer->setInterval(20 * 60 * 1000); // 起居注心跳：20min 一判
-    connect(m_refreshTimer, &QTimer::timeout, this, [this] {
-        if (auto *p = MainThreadProbe::instance())
-            p->mark("goody_heartbeat"); // T-070b：后台停摆归因打点
-        m_recordJob->maybeRefreshToday([this](bool changed) {
-            if (changed && m_services)
-                emit m_services->goodySummariesChanged(); // 静默：只发数据变更
-        });
-    });
     // T-067：工作摘要查询槽（桌面日历消费）——路径即存在性，内容由消费方读
     services.goodyDailyDigestPath = [this](int y, int m, int d) {
         const QDate date(y, m, d);
@@ -118,24 +125,6 @@ void GoodyModule::init(AppServices &services)
         const QString p = MonthlyRecordJob::monthPath(goodyDir(), y, m);
         return QFile::exists(p) ? p : QString();
     };
-    applySummarySchedule();
-    // 启动（延迟 5s：等事件循环与网络就绪）：历史日补账 + 当月滚动月报
-    //（【月报更新】；无日摘要不烧 LLM；往月冻结不自动重算）
-    if (Settings::instance().assistantAutoSummarize()) {
-        QTimer::singleShot(5000, this, [this] {
-            if (!Settings::instance().assistantAutoSummarize())
-                return;
-            m_recordJob->processPending(false, [](int, const QString &) {});
-            const QDate today = QDate::currentDate();
-            if (MonthlyRecordJob::monthHasDailyData(goodyDir(), today.year(),
-                                                    today.month()))
-                m_monthlyJob->runForMonth(today.year(), today.month(),
-                                          [this](bool ok, const QString &) {
-                                              if (ok && m_services)
-                                                  emit m_services->goodySummariesChanged();
-                                          });
-        });
-    }
 
     // 呼出热键（注册失败由组合根统一气泡告知；R5-D2：注册返回值用于
     // 托盘文案标注，不再静默）
@@ -158,20 +147,15 @@ void GoodyModule::init(AppServices &services)
     //「打开 Goody 管家」卡片消费（热键与悬浮球入口不变）
     services.goodyOpenChat = [this] { openChat(); };
 
+    // T-074：dsh 常驻窗 + sidecar 常驻启动（PopTools 存续期后台运行，
+    // 悬浮球/热键/设置页只唤起窗口不启停服务——用户 2026-11-21 拍板）
+    ensureDshWindow();
+
     // T-050：桌面悬浮球（开关默认开；关=销毁，设置页即时重应用）
     applyBallSettings();
 
-    // 聊天数据流
-    connect(m_client, &LlmClient::contentDelta, this, [this](const QString &delta) {
-        if (m_window)
-            m_window->appendAssistantDelta(delta);
-    });
-    // T-050-P2：思考增量 → 思考折叠区（流式，默认折叠，标题行报字数）
-    connect(m_client, &LlmClient::reasoningDelta, this, [this](const QString &delta) {
-        if (m_window)
-            m_window->appendReasoningDelta(delta);
-    });
-    connect(m_client, &LlmClient::finished, this, &GoodyModule::onTurnFinished);
+    // 旧聊天窗数据流已随 dsh 切换退役（m_window 恒空，ensureWindow 死代码
+    // 保留至域删除批）
 
     connect(&services, &AppServices::settingsChanged, this, &GoodyModule::onSettingsChanged);
 }
@@ -188,13 +172,12 @@ void GoodyModule::shutdown()
         m_auditStore->stop();
 }
 
-// 设置页保存后的三路重应用：权限参数 / 总结调度 / 悬浮球开关（各自内部幂等）
+// 设置页保存后的两路重应用：权限参数 / 悬浮球开关（各自内部幂等）。
+// 总结调度已随 dsh 原生定时任务退役（T-074，m_scheduler 恒空）
 void GoodyModule::onSettingsChanged()
 {
     // 权限配置即时重读（模式/白名单在设置页修改后生效）
     applyPermissionSettings();
-    // 总结调度接线：总结时刻/自动开关改动即时生效（原实现须重启）
-    applySummarySchedule();
     // T-050：悬浮球开关/位置改动即时重应用（开=建+显示，关=销毁）
     applyBallSettings();
 }
@@ -610,21 +593,49 @@ void GoodyModule::updateWorkingState()
     emit workingChanged(working);
 }
 
-// 唯一自动唤起点：懒启动 MCP → 懒建窗口 → 前置/激活；悬浮球按开关隐没，
+// ---- T-074：dsh 常驻窗 ----
+
+// 懒建（幂等）：init 即调——sidecar 常驻启动 + WebView2 内核预热，
+// 悬浮球/热键/设置页唤起只是 show（不再有"点了才启动"的等待）
+void GoodyModule::ensureDshWindow()
+{
+    if (m_dshWindow)
+        return;
+    m_dshWindow = new DshWindow();
+    const QString tools = toolsDir();
+    const QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    m_dshWindow->configure(
+        tools + QStringLiteral("/node/current/node.exe"),
+        tools + QStringLiteral("/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"),
+        dataRoot + QStringLiteral("/dsh-home"),
+        dataRoot + QStringLiteral("/dsh-agents-home"),
+        Settings::instance().dshApiKey(),
+        dataRoot + QStringLiteral("/WebView2"));
+    // sidecar 工作态 → 悬浮球呼吸（Starting 呼吸 / Ready、Failed 停）
+    connect(m_dshWindow, &DshWindow::workingChanged, this, [this](bool working) {
+        m_working = working;
+        emit workingChanged(working);
+    });
+    // 窗口隐藏回后台：悬浮球按开关回归（与旧聊天窗同语义）
+    connect(m_dshWindow, &DshWindow::windowHidden, this, [this] {
+        if (m_ball && Settings::instance().assistantBallEnabled())
+            m_ball->show();
+    });
+    connect(m_dshWindow, &QObject::destroyed, this, [this] { m_dshWindow = nullptr; });
+}
+
+// 唯一唤起点：dsh 常驻窗前置/激活（服务已常驻，无启动等待）；悬浮球隐没，
 // 关窗经 windowHidden 回归
 void GoodyModule::openChat()
 {
-    ensureMcpStarted(); // R6-C2: 首次打开聊天窗即拉起 MCP 子进程（幂等）
-    ensureWindow();
-    if (m_window->isVisible()) {
-        m_window->raise();
-        m_window->activateWindow();
+    ensureDshWindow();
+    if (m_dshWindow->isVisible()) {
+        m_dshWindow->raise();
+        m_dshWindow->activateWindow();
         return;
     }
-    m_window->show();
-    m_window->raise();
-    m_window->activateWindow();
-    // T-050：聊天时悬浮球隐没（球是唯一自动唤起点；关窗时经 windowHidden 回归）
+    m_dshWindow->openWindow();
+    // T-050：聊天时悬浮球隐没（关窗时经 windowHidden 回归）
     if (m_ball)
         m_ball->hide();
 }
