@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-22 01:55（T-074 M3 融合收口：安装器联网装 dsh（iss [Code]+pack_dsh_runtime.py，ISCC 编译验证）+ 截图历史层（PinWindow 副本/CaptureHistoryJob OCR 标注 30 天清理/MCP 两工具）+ 收纳盒实时重载（BoxModule 转 QObject），03ab228 提交；T-074 全批次落码完成待用户验收） · Agent_20261121184000
 > 最后更新：2026-11-22 01:05（T-074 M2.5 全功能交底收口：域工具 16 件并入 MCP（22 工具清单），跨进程 dirty 协议 + 心跳呼吸 + 单实例守卫 + 调试日志撤离，595aa07 提交；AGENTS.md 全功能指引与上下文纪律更新；打包形态决策点待用户） · Agent_20261121184000
 > 最后更新：2026-11-22 00:15（T-074 M2 能力桥收口：poptools_mcp_server 挂进 dsh 端到端实证（node→mcp-manager→子进程存活），六工具=活动数据/日报月报落盘/截图/OCR，ca05a55 提交；P-073 dsh-home 双层路径坑入账，孤儿测试 home 已清） · Agent_20261121184000
 > 最后更新：2026-11-21 22:45（T-074 删除批收口：旧 Goody 域全量退役（assistant 15 类/UI 六件/ToolRegistry 链/Settings 废弃键），domain_tests 3688→1770 行 52 用例全绿；旧记忆空零损失，dsh-home/AGENTS.md 人格基线写入；bc9abb9 融合批+8270ab3 删除批已提交） · Agent_20261121184000
@@ -188,6 +189,19 @@
   ①安装器首启下载（Inno [Code] 或首启检测缺失 → 引导下载器）②便携 zip 随
   附 install_dsh.py ③dsh 精简裁剪（去掉 experimental/未用包降体积）。当前
   源码树形态已可用（install_dsh.py + tools/ 定位健壮），iss 未注入 dsh 件
+- **M3 融合收口（03ab228，2026-11-22）**：①安装器联网装 dsh（用户拍板）——iss
+  [Code] ssInstall 时 WebView2 检测补装 + dsh 运行时下载解压（PowerShell 系统
+  自带能力，失败不阻断）；pack_dsh_runtime.py 打包 tools/→Release 资产 zip；
+  ISCC 编译验证通过 ②截图历史层（用户构想落地）——PinWindow saveHistoryCopy
+  （张贴始终存副本 captures/年-月/，与 pinSaveDir 语义解耦）+ CaptureHistoryJob
+  （15min 一轮：未标注图→RapidOCR→.label.json 侧车本地零 token；30 天保留期
+  清理）+ MCP capture_history_list/search（OCR 文本检索）③收纳盒实时重载——
+  BoxModule 转 QObject + box.dirty→reloadCatalog（MCP agent 整理桌面免重启）
+- 待验收清单（用户）：①dsh 对话「我今天干了什么」（activity 工具）②「把今天的
+  日报写一下」→ 日历日期链接 → notepad 弹日报（digest 工具+日历链路）③「把日历
+  的农历关掉」（settings_set+dirty 协议即时生效）④「帮我整理桌面文件夹」（box
+  工具+实时重载）⑤截图历史：贴几张图 → 等 OCR 标注 → 问「最近截了哪些图」⑥
+  「每天 22 点写日报」schedule 定时（dsh 原生）⑦悬浮球呼吸随 agent 工具调用
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
@@ -390,6 +404,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-22 01:55 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / packaging(iss) / scripts(pack) / pin / app(Box+CaptureHistory+Main) / mcpserver / CMake | T-074 M3：安装器联网装 dsh+截图历史层+收纳盒实时重载；ISCC 编译验证 | 构建 0 编译警告 ctest 54 绿；03ab228；全链路复验（mcp 子进程存活） |
 | 2026-11-22 01:05 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / mcpserver / app(Main+Watcher) / goody / settings / main / dsh-home AGENTS.md | T-074 M2.5：域工具 16 件（22 清单）+dirty 跨进程协议+心跳呼吸+单实例+日志撤离 | 构建 0 编译警告 ctest 54 绿；595aa07；打包决策点待用户 |
 | 2026-11-22 00:15 | Agent_20261121184000 | 头部 / 当前任务 / 踩坑记录 / 台账 / src(mcpserver) / CMake / tests / dsh-home 配置 | T-074 M2：MCP 服务器六工具+协议框架+dsh patch 注入+AGENTS.md 工作流+2 用例 | 构建 0 编译警告 ctest 54 绿；端到端实证（mcp 子进程存活）；P-073 入账 |
 | 2026-11-21 22:45 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / assistant+goody+settings+app 源码 / CMake / tests / dsh-home AGENTS.md | T-074 删除批：旧 Goody 域全量退役+domain_tests 手术+记忆迁移（空）+AGENTS.md 人格基线 | 构建 0 编译警告 ctest 52 用例全绿；bc9abb9+8270ab3 提交 |
