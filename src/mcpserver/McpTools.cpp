@@ -77,6 +77,10 @@ QJsonArray mcpToolDescriptors()
     readMonthlyProps.insert(QStringLiteral("year"), intProp(QStringLiteral("四位年份，默认当前年")));
     readMonthlyProps.insert(QStringLiteral("month"), intProp(QStringLiteral("1-12，默认当前月")));
 
+    QJsonObject ocrImageProps;
+    ocrImageProps.insert(QStringLiteral("image_path"),
+                         strProp(QStringLiteral("本地图片绝对路径")));
+
     QJsonArray tools;
     tools += tool(
         QStringLiteral("poptools_activity_daily"),
@@ -110,6 +114,12 @@ QJsonArray mcpToolDescriptors()
         QStringLiteral("截取当前屏幕（整虚拟桌面拼图），PNG 存临时目录并返回路径。"
                        "用户要求「看看我的屏幕」或结合 OCR 读取屏幕文字时用。"),
         objectSchema(QJsonObject{}));
+    tools += tool(
+        QStringLiteral("poptools_ocr_image"),
+        QStringLiteral("对本地图片做离线 OCR（RapidOCR），返回识别文本。"
+                       "常与 poptools_capture_screenshot 组合使用：先截图取路径，"
+                       "再用本工具读屏幕文字。"),
+        objectSchema(ocrImageProps));
     return tools;
 }
 

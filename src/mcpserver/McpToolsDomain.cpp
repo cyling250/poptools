@@ -371,8 +371,12 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
 
     // ---- 收纳盒域 ----
     if (name == QLatin1String("poptools_box_catalog_get")) {
+        // 具名变量承接：临时 BoxCatalog 在 range-init 全表达式末尾析构，
+        // 内联「load().boxes()」遍历=悬垂 UAF（2026-11-22 冒烟实锤，主程序
+        // BoxModule 先存具名变量故从未发病）
+        const BoxCatalog catalog = BoxCatalog::load();
         QJsonArray arr;
-        for (const BoxDef &b : BoxCatalog::load().boxes())
+        for (const BoxDef &b : catalog.boxes())
             arr.append(QJsonObject{{"id", b.id},
                                    {"name", b.name},
                                    {"dir", b.dir},
