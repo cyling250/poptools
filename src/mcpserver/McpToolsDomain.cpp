@@ -204,6 +204,21 @@ QJsonArray domainToolDescriptors()
                   QStringLiteral("修改 PopTools 全局设置（只传要改的字段，立即生效）。"),
                   objectSchema(sysSetProps));
 
+    // ---- 截图历史域（T-074：截图历史层的 AI 管理面） ----
+    QJsonObject capListProps;
+    capListProps.insert(QStringLiteral("month"), strProp(QStringLiteral("按月过滤 YYYY-MM；缺省=全部")));
+    tools += tool(
+        QStringLiteral("poptools_capture_history_list"),
+        QStringLiteral("列出截图历史（每次张贴自动归档 captures/年-月/，OCR 标注自动补写）。"
+                       "用户问「最近截了哪些图/那张图里写了什么」时用。"),
+        objectSchema(capListProps));
+    QJsonObject capSearchProps;
+    capSearchProps.insert(QStringLiteral("query"), strProp(QStringLiteral("关键词（匹配截图 OCR 文本）")));
+    tools += tool(
+        QStringLiteral("poptools_capture_history_search"),
+        QStringLiteral("按 OCR 文本搜索截图历史（找「写过 XX 的那张图」）。命中后用图片路径做深度解读。"),
+        objectSchema(capSearchProps));
+
     // ---- 上下文管理域（AI 自管理目录：千级日志先索引后取文） ----
     tools += tool(QStringLiteral("poptools_digest_list"),
                   QStringLiteral("列出全部日报/月报清单（名称/时间/标题）。"
@@ -487,6 +502,88 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
                             {"target", target},
                             {"result", resultText}},
                 false};
+        return true;
+    }
+
+    // ---- 截图历史域 ----
+    if (name == QLatin1String("poptools_capture_history_list")) {
+        const QString month = args.value(QStringLiteral("month")).toString();
+        if (!month.isEmpty() && !QRegularExpression(QStringLiteral("^\\d{4}-\\d{2}$"))
+                                   .match(month)
+                                   .hasMatch()) {
+            *out = McpToolResult{err(QStringLiteral("month 格式应为 YYYY-MM")), true};
+            return true;
+        }
+        const QDir base(dataRoot + QStringLiteral("/captures"));
+        QJsonArray entries;
+        const auto readLabel = [](const QString &png) {
+            QFile f(png + QStringLiteral(".label.json"));
+            if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+                return QJsonObject();
+            return QJsonDocument::fromJson(f.readAll()).object();
+        };
+        const auto emitMonth = [&](const QDir &monthDir) {
+            for (const QFileInfo &fi :
+                 monthDir.entryInfoList({"*.png"}, QDir::Files, QDir::Name)) {
+                const QJsonObject label = readLabel(fi.absoluteFilePath());
+                QString snippet = label.value(QStringLiteral("ocr")).toString();
+                if (snippet.size() > 160)
+                    snippet = snippet.left(160);
+                entries.append(QJsonObject{
+                    {"file", fi.absoluteFilePath()},
+                    {"size", double(fi.size())},
+                    {"modified", fi.lastModified().toString(Qt::ISODate)},
+                    {"ocr", snippet},
+                    {"labeled", !label.isEmpty()}});
+            }
+        };
+        if (month.isEmpty()) {
+            for (const QFileInfo &m : base.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+                emitMonth(QDir(m.absoluteFilePath()));
+        } else {
+            emitMonth(QDir(base.filePath(month)));
+        }
+        *out = McpToolResult{QJsonObject{{"ok", true},
+                                         {"count", double(entries.size())},
+                                         {"captures", entries}},
+                             false};
+        return true;
+    }
+    if (name == QLatin1String("poptools_capture_history_search")) {
+        const QString query = args.value(QStringLiteral("query")).toString().trimmed();
+        if (query.isEmpty()) {
+            *out = McpToolResult{err(QStringLiteral("query 必填")), true};
+            return true;
+        }
+        const QDir base(dataRoot + QStringLiteral("/captures"));
+        QJsonArray hits;
+        int scanned = 0;
+        for (const QFileInfo &m : base.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            for (const QFileInfo &lf :
+                 QDir(m.absoluteFilePath()).entryInfoList({"*.label.json"}, QDir::Files,
+                                                          QDir::Name)) {
+                ++scanned;
+                QFile f(lf.absoluteFilePath());
+                if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                const QJsonObject label = QJsonDocument::fromJson(f.readAll()).object();
+                const QString ocr = label.value(QStringLiteral("ocr")).toString();
+                if (ocr.contains(query, Qt::CaseInsensitive)) {
+                    const int at = ocr.indexOf(query, 0, Qt::CaseInsensitive);
+                    const int snippetStart = qMax(0, at - 60);
+                    hits.append(QJsonObject{
+                        {"file", label.value(QStringLiteral("file")).toString()},
+                        {"snippet", ocr.mid(snippetStart, 160)}});
+                    if (hits.size() >= 50)
+                        return true; // 命中上限（经 out 收口前直接断出）
+                }
+            }
+        }
+        *out = McpToolResult{QJsonObject{{"ok", true},
+                                         {"query", query},
+                                         {"scanned_labels", double(scanned)},
+                                         {"hits", hits}},
+                             false};
         return true;
     }
 

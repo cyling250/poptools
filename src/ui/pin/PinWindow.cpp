@@ -13,6 +13,7 @@
 #include <QThreadPool>
 
 #include "core/settings/Settings.h"
+#include <QStandardPaths>
 
 // ============================================================
 // 贴图窗口（F3）：置顶悬浮显示截图，支持拖动 / 滚轮缩放 /
@@ -97,6 +98,7 @@ void PinWindow::pin(const QPixmap &pixmap, const QPoint &globalTopLeft, qreal so
 
     remakeShadow();
     saveToDefaultDir(); // 张贴同时保存到默认文件夹（PNG 无损，异步落盘）
+    saveHistoryCopy();  // T-074 截图历史层（独立于 pinSaveDir 语义）
 
     // 内容左上角 = globalTopLeft；窗口四周是容纳投影衰减的透明边距
     resize(contentSize() + QSize(kMargin * 2, kMargin * 2));
@@ -130,6 +132,32 @@ void PinWindow::saveToDefaultDir()
         if (!img.save(path, "PNG"))
             QFile::remove(path); // 落盘失败：清掉半截文件
         // 销毁先于落盘完成：删掉刚写出的文件，防"销毁后文件复活"
+        if (aborted->load())
+            QFile::remove(path);
+    });
+}
+
+// T-074 截图历史层（用户构想落地）：每次张贴始终存一份历史副本到
+// captures/年-月/（与 pinSaveDir 语义解耦——用户未配置默认目录也积累）。
+// OCR 标注由 CaptureHistoryJob 后台补写侧车文件；保留期 30 天自动清理。
+// 落盘同走线程池（PNG 编码禁入主线程，红线 1）
+void PinWindow::saveHistoryCopy()
+{
+    const QImage img = m_pixmap.toImage();
+    if (img.isNull())
+        return;
+    const QString dataRoot =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString monthDir = dataRoot + QStringLiteral("/captures/")
+                             + QDateTime::currentDateTime().toString("yyyy-MM");
+    const QString path = QDir(monthDir).filePath(
+        QStringLiteral("Shot_%1.png")
+            .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz")));
+    auto aborted = QSharedPointer<std::atomic_bool>::create(false);
+    QThreadPool::globalInstance()->start([img, monthDir, path, aborted] {
+        QDir().mkpath(monthDir);
+        if (!img.save(path, "PNG"))
+            QFile::remove(path);
         if (aborted->load())
             QFile::remove(path);
     });

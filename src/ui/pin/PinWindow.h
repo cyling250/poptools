@@ -54,6 +54,7 @@ protected:
 
 private:
     void saveToDefaultDir();          // 张贴同时保存到默认文件夹
+    void saveHistoryCopy();           // T-074 截图历史层：始终存一份到 captures/年-月（AI 管理）
     QSize contentSize() const;        // 内容显示尺寸（baseSize × scale）
     void remakeShadow();              // 按当前内容尺寸重算投影轮廓
     QImage makeShadow(const QSize &content) const; // 生成内容矩形的高斯模糊投影

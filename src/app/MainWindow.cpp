@@ -1,5 +1,8 @@
 #include "MainWindow.h"
 
+#include "CaptureHistoryJob.h"
+#include "ExternalSyncWatcher.h"
+
 #include "ExternalSyncWatcher.h"
 
 #include <QApplication>
@@ -91,6 +94,9 @@ MainWindow::MainWindow(QObject *parent)
         Settings::instance().syncExternal();
         m_services->notifySettingsChanged();
     });
+
+    // 截图历史层后台服务（T-074：标注 + 30 天清理；OCR 走共享服务子进程）
+    m_captureHistory = new CaptureHistoryJob(dataRoot, m_ocr, this);
 
     // 能力槽完整性自检：拔掉 CaptureModule 时贴图会静默退化为"剪贴板 + 鼠标位置"，
     // 显式告警避免静默降级（模块间依赖在注册顺序上隐式成立，此处是唯一护栏）
@@ -230,4 +236,3 @@ void MainWindow::onShowSettings(bool openCalendarPage)
 }
 
 } // namespace poptools
-#include "app/ExternalSyncWatcher.h"

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QObject>
+
 #include "app/IFeatureModule.h"
 
 #include <QPointer>
@@ -21,9 +23,11 @@ class BoxPanel;
 // 精简：管理/显隐托盘入口撤除，等价入口收进设置页通用页
 //（boxOpenManager/boxAnyVisible/boxSetVisible 槽）。
 // ============================================================
-class BoxModule : public IFeatureModule
+class BoxModule : public QObject, public IFeatureModule
 {
+    Q_OBJECT
 public:
+    explicit BoxModule(QObject *parent = nullptr);
     QString id() const override { return QStringLiteral("box"); }
     void init(AppServices &services) override;
     void shutdown() override;
@@ -37,6 +41,7 @@ private:
     };
 
     void rebuildPanels();
+    void reloadCatalog(); // box.dirty（MCP agent 改写）→ 重读仓库 + 面板重建
     void openManager(const QString &focusBoxId);
     BoxPanel *panelFor(const QString &boxId) const;
 

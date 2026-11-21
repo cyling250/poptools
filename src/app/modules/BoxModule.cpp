@@ -4,7 +4,11 @@
 #include "ui/box/BoxManagerDialog.h"
 #include "ui/box/BoxPanel.h"
 
+#include <QDir>
+#include <QFileSystemWatcher>
+#include <QFileInfo>
 #include <QObject>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <algorithm>
@@ -13,6 +17,11 @@ namespace poptools {
 
 // 装配：读仓库 → 逐盒建面板注册宿主 → 1.5s 延迟拉值守（重活后置，与日历同纪律）；
 // 贡献托盘「收纳盒管理」「显示·隐藏收纳盒」
+BoxModule::BoxModule(QObject *parent)
+    : QObject(parent)
+{
+}
+
 void BoxModule::init(AppServices &services)
 {
     m_services = &services;
@@ -31,6 +40,23 @@ void BoxModule::init(AppServices &services)
     // 入口收进设置页通用页「收纳盒」卡片组（管理对话框 + 显示开关）。
     // 显隐语义沿用原 toggleShow：任一可见 → 全隐藏，否则全显示（零盒时
     // 不动，BUG-08 口径保持）
+    // T-074 M2.5：MCP 服务器（dsh agent）改写 boxes.json 后 touch box.dirty →
+    // 实时重载（收纳盒目录/新增/解绑立即上屏；AI 整理桌面免重启）
+    {
+        const QString dataRoot =
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        auto *watcher = new QFileSystemWatcher(this);
+        if (QDir(dataRoot).exists())
+            watcher->addPath(dataRoot);
+        connect(watcher, &QFileSystemWatcher::directoryChanged, this,
+                [this, dataRoot](const QString &) {
+                    if (!QFileInfo::exists(dataRoot + QStringLiteral("/box.dirty")))
+                        return;
+                    QFile::remove(dataRoot + QStringLiteral("/box.dirty"));
+                    reloadCatalog();
+                });
+    }
+
     services.boxOpenManager = [this] { openManager(QString()); };
     services.boxAnyVisible = [this] {
         if (!m_catalog)
@@ -90,6 +116,18 @@ void BoxModule::rebuildPanels()
         const int id = surface->registerPanel(panel);
         m_panels.append({ d.id, id, panel });
     }
+}
+
+// box.dirty（MCP agent 改写仓库）→ 重读仓库 + 全面板重建。
+// 重建走 rebuildPanels 全量路径：注销旧面板→销毁→按新仓库重建（面板数与
+// 绑定目录都可能变）；显隐态以新仓库为准
+void BoxModule::reloadCatalog()
+{
+    if (!m_catalog)
+        return;
+    BoxCatalog fresh = BoxCatalog::load();
+    *m_catalog = fresh;
+    rebuildPanels();
 }
 
 void BoxModule::openManager(const QString &focusBoxId)

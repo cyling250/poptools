@@ -67,6 +67,8 @@ qt_add_executable(PopTools WIN32
     src/main.cpp
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/CaptureHistoryJob.cpp
+    src/app/CaptureHistoryJob.h
     src/app/ExternalSyncWatcher.cpp
     src/app/ExternalSyncWatcher.h
     src/app/app.rc
