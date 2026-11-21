@@ -9,36 +9,6 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Svg)
 
 add_library(poptools_core STATIC
-    assistant/ChatSession.cpp
-    assistant/ChatSession.h
-    assistant/DailyAggregator.cpp
-    assistant/DailyAggregator.h
-    assistant/DailyRecordJob.cpp
-    assistant/DailyRecordJob.h
-    assistant/FsTool.cpp
-    assistant/FsTool.h
-    assistant/LlmClient.cpp
-    assistant/LlmClient.h
-    assistant/McpStdioClient.cpp
-    assistant/McpStdioClient.h
-    assistant/MemoryStore.cpp
-    assistant/MemoryStore.h
-    assistant/MonthlyRecordJob.cpp
-    assistant/MonthlyRecordJob.h
-    assistant/MonitorQueryTool.cpp
-    assistant/MonitorQueryTool.h
-    assistant/PermissionManager.cpp
-    assistant/PermissionManager.h
-    assistant/Scheduler.cpp
-    assistant/Scheduler.h
-    assistant/ShellTool.cpp
-    assistant/ShellTool.h
-    assistant/ToolRegistry.cpp
-    assistant/ToolRegistry.h
-    assistant/ToolText.cpp
-    assistant/ToolText.h
-    assistant/WorkingMemory.cpp
-    assistant/WorkingMemory.h
     annotation/AnnotationCanvas.cpp
     annotation/AnnotationCanvas.h
     annotation/AnnotationItem.h

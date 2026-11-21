@@ -15,7 +15,6 @@ namespace poptools {
 class DesktopSurfaceHost;
 class GlobalHotKey;
 class RapidOcrService;
-class ToolRegistry;
 
 // ============================================================
 // 应用级共享服务与贡献点（组合根装配，注入各功能模块）。
@@ -35,7 +34,6 @@ public:
     // ---- 共享服务（组合根在 initAll 前注入并持有所有权） ----
     GlobalHotKey *hotkey = nullptr;   // 全局热键注册器
     RapidOcrService *ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
-    ToolRegistry *toolRegistry = nullptr; // Goody 工具注册表（模块 init 中
                                           // registerTool 贡献"掌控本软件"能力）
     QMenu *trayMenu = nullptr;        // 托盘菜单（模块经 addTrayAction 贡献菜单项）
     // 桌面表面（T-059：注入通道 + 共享画布 + 面板事件路由；贴壁纸类面板共用，

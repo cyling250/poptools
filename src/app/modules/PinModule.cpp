@@ -13,7 +13,6 @@
 
 #include "../AppServices.h"
 #include "core/monitor/OwnWriteGuard.h" // T-047-CLIP
-#include "core/assistant/ToolRegistry.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/translation/Translator.h"
@@ -43,29 +42,6 @@ void PinModule::init(AppServices &services)
         QTimer::singleShot(0, QCoreApplication::instance(),
                            [this] { pinFromClipboard(); });
     });
-
-    // Goody 工具贡献：模型可把剪贴板图片贴到屏幕
-    if (services.toolRegistry) {
-        ToolDef d;
-        d.name = QStringLiteral("app.pin_clipboard");
-        d.readOnly = true;
-        d.description = QStringLiteral(
-            "把剪贴板中最新的图片贴为 PopTools 屏幕贴图（置顶悬浮）。"
-            "剪贴板没有图片时返回失败。");
-        d.parameters = emptyObjectSchema();
-        d.fn = [this](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
-            QTimer::singleShot(0, QCoreApplication::instance(), [this, done] {
-                if (QGuiApplication::clipboard()->pixmap().isNull()) {
-                    done(QJsonObject{{"ok", false},
-                                     {"error", QStringLiteral("剪贴板中没有图片")}});
-                    return;
-                }
-                pinFromClipboard();
-                done(QJsonObject{{"ok", true}, {"note", QStringLiteral("已张贴剪贴板图片")}});
-            });
-        };
-        services.toolRegistry->registerTool(d);
-    }
 }
 
 void PinModule::pinFromClipboard()

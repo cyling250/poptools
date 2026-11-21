@@ -90,37 +90,27 @@ public:
 
     // ---- Goody 管家（内置大模型助手） ----
     // API 配置（OpenAI 兼容，默认 DeepSeek；Key 只存本机 ini）
-    QString assistantApiKey() const;
     void setAssistantApiKey(const QString &key);
-    QString assistantApiBaseUrl() const;
     void setAssistantApiBaseUrl(const QString &url);
-    QString assistantApiModel() const;
     void setAssistantApiModel(const QString &model);
     // 呼出热键（默认 Ctrl+Alt+G：VK_G=0x47, MOD_CONTROL|MOD_ALT=0x0003）
     quint32 assistantHotKeyVk() const;
     quint32 assistantHotKeyModifiers() const;
     void setAssistantHotKey(quint32 vk, quint32 modifiers);
     // 每日工作记录生成时刻（"HH:mm"，默认 22:00）与自动开关
-    QString assistantSummaryTime() const;
     void setAssistantSummaryTime(const QString &hhmm);
-    bool assistantAutoSummarize() const;
     void setAssistantAutoSummarize(bool on);
     // 权限模式："ask"逐条确认 / "smart"智能自动 / "auto"全自动
-    QString assistantPermMode() const;
     void setAssistantPermMode(const QString &mode);
     // "总是允许此类"工具名清单（用户在确认卡片勾选后累积）
-    QStringList assistantAlwaysAllowTools() const;
     void setAssistantAlwaysAllowTools(const QStringList &tools);
     // Smart 模式的 shell 安全命令前缀白名单
-    QStringList assistantShellAllowPrefixes() const;
     void setAssistantShellAllowPrefixes(const QStringList &prefixes);
     // 人格附言（用户追加到 Goody 系统提示词末尾）
-    QString assistantPersonaAppendix() const;
     void setAssistantPersonaAppendix(const QString &text);
     // 聊天窗口几何（base64 序列化；空 = 未记忆，首开居中弹出）。
     // T-050-P2 新键：窗口升级为居中卡片聊天窗，几何与旧键（assistant/
     // geometry，440×600 竖版）解耦，避免旧尺寸撑爆新布局
-    QByteArray assistantWindowGeometry() const;
     void setAssistantWindowGeometry(const QByteArray &state);
     // 桌面悬浮球（T-050 阶段一）：显示开关与记忆位置。位置为 "x,y" 字符串
     //（空 = 未记忆，取默认屏幕右上角；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）

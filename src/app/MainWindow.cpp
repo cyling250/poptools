@@ -8,7 +8,6 @@
 #include <QUrl>
 
 #include "AppServices.h"
-#include "core/assistant/ToolRegistry.h"
 #include "core/monitor/MainThreadProbe.h"
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
@@ -46,11 +45,9 @@ MainWindow::MainWindow(QObject *parent)
 
     // ---- 共享服务（组合根持有所有权，注入各功能模块） ----
     m_ocr = new RapidOcrService(this);
-    m_toolRegistry = new ToolRegistry(this);
     m_services = new AppServices(this);
     m_services->hotkey = &m_hotKey;
     m_services->ocr = m_ocr;
-    m_services->toolRegistry = m_toolRegistry;
     m_services->trayMenu = m_menu;
     // 桌面表面：注入通道 + 共享画布 + 面板事件路由（日历/收纳盒等贴壁纸
     // 面板共用；本体只有隐藏 1x1 窗，重活在 startDuty，由模块延迟触发）

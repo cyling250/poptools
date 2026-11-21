@@ -8,7 +8,7 @@ add_executable(poptools_domain_tests domain_tests.cpp)
 target_link_libraries(poptools_domain_tests PRIVATE
     poptools_app_infra  # AppServices/FeatureRegistry（链接库目标，不再手抄源文件）
     poptools_core
-    poptools_ui_goody   # GoodyWindow（清空按钮 busy/工具期守卫用例）
+    poptools_ui_goody   # GoodyBallLogic（悬浮球手势/位置钳制用例）
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

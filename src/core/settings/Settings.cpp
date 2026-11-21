@@ -115,7 +115,7 @@ void Settings::setApiModel(const QString &model)
 }
 
 // API 接口格式，默认 OpenAI 兼容（存量配置无此键时行为不变）。
-// T-062 修复: 读侧加白名单归一（同 assistantPermMode 惯例）——此前原样返回，
+// T-062 修复: 读侧加白名单归一——此前原样返回，
 // 未知值靠消费端 apiFormatFromSetting 与设置页 findData 双路回退 openai；
 // 归一后两条消费路径输出不变
 QString Settings::apiFormat() const
@@ -307,10 +307,6 @@ void Settings::setMonitorOcrSnapshot(bool on)
 
 // ---- Goody 管家 ----
 
-QString Settings::assistantApiKey() const
-{
-    return m_s.value("assistant/apiKey", "").toString();
-}
 
 void Settings::setAssistantApiKey(const QString &key)
 {
@@ -318,10 +314,6 @@ void Settings::setAssistantApiKey(const QString &key)
     syncChecked();
 }
 
-QString Settings::assistantApiBaseUrl() const
-{
-    return m_s.value("assistant/apiBaseUrl", "https://api.deepseek.com/v1").toString();
-}
 
 void Settings::setAssistantApiBaseUrl(const QString &url)
 {
@@ -329,11 +321,6 @@ void Settings::setAssistantApiBaseUrl(const QString &url)
     syncChecked();
 }
 
-QString Settings::assistantApiModel() const
-{
-    // 默认 deepseek-v4-flash（与翻译模块同款）：调试期便宜快，用户可改 deepseek-chat
-    return m_s.value("assistant/apiModel", "deepseek-v4-flash").toString();
-}
 
 void Settings::setAssistantApiModel(const QString &model)
 {
@@ -364,12 +351,6 @@ void Settings::setAssistantHotKey(quint32 vk, quint32 modifiers)
     syncChecked();
 }
 
-QString Settings::assistantSummaryTime() const
-{
-    const QString v = m_s.value("assistant/summaryTime", "22:00").toString();
-    // 非法手改回退默认（QTime 严格解析 HH:mm）
-    return QTime::fromString(v, "HH:mm").isValid() ? v : QStringLiteral("22:00");
-}
 
 void Settings::setAssistantSummaryTime(const QString &hhmm)
 {
@@ -377,10 +358,6 @@ void Settings::setAssistantSummaryTime(const QString &hhmm)
     syncChecked();
 }
 
-bool Settings::assistantAutoSummarize() const
-{
-    return m_s.value("assistant/autoSummarize", true).toBool();
-}
 
 void Settings::setAssistantAutoSummarize(bool on)
 {
@@ -388,24 +365,6 @@ void Settings::setAssistantAutoSummarize(bool on)
     syncChecked();
 }
 
-QString Settings::assistantPermMode() const
-{
-    const QString v = m_s.value("assistant/permMode", "ask").toString();
-    return (v == "smart" || v == "auto") ? v : QStringLiteral("ask");
-}
-
-// 写侧不校验（UI 下拉只发 ask/smart/auto，手改 ini 乱值无害）；
-// 口径以读侧 assistantPermMode 为准（白名单外归一 ask）
-void Settings::setAssistantPermMode(const QString &mode)
-{
-    m_s.setValue("assistant/permMode", mode);
-    syncChecked();
-}
-
-QStringList Settings::assistantAlwaysAllowTools() const
-{
-    return m_s.value("assistant/alwaysAllowTools", QStringList()).toStringList();
-}
 
 void Settings::setAssistantAlwaysAllowTools(const QStringList &tools)
 {
@@ -413,15 +372,6 @@ void Settings::setAssistantAlwaysAllowTools(const QStringList &tools)
     syncChecked();
 }
 
-QStringList Settings::assistantShellAllowPrefixes() const
-{
-    // Smart 模式默认白名单：只读性质的常用查询命令（降低确认打扰，
-    // 不是安全边界——白名单外命令仍逐条确认）
-    return m_s.value("assistant/shellAllowPrefixes",
-                     QStringList{"git status", "git log", "git diff", "dir", "ls",
-                                 "ipconfig", "ping", "systeminfo"})
-        .toStringList();
-}
 
 void Settings::setAssistantShellAllowPrefixes(const QStringList &prefixes)
 {
@@ -429,10 +379,6 @@ void Settings::setAssistantShellAllowPrefixes(const QStringList &prefixes)
     syncChecked();
 }
 
-QString Settings::assistantPersonaAppendix() const
-{
-    return m_s.value("assistant/personaAppendix", "").toString();
-}
 
 void Settings::setAssistantPersonaAppendix(const QString &text)
 {
@@ -443,10 +389,6 @@ void Settings::setAssistantPersonaAppendix(const QString &text)
 // T-050-P2：聊天窗几何新键 assistant/windowGeometry（居中卡片聊天窗；
 // 空 = 未记忆，首开居中弹出）。旧键 assistant/geometry 不再读写（残留
 // 于用户 ini 无害）
-QByteArray Settings::assistantWindowGeometry() const
-{
-    return m_s.value("assistant/windowGeometry").toByteArray();
-}
 
 void Settings::setAssistantWindowGeometry(const QByteArray &state)
 {

@@ -2,41 +2,22 @@
 
 #include "../IFeatureModule.h"
 
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QList>
 #include <QObject>
-
-class QTimer;
 
 namespace poptools {
 
-class ActivityStore;
-class ChatSession;
-class DailyRecordJob;
 class DshWindow;
 class GoodyFloatingBall;
-class GoodyWindow;
-class LlmClient;
-class McpStdioClient;
-class MemoryStore;
-class MonthlyRecordJob;
-class PermissionManager;
-class Scheduler;
-class ToolRegistry;
-class WorkingMemory;
 
 // ============================================================
-// Goody 管家功能模块：内置大模型助手（DeepSeek，OpenAI 兼容协议）。
+// Goody 管家功能模块（T-074 dsh 原样移植后瘦身）：
+//   * dsh 常驻窗（DshWindow，WebView2 嵌 dsh 原版界面）+ sidecar 常驻管理；
+//   * 桌面悬浮球（唯一自动唤起入口）+ Ctrl+Alt+G 热键 + 设置页打开入口；
+//   * 日历工作摘要查询槽（goody/daily、goody/monthly 文件约定路径，
+//     M2 经 MCP 桥由 dsh 定时任务写入续命）。
 //
-// 职责：
-//   * 聊天窗（GoodyWindow，Ctrl+Alt+G 呼出 / 托盘入口）+ 多轮会话持久化；
-//   * 工具调用回合循环：模型发起 tool_calls → 权限决策（三模式，确认
-//     卡片内联聊天流）→ ToolRegistry 执行 → 结果回传 → 继续生成；
-//   * 人格系统提示词（专业温暖的小管家，只做电脑整理/电脑问题/记录）；
-//   * 审计日志（goody/audit.jsonl，复用 ActivityStore worker 写盘）。
-//
-// 每日工作记录、记忆系统、MCP 在后续阶段接入本模块（P4/P5/P6）。
+// 旧对话/工具/权限/记忆/日报成文已随 dsh 原生能力退役（会话事件日志、
+// 审批、compaction、schedule 均由 dsh host 承担）。
 // ============================================================
 class GoodyModule : public QObject, public IFeatureModule
 {
@@ -47,75 +28,22 @@ public:
     void init(AppServices &services) override;
     void shutdown() override;
 
-private slots:
-    void onSettingsChanged();
-
 signals:
-    // T-050：Goody 工作态广播（LLM 请求在途 || 工具执行期）——悬浮球
-    // 接此信号驱动呼吸光效；非工作态球侧零动画零定时器
+    // sidecar 工作态广播（Starting 呼吸 / Ready、Failed 停）——悬浮球呼吸光效
     void workingChanged(bool working);
 
 private:
-    void ensureWindow();
-    void ensureDshWindow();      // T-074：dsh 常驻窗懒建（init 即建即启动 sidecar）
-    void ensureBall();           // T-050：悬浮球懒建（开关开且未建时）
-    void applyBallSettings();    // T-050：球开关/位置重应用（init 与设置变更共用）
-    void applyPermissionSettings(); // 权限三参数从 Settings 重应用（init 装配与设置变更共用）
+    void ensureDshWindow();      // dsh 常驻窗懒建（init 即建即启动 sidecar）
+    void ensureBall();           // 悬浮球懒建（开关开且未建时）
+    void applyBallSettings();    // 球开关/位置重应用（init 与设置变更共用）
     void openChat();
-    void registerBuiltinTools();
-    void setupMcp();              // mcp.json 配置装载 + 工具桥接（P6；不 start，R6-C2）
-    void ensureMcpStarted();      // MCP 子进程懒启动（每次 openChat 重入，start 幂等；R6-C2）
-    void applySummarySchedule(); // 总结调度接线（init 与设置变更共用）
-    void updateWorkingState();   // T-050：busy||toolPhase → workingChanged 去重广播
-    void sendMessage(const QString &text);
-    bool turnLocked() const; // busy||工具期 → 会话侧栏/四件套操作锁定（T-050-P2）
-    void runTurn();
-    void onTurnFinished(bool ok, const QJsonObject &assistantMessage, const QString &error);
-    void processNextToolCall();
-    void executeToolCall(const QString &toolCallId, const QString &name,
-                         const QJsonObject &args);
-    void toolCallDone(const QString &toolCallId, const QJsonObject &result);
-    QString buildSystemPrompt() const;
-    // 工具调用行摘要（summarizeToolArgs/summarizeToolResult）已抽至
-    // core/assistant/ToolText.h（纯自由函数，单测覆盖）
 
     AppServices *m_services = nullptr;
-
-    ToolRegistry *m_registry = nullptr;   // 组合根创建，各模块共用
-    ActivityStore *m_auditStore = nullptr; // goody 目录审计流（worker 写盘）
-    PermissionManager *m_perm = nullptr;
-    LlmClient *m_client = nullptr;
-    ChatSession *m_session = nullptr;
-    // T-074：对话窗已切 dsh 常驻窗（用户 2026-11-21 拍板）。旧 GoodyWindow
-    // 全家（气泡/侧栏/回合链）保留编译但不再实例化（m_window 恒空），
-    // 域代码删除与测试手术在下一批
-    DshWindow *m_dshWindow = nullptr; // dsh 常驻窗（sidecar 常驻 + WebView2 内容）
-    GoodyWindow *m_window = nullptr;  // 旧聊天窗（已退役，恒空；下批删）
+    DshWindow *m_dshWindow = nullptr;    // dsh 常驻窗（sidecar 常驻 + WebView2 内容）
     // 桌面悬浮球：无父窗口，进程退出由 OS 回收（析构不执行）——球无关键
     // 落盘（位置在拖动时即时持久化），无析构依赖
-    GoodyFloatingBall *m_ball = nullptr; // T-050
-    bool m_working = false;              // T-050：工作态缓存（去重广播用）
-    DailyRecordJob *m_recordJob = nullptr; // 本日工作记录任务（P4）
-    MonthlyRecordJob *m_monthlyJob = nullptr; // 月度滚动月报任务（T-067）
-    Scheduler *m_scheduler = nullptr;      // 每日到点调度（P4）
-    QTimer *m_refreshTimer = nullptr;      // 起居注心跳：静默判断今日摘要重写（T-067）
-    MemoryStore *m_memory = nullptr;       // 长期记忆（P5）
-    WorkingMemory *m_work = nullptr;       // 瞬时工作记忆（P5）
-    QList<McpStdioClient *> m_mcpClients;  // MCP 服务器连接（P6；start 幂等，
-                                           // ensureMcpStarted 每次 openChat 重入，
-                                           // 握手超时的 client 借此获得重试）
-
-    QJsonArray m_pendingToolCalls; // 当前助手消息中待执行的工具调用
-    // 单次用户消息的工具回合计数（防失控循环）。复位点：sendMessage 发起新
-    // 消息、重新生成路径（GoodyModule.cpp regenerateRequested 内）——新增
-    // 回合入口时须同样复位，否则反复续轮会提前触发上限
-    int m_toolRounds = 0;
-    bool m_toolPhase = false;      // 工具执行期（tool_calls 回填中）：sendMessage 守卫
-    qint64 m_toolEpoch = 0;        // 会话清空收束代数（清空时 +1）：在途工具/
-                                   // 确认回调按代数失配丢弃，防孤儿 tool 入会话
-    qint64 m_activeTurnEpoch = -1; // 当前在途 LLM 回合发起时的代数快照：
-                                   // onTurnFinished 与 m_toolEpoch 失配即迟到
-                                   // 回包（会话已清空），整体丢弃不入新会话（C-N2）
+    GoodyFloatingBall *m_ball = nullptr;
+    bool m_working = false;              // 工作态缓存（去重广播用）
 };
 
 } // namespace poptools

@@ -6,7 +6,6 @@
 #include <QTimer>
 
 #include "../AppServices.h"
-#include "core/assistant/ToolRegistry.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/monitor/MainThreadProbe.h"
 #include "core/settings/Settings.h"
@@ -47,7 +46,7 @@ void CaptureModule::init(AppServices &services)
     services.registerHotKey(captureVk, 0, [this] {
         // T-062 修复: 热键回调在 GlobalHotKey 的原生事件过滤器栈中直发，
         // 直接建窗/激活违反 AppServices 契约（"GUI 操作请自行延迟到事件
-        // 循环"）——对齐 PinModule/划词翻译与本模块 toolRegistry 路径的
+        // 循环"）——对齐 PinModule/划词翻译的
         // singleShot 先例
         // T-069b F1 卡顿取证：热键回调与启动两段打点（探针 mark 全量落盘，
         // 与 cap_begin/cap_grabbed/cap_shown 分段按 QPC 对时还原完整链路）
@@ -63,23 +62,6 @@ void CaptureModule::init(AppServices &services)
 
     // T-069b 托盘菜单精简：「截图」托盘入口撤除（F1 热键即入口），菜单只留
     // 设置/关于/退出（需求单 requirements/20261119-tray-menu-f1-probe.md）
-
-    // Goody 工具贡献：模型可发起截图（UI 操作延迟到事件循环，与热键同纪律）
-    if (services.toolRegistry) {
-        ToolDef d;
-        d.name = QStringLiteral("app.capture");
-        d.readOnly = true;
-        d.description = QStringLiteral("启动 PopTools 截图（进入全屏选区模式）。");
-        d.parameters = emptyObjectSchema();
-        d.fn = [this](const QJsonObject &, const std::function<void(QJsonObject)> &done) {
-            QTimer::singleShot(0, QCoreApplication::instance(), [this] {
-                if (!m_window->isVisible())
-                    m_window->startCapture();
-            });
-            done(QJsonObject{{"ok", true}, {"note", QStringLiteral("已启动截图选区模式")}});
-        };
-        services.toolRegistry->registerTool(d);
-    }
 }
 
 void CaptureModule::shutdown()
