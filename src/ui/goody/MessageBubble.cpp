@@ -16,6 +16,7 @@
 #include <QScrollBar>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextFormat>
 #include <QTimer>
 #include <QToolButton>
@@ -36,6 +37,25 @@ constexpr int kCopiedResetMs = 1200; // 代码复制按钮"已复制"反馈复�
 const QString kCaret = QStringLiteral("▍");
 
 constexpr int kInnerFollowSlackPx = 24; // T-050-FIX2：内滚"贴底才跟随"判定余量
+
+// 全块行距（Typography Line Height 准则 1.5~1.75；dsh 正文 14/24≈171%，
+// Qt 块格式取 goody_theme::kBodyLineHeightPct=150% 折中）。setMarkdown /
+// setPlainText 后整文档遍历一次（定稿/历史路径，O(块数)）；流式纯文本
+// 追加的块不设（性能红线：流式零重渲染），定稿统一收口
+void applyBlockLineHeight(QTextDocument *doc, int pct)
+{
+    if (!doc)
+        return;
+    QTextCursor cur(doc);
+    cur.beginEditBlock();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        QTextBlockFormat f = b.blockFormat();
+        f.setLineHeight(pct, QTextBlockFormat::ProportionalHeight);
+        cur.setPosition(b.position());
+        cur.setBlockFormat(f);
+    }
+    cur.endEditBlock();
+}
 } // namespace
 
 // ============================================================
@@ -295,6 +315,7 @@ void MessageBubble::finalizeMarkdown(const QString &fullText, bool endedInFence)
     m_caretShown = false;
     // 定稿唯一重渲染点：一次 setMarkdown（含代码高亮），流式期间零重渲染
     m_body->setMarkdown(fullText);
+    applyBlockLineHeight(m_body->document(), goody_theme::kBodyLineHeightPct);
     m_body->setVisible(!fullText.isEmpty()); // 空回复（如错误回合）不露空壳
     updateToolbar();
 }
@@ -326,6 +347,7 @@ void MessageBubble::setReasoningFinal(const QString &full)
         m_reasonSection->setVisible(true);
     m_reasoningText = full;
     m_reasonBody->setPlainText(full);
+    applyBlockLineHeight(m_reasonBody->document(), goody_theme::kBodyLineHeightPct);
     updateReasoningHeader();
 }
 
@@ -456,7 +478,7 @@ void MessageBubble::applyTheme(bool dark)
              findChildren<QToolButton *>(QStringLiteral("goodyBubbleActBtn"))) {
             btn->setStyleSheet(QStringLiteral(
                 "QToolButton#goodyBubbleActBtn { color: %1; background: transparent;"
-                "  border: none; padding: 1px 5px; font-size: 11px; }"
+                "  border: none; padding: 2px 6px; font-size: 12px; }"
                 "QToolButton#goodyBubbleActBtn:hover { background: %2; }")
                 .arg(goody_theme::textPrimary().name(),
                      goody_theme::bgHover().name()));

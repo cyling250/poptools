@@ -12,7 +12,8 @@
 namespace poptools {
 
 namespace {
-constexpr int kDotSize = 8;
+constexpr int kDotSize = 8;   // 徽章内点
+constexpr int kHaloSize = 16; // 运行中外圈光环（accent 低透明底，结束态透明）
 
 // 状态徽章点 QSS：8px 圆，色随态（dsh state 徽章语义：运行中蓝/完成绿/失败红）
 QString stateDotQss(ProcessRow::State state)
@@ -24,6 +25,19 @@ QString stateDotQss(ProcessRow::State state)
     case ProcessRow::State::Error: c = goody_theme::error(); break;
     }
     return QStringLiteral("background: %1; border-radius: 4px;").arg(c.name());
+}
+
+// 运行中外圈光环：accent 低透明底（呼吸感的静态等价物，零定时器零开销）；
+// 收束态透明退场。色取 goody_theme（第二 token 表豁免口径）
+QString stateHaloQss(ProcessRow::State state)
+{
+    if (state != ProcessRow::State::Running)
+        return QStringLiteral("background: transparent;");
+    return QStringLiteral("background: rgba(%1, %2, %3, %4); border-radius: 8px;")
+        .arg(goody_theme::accent().red())
+        .arg(goody_theme::accent().green())
+        .arg(goody_theme::accent().blue())
+        .arg(goody_theme::dark() ? 0.24 : 0.18, 0, 'f', 2);
 }
 } // namespace
 
@@ -43,11 +57,20 @@ ProcessRow::ProcessRow(const QString &toolName, const QString &summary, QWidget 
     headLay->setContentsMargins(4, 4, 4, 4);
     headLay->setSpacing(8);
 
-    m_dot = new QLabel(this);
+    // 外圈光环容器 + 内点：运行中光环点亮（蓝晕），收束后透明只剩徽章点
+    m_halo = new QWidget(this);
+    m_halo->setAttribute(Qt::WA_StyledBackground);
+    m_halo->setObjectName("goodyProcessHalo");
+    m_halo->setFixedSize(kHaloSize, kHaloSize);
+    auto *haloLay = new QHBoxLayout(m_halo);
+    haloLay->setContentsMargins(0, 0, 0, 0);
+    m_dot = new QLabel(m_halo);
     m_dot->setObjectName("goodyProcessDot");
     m_dot->setFixedSize(kDotSize, kDotSize);
     m_dot->setStyleSheet(stateDotQss(m_state));
-    headLay->addWidget(m_dot, 0, Qt::AlignVCenter);
+    haloLay->addWidget(m_dot, 0, Qt::AlignCenter);
+    m_halo->setStyleSheet(stateHaloQss(m_state));
+    headLay->addWidget(m_halo, 0, Qt::AlignVCenter);
 
     m_head = new QToolButton(this);
     m_head->setObjectName("goodyProcessHead");
@@ -87,6 +110,8 @@ void ProcessRow::finish(State state, const QString &resultText)
     m_state = state;
     if (m_dot)
         m_dot->setStyleSheet(stateDotQss(state));
+    if (m_halo)
+        m_halo->setStyleSheet(stateHaloQss(state));
     if (m_result)
         m_result->setPlainText(resultText);
 }
@@ -99,6 +124,12 @@ void ProcessRow::setSummary(const QString &summary)
     // 所有过程行摘要清空成空串）
     setProperty("goodySummary", QVariant(summary));
     refreshHead();
+    // 徽章点/光环配色随主题重抛（T-070 诚实边界③就此收口：深浅切换后
+    // 运行中蓝/完成绿/失败红取当套 token，不再沿用旧主题色）
+    if (m_dot)
+        m_dot->setStyleSheet(stateDotQss(m_state));
+    if (m_halo)
+        m_halo->setStyleSheet(stateHaloQss(m_state));
 }
 
 } // namespace poptools

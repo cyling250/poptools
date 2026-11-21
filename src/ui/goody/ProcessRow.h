@@ -4,6 +4,7 @@
 
 class QLabel;
 class QToolButton;
+class QWidget;
 
 namespace poptools {
 
@@ -42,6 +43,7 @@ public:
 private:
     void refreshHead(); // 按当前态重写头部文本（徽章色经 m_dot QSS）
 
+    QWidget *m_halo = nullptr;   // 徽章外圈光环容器（运行中蓝晕，收束态透明）
     QLabel *m_dot = nullptr;     // 状态徽章点（8px 圆）
     QToolButton *m_head = nullptr; // 头部折叠行（整行可点）
     AutoHeightBrowser *m_result = nullptr; // 展开体

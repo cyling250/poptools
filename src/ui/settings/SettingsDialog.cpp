@@ -236,8 +236,9 @@ QWidget *newPage(const QString &title)
     auto *page = new QWidget;
     page->setObjectName("settingsPage");
     auto *lay = new QVBoxLayout(page);
-    lay->setContentsMargins(32, 28, 32, 24);
-    lay->setSpacing(16);
+    // 留白（Win11 设置密度）：左右 36 对齐导航视觉重心，分组间距 18
+    lay->setContentsMargins(36, 30, 36, 28);
+    lay->setSpacing(18);
     auto *titleLabel = new QLabel(title, page);
     titleLabel->setObjectName("settingsPageTitle");
     lay->addWidget(titleLabel);
@@ -859,7 +860,7 @@ void SettingsDialog::updateAutoStartButton()
 void SettingsDialog::applyTheme()
 {
     const FluentTokens t = fluentTheme(systemSchemeDark());
-    // 多参 .arg 单趟替换，占位符 ≤9（%10 会被 %1 误吞，SettingsDialog 历史坑）
+    // 多参 .arg 单趟替换（10 占位符，variadic arg 单趟多数字匹配）
     setStyleSheet(QStringLiteral(
                       "#settingsDialog { background: %1; }"
                       "#settingsNav { background: %1; border-right: 1px solid %2; }"
@@ -867,15 +868,18 @@ void SettingsDialog::applyTheme()
                       "  padding: 6px 8px 8px 8px; }"
                       "QListWidget#settingsNavList { background: transparent; border: none;"
                       "  outline: 0; font-size: 14px; }"
-                      "QListWidget#settingsNavList::item { color: %3; padding: 9px 14px;"
-                      "  border-radius: 5px; margin: 1px 6px; }"
+                      // Win11 NavigationView 语义：选中项左侧 3px accent 指示条；
+                      // 全部 item 常挂透明 3px 左边框，选中切换无文本位移
+                      "QListWidget#settingsNavList::item { color: %3;"
+                      "  padding: 9px 14px 9px 11px; border-left: 3px solid transparent;"
+                      "  border-radius: 4px; margin: 1px 6px; }"
                       "QListWidget#settingsNavList::item:hover { background: %4; }"
                       "QListWidget#settingsNavList::item:selected { background: %5;"
-                      "  color: %3; font-weight: 600; }"
+                      "  border-left-color: %10; color: %3; font-weight: 600; }"
                       "QStackedWidget#settingsPages { background: %1; }"
                       "QScrollArea#settingsPageScroll { background: %1; border: none; }"
                       "QWidget#settingsPage { background: %1; }"
-                      "#settingsPageTitle { color: %3; font-size: 20px; font-weight: 600; }"
+                      "#settingsPageTitle { color: %3; font-size: 24px; font-weight: 600; }"
                       "#settingGroupTitle { color: %3; font-size: 14px; font-weight: 600;"
                       "  padding-left: 2px; }"
                       "QFrame#settingCardGroup { background: %6; border: 1px solid %7;"
@@ -887,7 +891,8 @@ void SettingsDialog::applyTheme()
                       "#settingCardDesc { color: %9; font-size: 12px;"
                       "  background: transparent; }")
                       .arg(t.bgBase, t.divider, t.textPrimary, t.bgSubtle, t.accentSoft,
-                           t.bgCard, t.cardStroke, t.bgCardHover, t.textSecondary) +
+                           t.bgCard, t.cardStroke, t.bgCardHover, t.textSecondary,
+                           t.accent) +
                   QStringLiteral("QWidget#settingCardSeparator { background: %1; }"
                                  "#settingsHint { color: %2; font-size: 12px; }"
                                  "QToolButton { background: %3; border: 1px solid %4;"

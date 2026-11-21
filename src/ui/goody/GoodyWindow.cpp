@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QInputMethod>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
@@ -22,6 +23,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSizeGrip>
+#include <QStyle>
 #include <QStyleHints>
 #include <QTimer>
 #include <QToolButton>
@@ -301,8 +303,10 @@ void GoodyWindow::buildChatPane()
     m_msgList = new QWidget;
     m_msgList->setObjectName("goodyMsgList");
     m_msgLay = new QVBoxLayout(m_msgList);
-    m_msgLay->setContentsMargins(6, 4, 6, 4);
-    m_msgLay->setSpacing(8);
+    // 消息流节奏（dsh 文档流）：消息块间距 14px，上下留白对齐会话页留白；
+    // 左右由 updateMaxWidths 动态收放（消息列 clamp 居中）
+    m_msgLay->setContentsMargins(0, 14, 0, 14);
+    m_msgLay->setSpacing(goody_theme::kMsgGap);
     m_msgLay->addStretch(); // 消息贴顶（列表不足一屏时），气泡插在 stretch 之前
     m_scroll->setWidget(m_msgList);
     // 自动滚动只在本就贴底时跟随：滚动位置离开底部即停止跟随（用户上翻
@@ -459,7 +463,7 @@ void GoodyWindow::reloadFromSession()
             const QJsonObject result = QJsonDocument::fromJson(
                 o.value(QStringLiteral("content")).toString().toUtf8()).object();
             auto *b = new MessageBubble(MessageBubble::System, m_msgList);
-            b->setSystemText(QStringLiteral("🔧 %1").arg(summarizeToolResult(result)),
+            b->setSystemText(QStringLiteral("工具 · %1").arg(summarizeToolResult(result)),
                              false);
             addBubble(b);
         }
@@ -504,17 +508,72 @@ void GoodyWindow::clearBubbles()
         b->deleteLater();
     }
     m_bubbles.clear();
+    if (m_welcome) {
+        m_msgLay->removeWidget(m_welcome);
+        m_welcome->deleteLater();
+        m_welcome = nullptr;
+    }
     m_processRows.clear(); // 过程行随消息列表一并销毁（同为 m_msgList 子控件）
     m_streamBubble = nullptr;
 }
 
+// 空态欢迎卡（Empty States 准则：引导语 + 可执行动作）：球标 + 欢迎语 +
+// 三枚示例胶囊（点击填入输入框草稿，用户可改后发送）。非 MessageBubble，
+// 由 m_welcome 单独管理（clearBubbles 一并收走，reloadFromSession 空会话
+// 时回补）
 void GoodyWindow::appendWelcome()
 {
-    auto *b = new MessageBubble(MessageBubble::System, m_msgList);
-    b->setSystemText(QStringLiteral(
-        "Goody 已就绪：问电脑相关的事、让我做记录，或者试试"
-        "\"我今天干了什么\"。"), false);
-    addBubble(b);
+    if (m_welcome) { // 防叠加：先收旧卡
+        m_msgLay->removeWidget(m_welcome);
+        m_welcome->deleteLater();
+        m_welcome = nullptr;
+    }
+
+    auto *welcome = new QWidget(m_msgList);
+    welcome->setObjectName("goodyWelcome");
+    welcome->setAttribute(Qt::WA_StyledBackground);
+    auto *welLay = new QVBoxLayout(welcome);
+    welLay->setContentsMargins(0, 28, 0, 8);
+    welLay->setSpacing(10);
+    welLay->setAlignment(Qt::AlignHCenter);
+
+    // 球标：accent 实底圆 + 白 G（对齐悬浮球的品牌观感，静态无动画）
+    auto *orb = new QLabel(welcome);
+    orb->setObjectName("goodyWelcomeOrb");
+    orb->setAlignment(Qt::AlignCenter);
+    orb->setText(QStringLiteral("G"));
+    orb->setFixedSize(48, 48);
+    welLay->addWidget(orb, 0, Qt::AlignHCenter);
+
+    auto *headLine = new QLabel(QStringLiteral("你好，我是 Goody"), welcome);
+    headLine->setObjectName("goodyWelcomeHead");
+    welLay->addWidget(headLine, 0, Qt::AlignHCenter);
+
+    auto *subLine = new QLabel(QStringLiteral(
+        "可以问电脑相关的事、让我做记录，或者试试下面的例子"), welcome);
+    subLine->setObjectName("goodyWelcomeSub");
+    subLine->setWordWrap(true);
+    subLine->setAlignment(Qt::AlignHCenter);
+    welLay->addWidget(subLine, 0, Qt::AlignHCenter);
+
+    const QStringList suggestions = {
+        QStringLiteral("我今天干了什么？"),
+        QStringLiteral("总结一下最近的日程"),
+        QStringLiteral("帮我记一笔：明天下午 3 点开会"),
+    };
+    for (const QString &text : suggestions) {
+        auto *chip = new QPushButton(text, welcome);
+        chip->setObjectName("goodySuggestBtn");
+        chip->setCursor(Qt::PointingHandCursor);
+        chip->setToolTip(QStringLiteral("点击填入输入框，可修改后发送"));
+        welLay->addWidget(chip, 0, Qt::AlignHCenter);
+        connect(chip, &QPushButton::clicked, this, [this, text] {
+            setDraftInput(text); // 填草稿不直接发送：示例只是起点，用户可改
+        });
+    }
+
+    m_welcome = welcome;
+    m_msgLay->insertWidget(m_msgLay->count() - 1, welcome, 0, Qt::AlignHCenter);
 }
 
 // user/assistant 气泡与会话内非 system/tool 消息按序一一对应；按"尾部
@@ -864,25 +923,43 @@ void GoodyWindow::updateMaxWidths()
 
 bool GoodyWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // 输入框 Enter 发送（Shift+Enter 换行）
-    if (watched == m_input && event->type() == QEvent::KeyPress) {
-        auto *ke = static_cast<QKeyEvent *>(event);
-        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
-            if (!(ke->modifiers() & Qt::ShiftModifier)) {
-                // T-050-FIX2：工具执行期与 busy 同语义——Enter 吞掉、不清
-                // 输入框（草稿保留，等工具期结束再发）
-                if (!m_busy && !m_toolPhase) {
-                    const QString text = m_input->toPlainText().trimmed();
-                    if (!text.isEmpty()) {
-                        m_input->clear();
-                        scrollToBottomNow(true);
-                        emit sendRequested(text);
-                    }
-                }
-                return true; // busy/工具期 Enter 吞掉（不打进输入框）
-            }
+    if (watched == m_input) {
+        // composer 焦点态：输入框聚焦时输入卡描边转 accent（dsh composer
+        // focus 特征；QSS 无法反向选父级，经动态属性 + repolish 命中窗口
+        // QSS 的 [composerFocus="true"] 规则）
+        if (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut) {
+            m_composerCard->setProperty("composerFocus",
+                                        event->type() == QEvent::FocusIn);
+            m_composerCard->style()->unpolish(m_composerCard);
+            m_composerCard->style()->polish(m_composerCard);
         }
-        return QWidget::eventFilter(watched, event);
+        // 输入框 Enter 发送（Shift+Enter 换行）
+        if (event->type() == QEvent::KeyPress) {
+            auto *ke = static_cast<QKeyEvent *>(event);
+            if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+                if (!(ke->modifiers() & Qt::ShiftModifier)) {
+                    // IME 组词期 Enter 是候选确认/原样上屏键，不得触发发送
+                    //（IME Composition Enter 准则，High 级：中文用户回车
+                    // 确认拼音会把消息连半截拼音一起发出）。组词提交走
+                    // QInputMethodEvent 直接进控件，不经按键路径，吞掉
+                    // KeyPress 不影响组词上屏
+                    if (QGuiApplication::inputMethod()->isVisible())
+                        return true;
+                    // T-050-FIX2：工具执行期与 busy 同语义——Enter 吞掉、不清
+                    // 输入框（草稿保留，等工具期结束再发）
+                    if (!m_busy && !m_toolPhase) {
+                        const QString text = m_input->toPlainText().trimmed();
+                        if (!text.isEmpty()) {
+                            m_input->clear();
+                            scrollToBottomNow(true);
+                            emit sendRequested(text);
+                        }
+                    }
+                    return true; // busy/工具期 Enter 吞掉（不打进输入框）
+                }
+            }
+            return QWidget::eventFilter(watched, event);
+        }
     }
     // 标题栏拖拽（无边框窗口的移动）
     if (watched->objectName() == QLatin1String("goodyHeader")) {
@@ -932,6 +1009,13 @@ void GoodyWindow::applyWindowQss(bool dark)
     const QColor sidebar = goody_theme::bgSidebar();
     const QColor error = goody_theme::error();
     const QColor warning = goody_theme::warning();
+    // 低透明主色入 QSS 须走 rgba（QColor::name() 丢 alpha）
+    const QColor soft = goody_theme::accentSoft();
+    const QString accentSoftRgba = QStringLiteral("rgba(%1, %2, %3, %4)")
+                                       .arg(soft.red())
+                                       .arg(soft.green())
+                                       .arg(soft.blue())
+                                       .arg(soft.alphaF(), 0, 'f', 3);
     setStyleSheet(QStringLiteral(
         "#goodyCard { background: %1; border: 1px solid %2; border-radius: 12px; }"
         "#goodyTitle { color: %3; font-weight: 600; font-size: %4px; }"
@@ -942,6 +1026,7 @@ void GoodyWindow::applyWindowQss(bool dark)
         "QPushButton#goodySendBtn { background: %7; color: %8;"
         "  border: none; border-radius: 8px; font-weight: 600; font-size: %5px; }"
         "QPushButton#goodySendBtn:hover { background: %9; }"
+        "QPushButton#goodySendBtn:disabled { background: %6; color: %17; }"
         "QToolButton#goodySidebarToggle { color: %3; background: transparent;"
         "  border: none; font-size: 14px; border-radius: 8px; }"
         "QToolButton#goodySidebarToggle:hover { background: %6; }"
@@ -952,15 +1037,19 @@ void GoodyWindow::applyWindowQss(bool dark)
         "  font-size: %5px; font-weight: 600; }"
         "QPushButton#goodyNewChatBtn:hover { background: %7; color: %8;"
         "  border-color: %7; }"
+        "QPushButton#goodyNewChatBtn:disabled { color: %17; border-color: %2; }"
         "QListWidget#goodySessionList { background: transparent; border: none;"
         "  font-size: %5px; outline: none; }"
         "QListWidget#goodySessionList::item { margin: 1px 2px; border-radius: 8px; }"
-        "QListWidget#goodySessionList::item:selected { background: %6; }"
+        // 选中底用低透明主色（与 hover 底拉开层次，Win11 导航选中语义）
+        "QListWidget#goodySessionList::item:selected { background: %16;"
+        "  font-weight: 600; }"
         "QListWidget#goodySessionList::item:hover { background: %6; }"
         "QWidget#goodyScroll, QWidget#goodyMsgList { background: transparent; }"
-        // composer 大圆角卡（dsh InputBar：radius-panel + 内嵌底色）
+        // composer 大圆角卡（dsh InputBar：radius-panel + 内嵌底色 + 聚焦描边）
         "QFrame#goodyComposer { background: %11; border: 1px solid %2;"
         "  border-radius: %12px; }"
+        "QFrame#goodyComposer[composerFocus=\"true\"] { border-color: %7; }"
         "QPlainTextEdit#goodyInput { background: transparent; border: none; }"
         // 权限确认卡（dsh ApprovalCard：接管输入位，warning 描边大卡）
         "QWidget#goodyPermBar { background: %11; border: 1px solid %13;"
@@ -972,13 +1061,34 @@ void GoodyWindow::applyWindowQss(bool dark)
         "  border-radius: 8px; padding: 5px 12px; color: %8; font-weight: 600; }"
         "QPushButton#goodyPermAllow:hover { background: %9; }"
         "QWidget#goodyGrip { background: transparent; }"
-        // 过程行（T-070 ProcessRow）
+        // 过程行（T-070 ProcessRow；徽章点/光环 QSS 由 ProcessRow 内联自管）
         "QWidget#goodyProcessRow { background: transparent; }"
-        "QLabel#goodyProcessDot { border: none; }"
         "QToolButton#goodyProcessHead { background: transparent; border: none;"
         "  font-size: %14px; text-align: left; padding: 2px 4px; color: %3; }"
         "QTextBrowser#goodyProcessResult { color: %15; background: %6;"
-        "  border: 1px solid %2; border-radius: 8px; font-size: %5px; }")
+        "  border: 1px solid %2; border-radius: 8px; font-size: %5px; }"
+        // 空态欢迎卡（Empty States：球标 + 引导 + 示例胶囊）
+        "QWidget#goodyWelcome { background: transparent; }"
+        "QLabel#goodyWelcomeOrb { background: %7; color: %8; border: none;"
+        "  border-radius: 24px; font-size: 24px; font-weight: 600; }"
+        "QLabel#goodyWelcomeHead { color: %3; font-size: 15px; font-weight: 600;"
+        "  background: transparent; }"
+        "QLabel#goodyWelcomeSub { color: %15; font-size: 13px;"
+        "  background: transparent; }"
+        "QPushButton#goodySuggestBtn { background: transparent; border: 1px solid %2;"
+        "  border-radius: 16px; padding: 6px 16px; color: %3; font-size: 13px; }"
+        "QPushButton#goodySuggestBtn:hover { background: %16; border-color: %7; }"
+        // 细滚动条（dsh 悬浮胶囊风：8px 轨道透明，手柄描边灰）
+        "QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }"
+        "QScrollBar::handle:vertical { background: %2; border-radius: 3px;"
+        "  min-height: 32px; }"
+        "QScrollBar::handle:vertical:hover { background: %17; }"
+        "QScrollBar:horizontal { background: transparent; height: 8px; margin: 2px; }"
+        "QScrollBar::handle:horizontal { background: %2; border-radius: 3px;"
+        "  min-width: 32px; }"
+        "QScrollBar::handle:horizontal:hover { background: %17; }"
+        "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }"
+        "QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }")
         .arg(bgBase.name(), stroke.name(), textPrimary.name(),
              QString::number(goody_theme::kFontTitle),
              QString::number(goody_theme::kFontProcess),
@@ -987,7 +1097,9 @@ void GoodyWindow::applyWindowQss(bool dark)
              QString::number(goody_theme::kRadiusPanel),
              warning.name(),
              QString::number(goody_theme::kFontProcess),
-             textSecondary.name()));
+             textSecondary.name(),
+             accentSoftRgba,                      // %16
+             goody_theme::textTertiary().name())); // %17
 }
 
 // 通道一（控件内联样式）+ 通道二（Active/Inactive/Disabled 三组调色板钉扎）
@@ -1044,7 +1156,7 @@ void GoodyWindow::applyControlPalettes(bool dark)
     // 会话列表调色板钉扎（选中底/字取主题色，防 QSS 失效黑字）
     {
         QPalette pal = m_sessionList->palette();
-        const QBrush selBrush{goody_theme::bgHover()};
+        const QBrush selBrush{goody_theme::accentSoft()}; // 与 QSS 选中底同源
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                                  QPalette::Disabled}) {
             pal.setBrush(group, QPalette::Text, textBrush);

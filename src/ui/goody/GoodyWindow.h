@@ -165,6 +165,7 @@ private:
     QWidget *m_msgList = nullptr;
     QVBoxLayout *m_msgLay = nullptr;
     QList<MessageBubble *> m_bubbles;
+    QWidget *m_welcome = nullptr;      // 空态欢迎卡（非 MessageBubble，随 clearBubbles 收）
     QHash<QString, ProcessRow *> m_processRows; // callId→工具过程行（T-070）
     QString m_builtSessionId;          // 气泡列表当前对应的会话 id
     bool m_atBottom = true;            // 用户本就贴底才自动跟随

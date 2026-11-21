@@ -29,6 +29,7 @@ inline QColor inputBg()     { return dark() ? QColor(0x26, 0x26, 0x28) : QColor(
 // ---- 品牌蓝（deepseek 系） ----
 inline QColor accent()        { return dark() ? QColor(86, 134, 254) : QColor(65, 118, 230); }  // 450 / 500
 inline QColor accentHover()   { return dark() ? QColor(122, 170, 255) : QColor(86, 134, 254); } // 400 / 450
+inline QColor accentSoft()    { return dark() ? QColor(86, 134, 254, 45) : QColor(65, 118, 230, 26); } // 低透明主色（侧栏选中底/示例胶囊 hover 底）
 inline QColor userBubbleBg()  { return dark() ? QColor(44, 44, 46) : QColor(237, 243, 254); }   // 850 / deepseek-50
 inline QColor onAccent()      { return QColor(0xFF, 0xFF, 0xFF); }                              // accent 实底上的文字
 
@@ -63,8 +64,11 @@ constexpr int kFontTitle = 15;
 // ---- 布局常量 ----
 constexpr int kSidebarWidth = 280;      // 会话侧栏（dsh 默认 280）
 constexpr int kMsgColumnMax = 880;      // 消息列宽上限（clamp 680~880）
+constexpr int kMsgGap = 14;             // 文档流消息间距（dsh 消息块间 14~16px）
 constexpr int kComposerMaxHeight = 200; // 输入卡内容最大高（dsh 336px 对应约 14 行，
                                         // 桌面窗体矮一档收 200，超出内部滚动）
+constexpr int kBodyLineHeightPct = 150; // 正文/思考区行距（dsh 14/24≈171%，Qt 块格式
+                                        // 取 150% 折中：放宽阅读节奏又不显松散）
 
 } // namespace goody_theme
 

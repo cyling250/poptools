@@ -12,7 +12,7 @@ SettingCard::SettingCard(const QString &title, const QString &desc, QWidget *par
     setAttribute(Qt::WA_StyledBackground); // hover 底色经窗口 QSS 生效
 
     auto *lay = new QHBoxLayout(this);
-    lay->setContentsMargins(16, 10, 16, 10);
+    lay->setContentsMargins(16, 12, 16, 12); // 垂直内边距对齐 Win11 卡片密度
     lay->setSpacing(16);
 
     // 左列：标题 + 可选描述（描述空则不建，行高自动收紧）
