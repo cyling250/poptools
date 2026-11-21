@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-22 01:05（T-074 M2.5 全功能交底收口：域工具 16 件并入 MCP（22 工具清单），跨进程 dirty 协议 + 心跳呼吸 + 单实例守卫 + 调试日志撤离，595aa07 提交；AGENTS.md 全功能指引与上下文纪律更新；打包形态决策点待用户） · Agent_20261121184000
 > 最后更新：2026-11-22 00:15（T-074 M2 能力桥收口：poptools_mcp_server 挂进 dsh 端到端实证（node→mcp-manager→子进程存活），六工具=活动数据/日报月报落盘/截图/OCR，ca05a55 提交；P-073 dsh-home 双层路径坑入账，孤儿测试 home 已清） · Agent_20261121184000
 > 最后更新：2026-11-21 22:45（T-074 删除批收口：旧 Goody 域全量退役（assistant 15 类/UI 六件/ToolRegistry 链/Settings 废弃键），domain_tests 3688→1770 行 52 用例全绿；旧记忆空零损失，dsh-home/AGENTS.md 人格基线写入；bc9abb9 融合批+8270ab3 删除批已提交） · Agent_20261121184000
 > 最后更新：2026-11-21 21:40（T-074 M1 融合批落码：DshWindow 常驻窗+sidecar 开机即拉+悬浮球/热键直达 dsh+设置页收窄+API Key 启动环境注入，构建 0 编译警告+ctest 99 绿，node 常驻实证，未提交待目测；存量验收块 T-067~T-072 无损剪切 archive/current-pending-acceptance-1118-1121.md） · Agent_20261121184000
@@ -170,11 +171,23 @@
 - 坑：P-073（dsh-home 双层路径漏算，P-067 同款——调试 home 与产品 home 分叉，
   配置不生效；孤儿测试 home 已清，教训：dsh-home 调试一律走产品
   AppLocalDataLocation=PopTools/PopTools 双层口径）
-- 待办（M3 产品融合）：①单实例守卫（3080 端口 EADDRINUSE→第二实例 dsh 启动失败，
-  蓝图风险④实证）②安装包形态（dsh 运行时随包/tools 定位；WebView2Loader 部署）③
-  悬浮球呼吸绑定 dsh 工具调用态（MCP server 侧信号）④日报定时建议用户在 dsh 对话
-  里说「每天 22 点写日报」由 schedule 承载（AGENTS.md 已指引）⑤webview2_debug.log
-  与 MCP 无关的调试日志稳定后撤
+- **M2.5 全功能交底已收口（595aa07，2026-11-22）**：McpToolsDomain 域工具 16 件
+  （日历日程读写+五项显示设置 / 活动监控设置 / 收纳盒 catalog+add+remove /
+  翻译 translate_text / system_info+settings / digest_list+digest_search 上下文
+  管理），tools/list 合并=22 工具清单；跨进程生效协议 ExternalSyncWatcher
+  （dirty 标记读后即删：settings→syncExternal+广播、calendar→宿主重载、box→广播）
+  + mcp.heartbeat 心跳→悬浮球呼吸（10s 无心跳回静默）；单实例命名互斥体
+  （3080 EADDRINUSE 风险收口）；webview2 hostLog no-op（调试撤离）；AGENTS.md
+  全功能指引+上下文纪律（先索引后取文，禁止整批读入；AI 可自维护月报头部索引）
+- 待办（M3 产品融合）：①打包形态决策（见下方决策点）②收纳盒实时重载（v1 经
+  设置变更兜底）③BoxModule 域深度工具（文件整理执行面）④截图历史目录管理
+  （用户构想：近几天截图按层级组织 + AI 读图标注 + 定时清理）⑤日程编辑器/
+  日历面板随 dsh 化的后续融合方向
+- **打包形态决策点（待用户拍板）**：dsh 运行时 node(37MB zip)+dsh 包(1.3GB
+  node_modules)+WebView2Loader——安装包整含则体积 >1.5GB 不现实；候选方案
+  ①安装器首启下载（Inno [Code] 或首启检测缺失 → 引导下载器）②便携 zip 随
+  附 install_dsh.py ③dsh 精简裁剪（去掉 experimental/未用包降体积）。当前
+  源码树形态已可用（install_dsh.py + tools/ 定位健壮），iss 未注入 dsh 件
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
@@ -377,6 +390,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-22 01:05 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / mcpserver / app(Main+Watcher) / goody / settings / main / dsh-home AGENTS.md | T-074 M2.5：域工具 16 件（22 清单）+dirty 跨进程协议+心跳呼吸+单实例+日志撤离 | 构建 0 编译警告 ctest 54 绿；595aa07；打包决策点待用户 |
 | 2026-11-22 00:15 | Agent_20261121184000 | 头部 / 当前任务 / 踩坑记录 / 台账 / src(mcpserver) / CMake / tests / dsh-home 配置 | T-074 M2：MCP 服务器六工具+协议框架+dsh patch 注入+AGENTS.md 工作流+2 用例 | 构建 0 编译警告 ctest 54 绿；端到端实证（mcp 子进程存活）；P-073 入账 |
 | 2026-11-21 22:45 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / assistant+goody+settings+app 源码 / CMake / tests / dsh-home AGENTS.md | T-074 删除批：旧 Goody 域全量退役+domain_tests 手术+记忆迁移（空）+AGENTS.md 人格基线 | 构建 0 编译警告 ctest 52 用例全绿；bc9abb9+8270ab3 提交 |
 | 2026-11-21 21:40 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / settings 源码 / app 模块 / ui 源码 / CMake / 归档 | T-074 M1 融合批：DshWindow 常驻窗+GoodyModule 切路由+设置页收窄+WebView2Loader 部署；存量验收块 T-067~T-072 剪切归档；用户三拍板入账 | 构建 0 编译警告 ctest 99 绿；node 常驻实证待目测 |
