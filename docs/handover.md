@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-22 01:15（T-074 收口冲刺：提交态复验全绿 + MCP 25 件冒烟 13/13 + 截图历史层自证 6/6 + 安装器对齐走查无缺口；双缺陷修复 a6e2a59（ocr_image 漏注册补齐 + box_catalog_get 悬垂 UAF 根修，P-074/P-075 入账）；验收手册 docs/20261122-t074-m3-acceptance.md——7 项真机验收待用户） · Agent_20261122011419
 > 最后更新：2026-11-22 01:55（T-074 M3 融合收口：安装器联网装 dsh（iss [Code]+pack_dsh_runtime.py，ISCC 编译验证）+ 截图历史层（PinWindow 副本/CaptureHistoryJob OCR 标注 30 天清理/MCP 两工具）+ 收纳盒实时重载（BoxModule 转 QObject），03ab228 提交；T-074 全批次落码完成待用户验收） · Agent_20261121184000
 > 最后更新：2026-11-22 01:05（T-074 M2.5 全功能交底收口：域工具 16 件并入 MCP（22 工具清单），跨进程 dirty 协议 + 心跳呼吸 + 单实例守卫 + 调试日志撤离，595aa07 提交；AGENTS.md 全功能指引与上下文纪律更新；打包形态决策点待用户） · Agent_20261121184000
 > 最后更新：2026-11-22 00:15（T-074 M2 能力桥收口：poptools_mcp_server 挂进 dsh 端到端实证（node→mcp-manager→子进程存活），六工具=活动数据/日报月报落盘/截图/OCR，ca05a55 提交；P-073 dsh-home 双层路径坑入账，孤儿测试 home 已清） · Agent_20261121184000
@@ -204,6 +205,14 @@
   「每天 22 点写日报」schedule 定时（dsh 原生）⑦悬浮球呼吸随 agent 工具调用
 - 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
   extensions/cordis-runner（模型自改插件树 RCE 面）不启用
+- **收口自证批（01:15，2026-11-22，a6e2a59）**：提交态复验全绿（防 P-070）+ MCP
+  tools/list 实测 **25 件**（旧口径 22 件=M2.5 时刻，M3 +2、本次补 ocr_image +1）
+  + 只读冒烟 13/13 + 截图历史层自证 6/6（模拟落盘→list/search 契约全对→清理）
+  + 安装器 [Code] 对齐走查无缺口（zip 布局/标记口径/toolsDir 双形态/WebView2
+  GUID）；双缺陷根修：ocr_image 漏注册（分发有、描述符无）+ box_catalog_get
+  悬垂 UAF（内联 load().boxes() 遍历临时对象，P-074）。**验收手册
+  [docs/20261122-t074-m3-acceptance.md](docs/20261122-t074-m3-acceptance.md)
+  已备（7 项 step-by-step + 发版纪律备注）——待用户按手册真机验收后结算**
 
 > 已提交待验收（验收清单原文 → [handover/archive/current-pending-acceptance-1118-1121.md](handover/archive/current-pending-acceptance-1118-1121.md)）：T-072 日程编辑器双修
 >（f4f0f4f）｜ T-071 UI 收编+效率批（5887ee9..78abd32）｜ T-070 Goody 按 dsh 形式重构（4e153c6）｜ T-069b 托盘精简+F1 打桩（8ebd1cd）｜ T-069 Win11 Fluent 改版（2cbd47d）｜
@@ -246,6 +255,27 @@
 
 > 每条坑必须链接到产生它的历史任务条目。
 > 维护智能体：Agent_20261117004800
+
+### P-074 box_catalog_get 悬垂 UAF：range-for 内联遍历临时对象，读到堆碎片乱码
+- **关联任务**：T-074 ｜ 记录智能体：Agent_20261122011419
+- **现象**：MCP box_catalog_get 的 dir/name 非确定性乱码（UTF-16 字节错位重读、
+  正确片段与垃圾交错、混入 0x10/0x24 长度前缀），同一 JSON 里 name/dir 一个对一个错
+- **原因**：`for (… : BoxCatalog::load().boxes())`——临时 BoxCatalog 在 range-init
+  全表达式末尾析构，boxes() 返回成员引用悬垂（C++23 P2718R0 前经典陷阱）；主程序
+  BoxModule 具名变量承接故从未发病，domain_tests override 目录未踩中
+- **解决**：具名变量承接（a6e2a59），5/5 复测全对。教训：**成员引用 getter 的
+  临时对象内联 range-for 一律禁止**；诡异乱码先怀疑内存再怀疑编码（文件 od 完好
+  + 乱码码点反推出 id 的 UTF-16 字节是定位决定性线索）
+
+### P-075 强杀 PopTools 后 dsh sidecar 孤儿：mcp-manager respawn 致 exe 占用，链接 LNK1104
+- **关联任务**：T-074 ｜ 记录智能体：Agent_20261122011419
+- **现象**：taskkill 杀 poptools_mcp_server 后立刻被重新拉起（PID 变化），
+  增量构建 LNK1104 无法写 exe，连杀无效
+- **原因**：强杀 PopTools（taskkill /F）不给清理机会，dsh sidecar（node
+  bin.js web）存活且其 mcp-manager stdio eager 持续 respawn mcp_server 子进程
+- **解决**：先杀 sidecar（PowerShell 查 node 命令行认准 tools\dsh 那个，勿误杀
+  Zotero 等其他 node）再杀 mcp_server。教训：**重建 mcp_server 前先清 dsh
+  sidecar**；「杀不死子进程」= 有父在 respawn，向上找根源
 
 ### P-073 dsh-home 双层路径漏算：调试配置写错家 → MCP 配置「不生效」假象
 - **关联任务**：T-074 ｜ 记录智能体：Agent_20261121184000
@@ -404,6 +434,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-22 01:15 | Agent_20261122011419 | 头部 / 当前任务 / 踩坑记录 / 台账 / docs(验收手册) / mcpserver 两文件 | T-074 收口冲刺：提交态复验+MCP 25 件冒烟 13/13+截图历史 6/6+安装器走查；双缺陷修复（ocr_image 注册+box UAF）a6e2a59；P-074/P-075 入账；验收手册落 docs | 构建 0 编译警告 ctest 全绿；7 项真机验收待用户 |
 | 2026-11-22 01:55 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / packaging(iss) / scripts(pack) / pin / app(Box+CaptureHistory+Main) / mcpserver / CMake | T-074 M3：安装器联网装 dsh+截图历史层+收纳盒实时重载；ISCC 编译验证 | 构建 0 编译警告 ctest 54 绿；03ab228；全链路复验（mcp 子进程存活） |
 | 2026-11-22 01:05 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / mcpserver / app(Main+Watcher) / goody / settings / main / dsh-home AGENTS.md | T-074 M2.5：域工具 16 件（22 清单）+dirty 跨进程协议+心跳呼吸+单实例+日志撤离 | 构建 0 编译警告 ctest 54 绿；595aa07；打包决策点待用户 |
 | 2026-11-22 00:15 | Agent_20261121184000 | 头部 / 当前任务 / 踩坑记录 / 台账 / src(mcpserver) / CMake / tests / dsh-home 配置 | T-074 M2：MCP 服务器六工具+协议框架+dsh patch 注入+AGENTS.md 工作流+2 用例 | 构建 0 编译警告 ctest 54 绿；端到端实证（mcp 子进程存活）；P-073 入账 |
