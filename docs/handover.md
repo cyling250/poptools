@@ -1,6 +1,8 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-21 21:10（T-074 M1 落码：WebView2 嵌入+dsh sidecar PoC 全链就绪——安装脚本两件/Node 24.22.3/dsh 0.2.2-rc.5/侧车冒烟出 URL 成功/dsh_poc.exe 构建 0 警告已拉起待目测） · Agent_20261121184000
+> 最后更新：2026-11-21 18:50（T-073 界面美化精修落码：设置导航指示条/标题层次/留白 + Goody IME Enter 守卫/空态欢迎卡/行高/间距/滚动条/过程行光环，构建 0 编译警告+ctest 99 绿，未提交待目测） · Agent_20261121184000
 > 最后更新：2026-11-20 02:40（T-071 夜间批次落码完成：P0 修复 T-070 提交态编译损坏 + ChatSession 热路径四项/分散效率批/UI 收编批/日历悬停脏矩形，6 提交 5887ee9..78abd32 每步独立构建 0 警告+ctest 99 绿，待真机验收；P-070/P-071 入账；陈旧验收块 T-059/T-060/T-064/T-062 无损搬移 archive/current-superseded-1117-1118.md） · Agent_20261120005535
 > 最后更新：2026-11-19 19:25（T-070 落码完成：Goody 按 deepseek-harness 形式重构——后端 ChatSession v3 会话事件日志/块化消息/审批审计对/投影派生模型历史（v1/v2 迁移），前端 dsh WebUI 形态（文档流气泡/ProcessRow 过程行/composer 大圆角卡/侧栏 280），提交 4e153c6，ctest 99 绿，未真机验收；dsh 源码研读存 temp_scripts/dl_dsh/） · Agent_20261119172053
 > 最后更新：2026-11-19 17:20（T-069 落码完成：UI 现代化改版 M0-M3 全流程——Fluent token 底座 theming 库 + 设置界面 SettingCard/ToggleSwitch/即时生效 + Goody 头像行/卡片描边/自适应输入 + 全局配色统一 Fluent token（ThemeColors 表退役），构建+ctest 绿，未提交待用户目测验收；方案 docs/design/20261119-ui-fluent-restyle-proposal.md） · Agent_20261119172053
@@ -73,6 +75,14 @@
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261117004800
 
+### T-073 界面美化精修——设置 + Goody 对话（UI 方向被否，转 T-074）
+- **执行智能体**：Agent_20261121184000
+- **结果**：⚠️ Fluent/dsh 底座上精修两界面（导航指示条/标题层次/间距 + IME 组词
+  Enter 守卫/空态欢迎卡/行高 150%/细滚动条/过程行光环），构建 0 编译警告+ctest 99 绿；
+  用户目测否决 UI 增量方向，拍板全量 dsh 化（T-074）→ IME 守卫等行为修复保留随
+  T-074 提交，UI 精修过渡期服役
+- 相关坑：无 ｜ 未提交（改动在工作区 9 文件，随 T-074 M1 处置）
+
 ### T-068 鼠标拖动「卡顿→瞬移」取证+根治+发版 v0.5.1
 - **执行智能体**：Agent_20261119101500
 - **结果**：✅ 探针实锤三类主线程停摆（30s 壁纸重算 ~160-170ms 主犯/IME 截屏/开机月报
@@ -94,6 +104,42 @@
 ## 当前任务
 
 > 占位：无结算中任务。在途验收项见历史任务区各条目「待用户」与下方块。
+
+**T-074 DeepSeek Harness 全量照搬——dsh 原样移植 + C++ 壳（M0 定稿待开工，2026-11-21）**：
+- 用户拍板：界面/内核/插件架构全量照搬 dsh 且**跟随上游更新**（批注锁定「原样移植+
+  给他套个壳」，不做内核语义重写）；全系统插件化=「桌面端智能管家，其余皆插件」；
+  界面载体 WebView2 嵌真 dsh 前端（用户问卡不卡→答不卡，认可）
+- M0 三文档落盘：需求单 requirements/20261121-dsh-full-port.md + 盘点报告
+  docs/design/20261121-dsh-inventory-report.md（96 万行/190 包/Cordis 2.9k/事件词表
+  63 型/session-controller API 全列）+ 蓝图 docs/design/20261121-dsh-port-blueprint.md
+- **定案**：sidecar 原样移植——dsh 自家桌面形态就是 Electron 壳跑 `dsh web` profile，
+  PopTools 用 Qt 壳等价替换：npm @deepseek-ai/dsh（Node>=24.9 sidecar）+ WebView2
+  加载 localhost:3080；桥接面唯一=MCP 能力桥/进程生命周期/展示路由；分期 M1 壳与
+  运行时→M2 MCP 能力桥→M3 产品融合→M4 全系统插件化；回退=核心契约层五件套
+  C++ 语义移植（报告 f 节矩阵，≈1.5-2 万行）
+- 已验证：npm @deepseek-ai/dsh@0.2.2-rc.5（91 依赖，engines node>=24.9）/GitHub
+  Release 无二进制/nodejs.org zip 渠道/WebView2 运行时本机 157.x 存在/dsh 源码副本
+  temp_scripts/dl_dsh_20261121/
+- **M1 已落码（2026-11-21 21:10）**：①scripts/install_webview2.py（NuGet 1.0.4370.26
+  →tools/webview2，头文件+loader dll）②scripts/install_dsh.py（Node v24.22.3→
+  tools/node/current + npm @deepseek-ai/dsh→tools/dsh 1.3G；全局 .npmrc 旧代理端口
+  7897 经 CLI 旗标覆盖——npm 配置优先级 CLI>env>user npmrc）③src/ui/dsh/ 新库
+  poptools_ui_dsh（WebView2Host：QLibrary 动态解析 loader 免 .lib/CRT 纠缠 +
+  DshRuntime：QProcess 托管 `node bin.js web --no-open`，stdout 解析「dsh web:
+  <url>」启动行即登录态）④src/dsh_poc/main.cpp 独立验证窗（启动 sidecar/本地页
+  测试/停止 + 日志）⑤根 CMakeLists 尾部 gated 块（tools/webview2 缺席跳过）
+- 侧车冒烟通过：`node bin.js web --dump-config` 出完整装配树；真启动 stdout 单行
+  `dsh web: http://127.0.0.1:3080/?token=…`（与设计一致，token=进程级登录态，首访
+  种 30 天 cookie）；DSH_HOME 指向 %LOCALAPPDATA%/PopTools/dsh-home 生效
+- dsh_poc.exe 构建 0 编译警告（坑：SDK 10 的 interface 宏在 combaseapi.h，
+  WIN32_LEAN_AND_MEAN 排除 objbase 链致 MIDL 前向声明炸——显式 include 修复；
+  ICoreWebView2 取 URI 是 get_Source 非 get_Uri）——已拉起待用户目测：本地页测试
+  →启动 dsh sidecar→dsh 原版界面
+- 待办：用户目测 PoC 链路；dsh 首发需在 dsh 设置页配自家 API Key（credentials-local
+  自管，PopTools 不经手）；M1 收尾（T-073 未提交 9 文件随下批提交处置）→ M2
+  MCP 能力桥
+- 红线：禁经桥接面改 dsh 内部/禁 fork dsh 修补（上游 issue 走上游）；
+  extensions/cordis-runner（模型自改插件树 RCE 面）不启用
 
 **T-072 日程编辑器按用户反馈双修（已提交 f4f0f4f，待目测验收，2026-11-21）**：
 - 用户两截图批注：①编辑器底部五图标（插时间/重复/提醒/地点/颜色，后四项 rlqd
@@ -413,6 +459,9 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-21 21:10 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / scripts / tools / src(ui/dsh+dsh_poc) / CMake | T-074 M1：安装脚本两件+Node/dsh 落 tools+WebView2Host/DshRuntime/dsh_poc 落码+CMake gated 块；侧车冒烟出启动 URL 成功 | dsh_poc.exe 构建 0 编译警告已拉起待目测；interface 宏坑当场修 |
+| 2026-11-21 20:05 | Agent_20261121184000 | 头部 / 历史任务 / 当前任务 / 台账 / 需求单 / 设计文档 | T-074 M0：dsh 全量盘点（子代理重下载）+sidecar 定案+三文档落盘；T-073 入历史（UI 否决，行为修复保留） | npm/Node/WebView2 渠道全验证；M1 待开工 |
+| 2026-11-21 18:50 | Agent_20261121184000 | 头部 / 当前任务 / 台账 / ui(settings+goody) 源码 | T-073：界面美化精修（设置导航指示条/标题层次/留白 + Goody IME Enter 守卫/空态欢迎卡/行高 150%/消息间距/composer 焦点描边/细滚动条/过程行光环） | 构建 0 编译警告 ctest 99 绿；未提交待目测 |
 | 2026-11-21 01:35 | Agent_20261120005535 | 当前任务 / calendar 源码 / 台账 | T-072：日程编辑器撤工具条/页脚+窗高收缩+弹出位置格心居中（f4f0f4f，用户两截图批注） | 构建 0 警告 ctest 99 绿；新版已拉起待目测 |
 | 2026-11-20 02:45 | Agent_20261120005535 | 头部 / 当前任务 / 踩坑记录 / 项目快照 / ui+goody+core+settings+monitor 源码 / 需求单 / 归档 | T-071 夜战收口：UI 收编批+日历悬停脏矩形（538598c/78abd32）；新增 P-070/P-071；陈旧验收块无损搬移 archive/current-superseded-1117-1118.md；快照 0.5.1/99 用例 | 6 提交全绿待晨验；推送走代理尝试 |
 | 2026-11-20 01:05 | Agent_20261120005535 | 头部 / 当前任务 / 踩坑记录 / goody+core 源码 / 测试 / 需求单 | T-071 夜战立项+P0 修复+批次 A/ChatSession 四项/分散效率批（5887ee9/1bd70c9/fe65610/8fc5236）；新增 P-070 | 用户睡眠授权全权代决；双子代理盘点取证；每提交独立构建+ctest 99 绿 |
