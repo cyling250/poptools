@@ -18,6 +18,21 @@ int main(int argc, char *argv[])
     // exe 旁 crash/ 落 MiniDump + 符号化栈日志
     poptools::CrashReporter::install();
 
+    // 单实例守卫（T-074 M3）：dsh sidecar 绑定 127.0.0.1:3080，双实例第二份
+    // 启动必然 EADDRINUSE 失败（实测）；命名互斥体在崩溃时由 OS 释放
+#ifdef Q_OS_WIN
+    {
+        HANDLE guard = CreateMutexW(nullptr, TRUE, L"PopTools.SingleInstance.Mutex");
+        if (guard && GetLastError() == ERROR_ALREADY_EXISTS) {
+            if (guard != INVALID_HANDLE_VALUE)
+                ReleaseMutex(guard);
+            QMessageBox::information(nullptr, QStringLiteral("PopTools"),
+                                     QStringLiteral("PopTools 已在运行（托盘图标处）"));
+            return 0;
+        }
+    }
+#endif
+
     QApplication app(argc, argv);
     QApplication::setApplicationName("PopTools");
     QApplication::setOrganizationName("PopTools");

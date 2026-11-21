@@ -67,6 +67,8 @@ qt_add_executable(PopTools WIN32
     src/main.cpp
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/ExternalSyncWatcher.cpp
+    src/app/ExternalSyncWatcher.h
     src/app/app.rc
     src/resources/resources.qrc
 )
@@ -156,8 +158,9 @@ endif()
 add_library(poptools_mcpserver STATIC
     src/mcpserver/McpTools.cpp
     src/mcpserver/McpTools.h
+    src/mcpserver/McpToolsDomain.cpp
 )
-target_link_libraries(poptools_mcpserver PUBLIC Qt6::Core Qt6::Gui)
+target_link_libraries(poptools_mcpserver PUBLIC poptools_core Qt6::Core Qt6::Gui)
 target_include_directories(poptools_mcpserver PUBLIC "${CMAKE_SOURCE_DIR}/src")
 
 add_executable(poptools_mcp_server

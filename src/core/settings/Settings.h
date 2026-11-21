@@ -140,6 +140,10 @@ public:
     void beginBatch();
     void endBatch();
 
+    // 外部进程（poptools_mcp_server）改写 ini 后的通知入口：QSettings sync
+    // 会拉入磁盘上的外部变更（T-074 M2.5 跨进程生效协议，配 dirty 文件触发）
+    void syncExternal();
+
 private:
     Settings();
     // 落盘并检查可写性（安装到无写权限目录时 sync 静默失败，首次失败告警一次）

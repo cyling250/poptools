@@ -26,6 +26,13 @@ struct McpToolResult
 {
     QJsonObject payload;
     bool isError = false;
+    // 显式双参构造：调用点的 *out = {payload, isError} 拷贝列表赋值依赖它
+    //（聚合体在 MSVC 上的列表赋值口径不稳，C2679 实测）
+    McpToolResult() = default;
+    McpToolResult(QJsonObject p, bool e)
+        : payload(p), isError(e)
+    {
+    }
 };
 
 // ---- 工具描述（tools/list 载荷；与 run* 一一对应） ----
@@ -41,5 +48,14 @@ McpToolResult runWriteMonthlyDigest(const QString &goodyBaseDir, const QJsonObje
 McpToolResult runReadMonthlyDigest(const QString &goodyBaseDir, const QJsonObject &args);
 // 截图（整虚拟桌面拼图，PNG 落临时目录，返回路径供 dsh 读图/OCR）
 McpToolResult runCaptureScreenshot(const QJsonObject &args);
+
+// ---- 域工具扩展（T-074 M2.5「全功能交底」）：日历/活动设置/收纳盒/翻译/
+// 系统/上下文管理。runDomainTool 未命中时返回 false（协议层回落核心工具），
+// domainToolDescriptors 追加进 tools/list ----
+QJsonArray domainToolDescriptors();
+bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
+                   const QString &name, const QJsonObject &args, McpToolResult *out);
+// 心跳触碰：每次 tools/call 由协议层调（写 dataRoot/mcp.heartbeat，失败忽略）
+void touchMcpHeartbeat(const QString &dataRoot);
 
 } // namespace poptools

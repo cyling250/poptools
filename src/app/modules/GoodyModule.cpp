@@ -2,8 +2,10 @@
 
 #include <QCoreApplication>
 #include <QDate>
+#include <QFileSystemWatcher>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QTimer>
 
@@ -128,6 +130,31 @@ void GoodyModule::ensureDshWindow()
             m_ball->show();
     });
     connect(m_dshWindow, &QObject::destroyed, this, [this] { m_dshWindow = nullptr; });
+
+    // ---- MCP 心跳 → 呼吸光效（T-074 M2.5）：dsh agent 每次调用 PopTools
+    // 工具，poptools_mcp_server 触碰 mcp.heartbeat；10s 无心跳回静默。
+    // 独立监听器（ExternalSyncWatcher 在 MainWindow 管 settings/calendar/box）----
+    auto *hbWatcher = new QFileSystemWatcher(this);
+    if (QDir(dataRoot).exists())
+        hbWatcher->addPath(dataRoot);
+    auto *revert = new QTimer(this);
+    revert->setSingleShot(true);
+    revert->setInterval(10 * 1000);
+    connect(revert, &QTimer::timeout, this, [this] {
+        m_working = false;
+        emit workingChanged(false);
+    });
+    connect(hbWatcher, &QFileSystemWatcher::directoryChanged, this,
+            [this, revert, dataRoot](const QString &) {
+                if (!QFileInfo::exists(dataRoot + QStringLiteral("/mcp.heartbeat")))
+                    return;
+                QFile::remove(dataRoot + QStringLiteral("/mcp.heartbeat"));
+                if (!m_working) {
+                    m_working = true;
+                    emit workingChanged(true);
+                }
+                revert->start();
+            });
 }
 
 // ---- T-050：桌面悬浮球 ----

@@ -428,6 +428,13 @@ void Settings::setAssistantBallPos(const QString &xy)
     syncChecked();
 }
 
+// T-074 M2.5：MCP 服务器进程改写 ini 后触发（ExternalSyncWatcher → dirty 文件）。
+// QSettings 的 sync 会把磁盘上的外部变更合并进本实例，随后各 getter 读到新值
+void Settings::syncExternal()
+{
+    m_s.sync();
+}
+
 // ---- dsh 常驻服务（T-074） ----
 
 QString Settings::dshApiKey() const

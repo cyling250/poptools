@@ -1,11 +1,14 @@
 #include "MainWindow.h"
 
+#include "ExternalSyncWatcher.h"
+
 #include <QApplication>
 #include <QDesktopServices>
 #include <QMessageBox>
 #include <QScreen>
 #include <QTimer>
 #include <QUrl>
+#include <QStandardPaths>
 
 #include "AppServices.h"
 #include "core/monitor/MainThreadProbe.h"
@@ -69,6 +72,25 @@ MainWindow::MainWindow(QObject *parent)
     m_registry.add(std::make_unique<CalendarModule>());
     m_registry.add(std::make_unique<BoxModule>());
     m_registry.initAll(*m_services);
+
+    // ---- 跨进程生效协议（T-074 M2.5）：poptools_mcp_server（dsh 拉起的独立
+    // 进程）代表 agent 改写数据文件后 touch dirty 标记，此处统一收口——
+    // settings → sync + 广播；calendar → 宿主重载；box → 广播（重应用）----
+    const QString dataRoot =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    auto *syncWatcher = new ExternalSyncWatcher(dataRoot, this);
+    connect(syncWatcher, &ExternalSyncWatcher::settingsDirty, this, [this] {
+        Settings::instance().syncExternal();
+        m_services->notifySettingsChanged();
+    });
+    connect(syncWatcher, &ExternalSyncWatcher::calendarDirty, this, [this] {
+        if (m_services->calendarApplySettings)
+            m_services->calendarApplySettings();
+    });
+    connect(syncWatcher, &ExternalSyncWatcher::boxDirty, this, [this] {
+        Settings::instance().syncExternal();
+        m_services->notifySettingsChanged();
+    });
 
     // 能力槽完整性自检：拔掉 CaptureModule 时贴图会静默退化为"剪贴板 + 鼠标位置"，
     // 显式告警避免静默降级（模块间依赖在注册顺序上隐式成立，此处是唯一护栏）
@@ -208,3 +230,4 @@ void MainWindow::onShowSettings(bool openCalendarPage)
 }
 
 } // namespace poptools
+#include "app/ExternalSyncWatcher.h"

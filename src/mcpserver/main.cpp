@@ -89,6 +89,13 @@ int main(int argc, char *argv[])
         const QString dataRoot =
             QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         *isError = false;
+        // M2.5 域工具优先（日历/活动设置/收纳盒/翻译/系统/上下文管理）
+        {
+            poptools::McpToolResult domainResult;
+            if (runDomainTool(dataRoot + QStringLiteral("/monitor"), dataRoot, name, args,
+                              &domainResult))
+                return wrapPayload(domainResult, isError);
+        }
         if (name == QLatin1String("poptools_activity_daily"))
             return wrapPayload(
                 runActivityDaily(dataRoot + QStringLiteral("/monitor"), args), isError);
@@ -181,13 +188,21 @@ int main(int argc, char *argv[])
             return;
         }
         if (method == QLatin1String("tools/list")) {
-            sendResult(id, QJsonObject{{"tools", poptools::mcpToolDescriptors()}});
+            QJsonArray tools = poptools::mcpToolDescriptors();
+            const QJsonArray domain = poptools::domainToolDescriptors();
+            for (const QJsonValue &t : domain)
+                tools.append(t);
+            sendResult(id, QJsonObject{{"tools", tools}});
             return;
         }
         if (method == QLatin1String("tools/call")) {
             const QString name = params.value(QStringLiteral("name")).toString();
             const QJsonObject args = params.value(QStringLiteral("arguments")).toObject();
             bool isError = false;
+            // 心跳：悬浮球呼吸绑定 agent 工具调用（handleMessage 作用域无
+            // dataRoot，就地取 AppLocalDataLocation——与 dispatchTool 同口径）
+            poptools::touchMcpHeartbeat(QStandardPaths::writableLocation(
+                QStandardPaths::AppLocalDataLocation));
             const QJsonObject payload = dispatchTool(name, args, &isError);
             // 深层嵌套走 insert（MSVC 大括号初始化列表炸 C2440，McpTools 同教训）
             QJsonObject contentBlock;

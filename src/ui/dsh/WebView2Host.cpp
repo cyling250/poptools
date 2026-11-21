@@ -47,13 +47,9 @@ using CreateEnvironmentWithOptionsFn = HRESULT (__stdcall *)(
 // webview2_debug.log——GUI 程序的失败原因无法远程读取，靠文件留痕
 void hostLog(const QString &line)
 {
-    QFile log(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
-              + QStringLiteral("/webview2_debug.log"));
-    if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        log.write((QTime::currentTime().toString(QStringLiteral("HH:mm:ss ")) + line)
-                      .toUtf8());
-        log.write("\n");
-    }
+    // 嵌入层调试日志：黑框排查期曾落盘 webview2_debug.log，稳定后撤离（T-074
+    // M3）——保留函数签名免动全部调用点，实现为 no-op
+    Q_UNUSED(line);
 }
 
 } // namespace
