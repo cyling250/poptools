@@ -467,21 +467,22 @@ void CalendarPanel::handleDoubleClick(const QPoint &p)
 void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
 {
     // 坐标口径（T-062 修复: G-02）：cell/screen/编辑器落点均为物理像素，而
-    // 编辑器尺寸 380×430 是 Qt 逻辑坐标（CalendarEventEditor 构造 resize）。
-    // 原实现直接拿逻辑尺寸对物理屏做钳制，150% 下编辑器物理占 570×645，最右
-    // 列/最底行双击时右/底缘最多溢出屏幕 190/215 物理px。统一为物理算：
-    // w/h 先按 dpr 折算成物理尺寸参与钳制，最终落点经 logicalPos 转回逻辑
-    // 坐标传给编辑器（Qt 窗口 move 用逻辑坐标）
+    // 编辑器尺寸（kEditorSize）是 Qt 逻辑坐标（CalendarEventEditor 构造
+    // resize）。w/h 先按 dpr 折算成物理尺寸参与定位与钳制，最终落点经
+    // logicalPos 转回逻辑坐标传给编辑器（Qt 窗口 move 用逻辑坐标）
     const int w = CalendarEventEditor::kEditorSize.width(); // 逻辑尺寸（S-07 收敛常量）
     const int h = CalendarEventEditor::kEditorSize.height();
     const qreal dpr = m_surface ? m_surface->dpr() : 1.0;
     const int wPhys = qRound(w * (dpr > 0.0 ? dpr : 1.0));
     const int hPhys = qRound(h * (dpr > 0.0 ? dpr : 1.0));
     const QRect screen = m_surface ? m_surface->screenPhysical() : QRect();
-    int x = cell.left() + 12;
+    // T-072（用户拍板）：编辑器对齐所点击日期格居中——原实现钉在格子左上角
+    // (cell.left+12, cell.top+12)，视觉偏离所点日期。编辑器远大于格子，以格
+    // 心为锚居中后再按屏幕钳制（右缘 12px/底缘 60px 余量、左/顶 10px 下限）
+    int x = cell.center().x() - wPhys / 2;
+    int y = cell.center().y() - hPhys / 2;
     if (x + wPhys > screen.right() + 1 - 12)
-        x = cell.left() + cell.width() - wPhys - 12;
-    int y = cell.top() + 12;
+        x = screen.right() + 1 - 12 - wPhys;
     if (y + hPhys > screen.bottom() + 1 - 60) // 60 = 底部预留（任务栏高度余量）
         y = screen.bottom() + 1 - hPhys - 60;
     x = std::max(screen.left() + 10, x);

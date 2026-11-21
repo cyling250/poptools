@@ -11,7 +11,6 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
-#include <QToolTip>
 
 namespace poptools {
 
@@ -24,8 +23,7 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowFlag(Qt::Tool, false);
-    setMouseTracking(true);
-    resize(kEditorSize); // S-07：与面板定位共用同一常量
+    resize(kEditorSize); // S-07：与面板定位共用同一常量（T-072：340，随工具条/页脚撤除收缩）
     move(pos);
 
     m_text = new QPlainTextEdit(this);
@@ -51,8 +49,8 @@ CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *s
         return lines.join(QLatin1Char('\n'));
     }());
 
-    // 文本变化只发生在子控件自身绘制内，父窗绘制（边框/标题/工具条/脚注）
-    // 不依赖文本内容——不再每键整窗 update()（T-071 夜间批次收编）
+    // 文本变化只发生在子控件自身绘制内，父窗绘制（边框/标题）不依赖文本内容
+    // ——不每键整窗 update()（T-071 收编）
 }
 
 void CalendarEventEditor::paintEvent(QPaintEvent *)
@@ -93,124 +91,13 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
     g.drawPolyline(QVector<QPoint>{ QPoint(m_checkRect.left() + 7, m_checkRect.top() + 14),
                                     QPoint(m_checkRect.left() + 12, m_checkRect.top() + 19),
                                     QPoint(m_checkRect.left() + 21, m_checkRect.top() + 8) });
-
-    // 工具条
-    const int toolbarY = height() - 110;
-    g.setPen(QPen(QColor(255, 255, 255, 34), 1));
-    g.drawLine(14, toolbarY - 8, width() - 14, toolbarY - 8);
-    for (int i = 0; i < 5; ++i) {
-        const QRect r(14 + i * 36, toolbarY, 28, 28);
-        m_toolRects[i] = r;
-        if (i == m_hoverTool)
-            g.fillPath(roundedPath(QRectF(r), 5), QColor(255, 255, 255, 42));
-        drawToolIcon(&g, i, r);
-    }
-
-    QFont smallFont;
-    smallFont.setFamilies({ QStringLiteral("Microsoft YaHei UI") });
-    smallFont.setPixelSize(11);
-    g.setFont(smallFont);
-    g.setPen(QColor(t.textTertiary)); // T-071 收编：字面量 (150,150,150) → 深套 token
-    // 基线经 ascent 锚定（P-064 口径，禁手算偏移）
-    g.drawText(QPoint(16, height() - 58 + QFontMetrics(smallFont).ascent()),
-               QStringLiteral("数据保存在本机"));
 }
 
-int CalendarEventEditor::hitTool(const QPoint &p) const
+void CalendarEventEditor::mousePressEvent(QMouseEvent *event)
 {
-    for (int i = 0; i < 5; ++i)
-        if (m_toolRects[i].contains(p))
-            return i;
-    return -1;
-}
-
-void CalendarEventEditor::handleTool(int index)
-{
-    switch (index) {
-        case 0:
-            insertTime();
-            break;
-        case 1:
-            QToolTip::showText(mapToGlobal(m_toolRects[index].topLeft()),
-                               QStringLiteral("重复：不重复（复刻版仅支持单日）"), this);
-            break;
-        case 2:
-            QToolTip::showText(mapToGlobal(m_toolRects[index].topLeft()),
-                               QStringLiteral("提醒：无"), this);
-            break;
-        case 3:
-            QToolTip::showText(mapToGlobal(m_toolRects[index].topLeft()),
-                               QStringLiteral("地点：未设置"), this);
-            break;
-        case 4:
-            QToolTip::showText(mapToGlobal(m_toolRects[index].topLeft()),
-                               QStringLiteral("颜色：默认"), this);
-            break;
-        default:
-            break;
-    }
-}
-
-void CalendarEventEditor::insertTime()
-{
-    // 与 rlqd 一致：在光标所在行行首插入 "09:00 " 前缀
-    QTextCursor cur = m_text->textCursor();
-    const int pos = cur.position();
-    const QString text = m_text->toPlainText();
-    int lineStart = text.lastIndexOf(QLatin1Char('\n'), qMax(0, pos - 1)) + 1;
-    if (pos == 0)
-        lineStart = 0;
-    const QString prefix = QStringLiteral("09:00 ");
-    cur.setPosition(lineStart);
-    cur.insertText(prefix);
-    cur.setPosition(lineStart + prefix.length());
-    m_text->setTextCursor(cur);
-    m_text->setFocus();
-}
-
-void CalendarEventEditor::drawToolIcon(QPainter *g, int index, const QRect &r)
-{
-    // T-071 收编：字面量 (220,220,220) → 深套 token（常暗语境自取深套）
-    QPen pen(QColor(fluentTheme(true).textSecondary), 1.4);
-    pen.setCapStyle(Qt::RoundCap);
-    pen.setJoinStyle(Qt::RoundJoin);
-    g->setPen(pen);
-    g->setBrush(Qt::NoBrush);
-    const qreal cx = r.left() + r.width() / 2.0, cy = r.top() + r.height() / 2.0;
-    switch (index) {
-        case 0: // 时间
-            g->drawEllipse(QPointF(cx, cy), 7, 7);
-            g->drawLine(QPointF(cx, cy - 4), QPointF(cx, cy));
-            g->drawLine(QPointF(cx, cy), QPointF(cx + 4, cy + 2));
-            break;
-        case 1: // 重复
-            g->drawArc(QRectF(cx - 7, cy - 7, 14, 14), 40 * 16, 250 * 16);
-            g->drawLine(QPointF(cx + 5, cy - 8), QPointF(cx + 8, cy - 5));
-            g->drawLine(QPointF(cx + 8, cy - 5), QPointF(cx + 4, cy - 3));
-            break;
-        case 2: // 提醒
-            g->drawArc(QRectF(cx - 6, cy - 7, 12, 12), 180 * 16, 180 * 16);
-            g->drawLine(QPointF(cx - 6, cy), QPointF(cx - 6, cy + 5));
-            g->drawLine(QPointF(cx + 6, cy), QPointF(cx + 6, cy + 5));
-            g->drawLine(QPointF(cx - 8, cy + 5), QPointF(cx + 8, cy + 5));
-            g->drawLine(QPointF(cx, cy + 8), QPointF(cx, cy + 8.1));
-            break;
-        case 3: // 地点
-            g->drawEllipse(QPointF(cx, cy - 3), 5, 5);
-            g->drawPolyline(QVector<QPointF>{ QPointF(cx + 4, cy - 1), QPointF(cx, cy + 9),
-                                              QPointF(cx - 4, cy - 1) });
-            break;
-        case 4: { // 颜色
-            g->drawEllipse(QPointF(cx, cy), 7, 7);
-            g->setBrush(QColor(fluentTheme(true).textSecondary));
-            g->drawEllipse(QPointF(cx - 2.8, cy - 2.8), 1.2, 1.2);
-            g->drawEllipse(QPointF(cx + 2.6, cy - 2.8), 1.2, 1.2);
-            g->drawEllipse(QPointF(cx - 2.8, cy + 2.6), 1.2, 1.2);
-            g->setBrush(Qt::NoBrush);
-            break;
-        }
-        default:
-            break;
+    if (m_checkRect.contains(event->pos())) {
+        saveAndClose();
+        return;
     }
 }
 
@@ -225,26 +112,6 @@ void CalendarEventEditor::keyPressEvent(QKeyEvent *event)
         return;
     }
     QWidget::keyPressEvent(event);
-}
-
-void CalendarEventEditor::mouseMoveEvent(QMouseEvent *event)
-{
-    const int h = hitTool(event->pos());
-    if (h != m_hoverTool) {
-        m_hoverTool = h;
-        update();
-    }
-}
-
-void CalendarEventEditor::mousePressEvent(QMouseEvent *event)
-{
-    if (m_checkRect.contains(event->pos())) {
-        saveAndClose();
-        return;
-    }
-    const int t = hitTool(event->pos());
-    if (t >= 0)
-        handleTool(t);
 }
 
 bool CalendarEventEditor::event(QEvent *event)
