@@ -92,6 +92,11 @@ public:
     // 遗漏时（确认恢复等场景）一次性全桌面重绘补齐
     void requestFullRepaint();
 
+signals:
+    // 主屏 DPR 变化（T-077b 混 DPI 修复：接拔屏切换 100%/150% 缩放配置）——
+    // 面板须重建渲染器（字号/间距按 dpr 缩放）并按比率重映射视觉矩形
+    void dprChanged(qreal dpr);
+
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qint64 *result) override;
 
@@ -101,6 +106,7 @@ private:
     void notifyHookUpdate();
     static HWND findHookFrameworkWindow();
     DesktopPanel *hitPanel(const QPoint &physical) const;
+    void refreshDpr(); // primaryScreen dpr 重估（构造即一次 + 屏变化信号再估）
 
     struct PanelSlot
     {

@@ -15,8 +15,9 @@
 
 namespace poptools {
 
-// 1x1 屏外宿主窗：永不激活不显示，仅作 DLL 事件投递目标；主屏物理尺寸/DPR
-// 构造时快照（运行中改分辨率不跟随，登记 BUG-08，修复超出卫生范畴）
+// 1x1 屏外宿主窗：永不激活不显示，仅作 DLL 事件投递目标；主屏物理尺寸构造
+// 时快照（运行中改分辨率不跟随，登记 BUG-08）；DPR 动态重估（T-077b：
+// 接拔屏常伴随 150%↔100% 缩放切换，物理 rect 相同而 dpr 变——全链跟随）
 DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint)
 {
@@ -29,7 +30,25 @@ DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
     // 画布覆盖整个虚拟桌面（并集物理像素）：面板槽矩形即虚拟桌面坐标，面板
     // 跨屏/归属切换只改槽矩形，画布无需重建（T-063 多屏移植）
     m_screen = deskscreens::virtualDesktopPhysical();
-    m_dpr = QGuiApplication::primaryScreen()->devicePixelRatio();
+    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this,
+            [this](QScreen *) { refreshDpr(); });
+    for (QScreen *s : QGuiApplication::screens()) {
+        connect(s, &QScreen::geometryChanged, this, [this] { refreshDpr(); });
+        // 缩放比变化（150%↔100%）不改几何——logicalDpi 变化专用信号才可靠
+        connect(s, &QScreen::logicalDotsPerInchChanged, this,
+                [this] { refreshDpr(); });
+    }
+    refreshDpr();
+}
+
+void DesktopSurfaceHost::refreshDpr()
+{
+    QScreen *primary = QGuiApplication::primaryScreen();
+    const qreal dpr = primary ? primary->devicePixelRatio() : 1.0;
+    if (qFuzzyCompare(m_dpr, dpr))
+        return;
+    m_dpr = dpr;
+    emit dprChanged(dpr);
 }
 
 // 停值守（解除注入）并解除面板反引；QLibrary 随 QObject 父子关系析构

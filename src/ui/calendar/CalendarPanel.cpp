@@ -56,10 +56,42 @@ CalendarPanel::CalendarPanel(QObject *parent)
             });
 }
 
+// 主屏 DPR 变化（T-077b）：renderer 重建（字号/间距随新 dpr）+ 日历视觉矩形
+// 等比重映射——150%↔100% 切换时物理 rect 相同而视觉占屏比变了，按 dpr 比率
+// 缩放使日历视觉大小跟随系统元素。壁纸缓存随旧 renderer 丢失 → 异步重算。
+// 与 onScreenLayoutChanged 分层：本函数只管 dpr 比率，屏几何比率归那条链；
+// 两链复合（拔屏常伴 dpr 切换）时线性无关、次序无关。
+void CalendarPanel::onDprChanged()
+{
+    const qreal newDpr = m_surface->dpr();
+    if (qFuzzyCompare(newDpr, m_lastDpr) || m_lastDpr <= 0.0)
+        return;
+    const double factor = double(newDpr) / m_lastDpr; // 视觉等比因子（先算后覆盖）
+    m_lastDpr = newDpr;
+    if (!m_renderer)
+        return; // duty 未启动：renderer/设置懒建时按新 dpr 走，无需处理
+    const QRect screen = m_surface->screenPhysical();
+    m_renderer = std::make_unique<CalendarRenderer>(screen.width(), screen.height(),
+                                                    newDpr);
+    kickWallpaperRefresh(); // 壁纸缓存随旧 renderer 丢失
+    // 视觉等比重映射：相对归属屏按 dpr 比率缩放（视觉占比不变）
+    const QRect &s = m_screenNative;
+    if (!s.isEmpty()) {
+        m_settings.x = qRound(s.left() + (m_settings.x - s.left()) * factor);
+        m_settings.y = qRound(s.top() + (m_settings.y - s.top()) * factor);
+        m_settings.width = qRound(std::max(520.0, m_settings.width * factor));
+        m_settings.height = qRound(std::max(420.0, m_settings.height * factor));
+        clampSettings(); // 归属屏重解析 + 屏内钳制
+        m_settings.save();
+    }
+    render();
+}
+
 // 拔屏/改分辨率/主屏切换：旧归属屏（m_screenNative）不再匹配当前布局时，
 // 把日历矩形按新旧屏比例映射到新归属屏（中心仍在原归属屏则不动——无关屏
-// 插拔与 DPI 微调不折腾面板）。画布=虚拟桌面并集且拔屏只会变小，槽矩形
-// 缩回新并集即可，无需重建 SHM（T-063 架构红利）
+// 插拔与 DPI 微调不折腾面板；物理 rect 相同而 dpr 变的切换由 onDprChanged
+// 处理，此处 target==oldScreen 直接返回不冲突）。画布=虚拟桌面并集且拔屏
+// 只会变小，槽矩形缩回新并集即可，无需重建 SHM（T-063 架构红利）。
 void CalendarPanel::onScreenLayoutChanged()
 {
     const QRect oldScreen = m_screenNative;
@@ -117,6 +149,11 @@ void CalendarPanel::onDutyStarted()
         clampSettings();
         m_renderer = std::make_unique<CalendarRenderer>(screen.width(), screen.height(),
                                                         m_surface->dpr());
+        m_lastDpr = m_surface->dpr();
+        // 主屏 DPR 变化（T-077b）：重建渲染器（字号/间距随新 dpr）+ 视觉矩形
+        // 等比重映射——物理 rect 相同的屏切换（150%↔100%）也不漏
+        connect(m_surface, &DesktopSurfaceHost::dprChanged, this,
+                [this](qreal) { onDprChanged(); });
     }
     if (!m_clock) {
         m_clock = new QTimer(this);
