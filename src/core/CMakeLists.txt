@@ -73,6 +73,8 @@ add_library(poptools_core STATIC
     settings/Settings.h
     update/UpdateChecker.cpp
     update/UpdateChecker.h
+    update/UpdateDownloader.cpp
+    update/UpdateDownloader.h
     translation/Translator.cpp
     translation/Translator.h
     translation/SelectionTranslator.cpp

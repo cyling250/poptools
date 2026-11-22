@@ -3,6 +3,7 @@
 #include <QMenu>
 #include <QObject>
 #include <QSystemTrayIcon>
+#include <QTimer>
 
 #include "FeatureRegistry.h"
 #include "core/hotkey/GlobalHotKey.h"
@@ -41,6 +42,7 @@ private:
 
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
+    QTimer *m_updateTimer = nullptr;    // 24h 定期更新自查（T-077）
     GlobalHotKey m_hotKey;              // 全局热键注册器（nativeEventFilter 由该类安装）
     RapidOcrService *m_ocr = nullptr;  // 共享 OCR 引擎（子进程昂贵，全局唯一）
     CaptureHistoryJob *m_captureHistory = nullptr; // 截图历史标注+清理（T-074）

@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QScreen>
 #include <QTimer>
 #include <QUrl>
@@ -18,6 +19,7 @@
 #include "core/ocr/RapidOcrService.h"
 #include "core/settings/Settings.h"
 #include "core/update/UpdateChecker.h"
+#include "core/update/UpdateDownloader.h"
 #include "modules/ActivityMonitorModule.h"
 #include "modules/BoxModule.h"
 #include "modules/CalendarModule.h"
@@ -156,30 +158,75 @@ MainWindow::MainWindow(QObject *parent)
     // 启动更新自查：延迟 5s（避开启动路径，红线 6），静默模式——仅发现新版时
     // 弹提示，无更新/失败不打扰；用户"跳过此版本"后同版本不再提示
     QTimer::singleShot(5000, this, [this] { doUpdateCheck(false); });
+    // T-077：24h 定期重查（常驻形态下运行数天也能跟上发布节奏）
+    m_updateTimer = new QTimer(this);
+    m_updateTimer->setInterval(24 * 60 * 60 * 1000);
+    connect(m_updateTimer, &QTimer::timeout, this, [this] { doUpdateCheck(false); });
+    m_updateTimer->start();
 }
 
 void MainWindow::doUpdateCheck(bool interactive)
 {
     auto *checker = new UpdateChecker(this);
     connect(checker, &UpdateChecker::updateAvailable, this,
-            [this, interactive](const QString &version, const QString &url) {
+            [this, interactive](const QString &version, const QString &url,
+                                const QString &installerUrl) {
                 // 启动静默模式：用户跳过过的版本不再提示（手动检查不受限）
                 if (!interactive && version == Settings::instance().updateIgnoredVersion())
                     return;
+                // T-077 自动更新门控：安装器直链 + 安装器形态 → 可静默装；
+                // 开发树（无 unins000.exe）保持跳转下载页（防覆盖源码树产物）
+                const bool autoInstall = !installerUrl.isEmpty()
+                                         && UpdateDownloader::canAutoInstall();
                 QMessageBox box(nullptr);
                 box.setWindowTitle(QStringLiteral("发现新版本"));
-                box.setText(QStringLiteral("PopTools %1 已发布（当前版本 v%2）。\n\n"
-                                           "是否前往下载页获取安装包？")
-                                .arg(version, QLatin1String(POPTOOLS_VERSION)));
+                box.setText(QStringLiteral("PopTools %1 已发布（当前版本 v%2）。\n\n%3")
+                                .arg(version, QLatin1String(POPTOOLS_VERSION),
+                                     autoInstall
+                                         ? QStringLiteral("下载安装包后自动静默安装并重启 PopTools。")
+                                         : QStringLiteral("是否前往下载页获取安装包？")));
                 // 标准按钮 + setButtonText（exec 返回值判定，绕开 QAbstractButton*）
                 box.setStandardButtons(QMessageBox::Yes | QMessageBox::No
                                        | QMessageBox::Cancel);
-                box.setButtonText(QMessageBox::Yes, QStringLiteral("前往下载"));
+                box.setButtonText(QMessageBox::Yes,
+                                  autoInstall ? QStringLiteral("立即更新")
+                                              : QStringLiteral("前往下载"));
                 box.setButtonText(QMessageBox::No, QStringLiteral("跳过此版本"));
                 box.setButtonText(QMessageBox::Cancel, QStringLiteral("关闭"));
                 const int pick = box.exec();
                 if (pick == QMessageBox::Yes) {
-                    QDesktopServices::openUrl(QUrl(url));
+                    if (!autoInstall) {
+                        QDesktopServices::openUrl(QUrl(url));
+                        return;
+                    }
+                    auto *downloader = new UpdateDownloader(box.parentWidget());
+                    auto *progress = new QProgressDialog(
+                        QStringLiteral("正在下载更新包…"), QStringLiteral("取消"), 0, 100,
+                        nullptr);
+                    progress->setWindowTitle(QStringLiteral("PopTools 更新"));
+                    progress->setWindowModality(Qt::NonModal);
+                    progress->show();
+                    connect(downloader, &UpdateDownloader::downloadProgress,
+                            progress, [progress](qint64 got, qint64 total) {
+                                if (total > 0)
+                                    progress->setValue(int(got * 100 / total));
+                            });
+                    connect(downloader, &UpdateDownloader::failed, progress,
+                            [progress](const QString &reason) {
+                                progress->close();
+                                progress->deleteLater();
+                                QMessageBox::warning(nullptr,
+                                                     QStringLiteral("自动更新失败"), reason);
+                            });
+                    connect(downloader, &UpdateDownloader::installerLaunched,
+                            progress, [progress](const QString &) {
+                                progress->close();
+                                progress->deleteLater();
+                                // 安装器已等锁接管：主程序退出（/RESTARTAPPLICATIONS
+                                // 会自动重启新版）
+                                QCoreApplication::exit(0);
+                            });
+                    downloader->downloadAndInstall(installerUrl);
                 } else if (pick == QMessageBox::No && interactive) {
                     Settings::instance().setUpdateIgnoredVersion(version);
                 }

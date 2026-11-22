@@ -32,6 +32,8 @@ public:
                    const QString &userDataDir = QString());
     // 唤起入口（悬浮球/热键/设置页）：显示 + 前置 + 激活
     void openWindow();
+    // sidecar 运行时访问（T-077 DshUpdateService 编排停/启 sidecar 用）
+    DshRuntime *runtime() { return &m_runtime; }
 
 signals:
     // sidecar 工作态广播：Starting=true，Ready/Failed=false（悬浮球呼吸光效）

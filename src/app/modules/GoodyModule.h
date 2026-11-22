@@ -7,6 +7,7 @@
 namespace poptools {
 
 class DshWindow;
+class DshUpdateService;
 class GoodyFloatingBall;
 
 // ============================================================
@@ -40,6 +41,7 @@ private:
 
     AppServices *m_services = nullptr;
     DshWindow *m_dshWindow = nullptr;    // dsh 常驻窗（sidecar 常驻 + WebView2 内容）
+    DshUpdateService *m_dshUpdate = nullptr; // dsh 运行时自动更新（T-077）
     // 桌面悬浮球：无父窗口，进程退出由 OS 回收（析构不执行）——球无关键
     // 落盘（位置在拖动时即时持久化），无析构依赖
     GoodyFloatingBall *m_ball = nullptr;

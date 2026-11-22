@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMessageBox>
 #include <QStandardPaths>
 #include <QTimer>
 
@@ -13,6 +14,7 @@
 #include "core/hotkey/GlobalHotKey.h"
 #include "core/hotkey/HotKeyNames.h"
 #include "core/settings/Settings.h"
+#include "ui/dsh/DshUpdateService.h"
 #include "ui/dsh/DshWindow.h"
 #include "ui/goody/GoodyBallLogic.h"
 #include "ui/goody/GoodyFloatingBall.h"
@@ -130,6 +132,39 @@ void GoodyModule::ensureDshWindow()
             m_ball->show();
     });
     connect(m_dshWindow, &QObject::destroyed, this, [this] { m_dshWindow = nullptr; });
+
+    // ---- dsh 自动更新（T-077）：24h 定期查 npm 官方源最新版；发现新版弹窗
+    // 确认后编排停 sidecar → npm install → 重启（DshUpdateService 托管） ----
+    m_dshUpdate = new DshUpdateService(m_dshWindow->runtime(), this);
+    m_dshUpdate->configure(tools + QStringLiteral("/node/current/npm.cmd"),
+                           tools + QStringLiteral("/dsh"));
+    const auto dshCheck = [this] { m_dshUpdate->checkForUpdates(false); };
+    QTimer::singleShot(20 * 1000, this, dshCheck); // 启动 20s（sidecar 就绪后再查）
+    auto *dshUpdateTimer = new QTimer(this);
+    dshUpdateTimer->setInterval(24 * 60 * 60 * 1000);
+    connect(dshUpdateTimer, &QTimer::timeout, this, dshCheck);
+    dshUpdateTimer->start();
+    connect(m_dshUpdate, &DshUpdateService::updateAvailable, this,
+            [this](const QString &local, const QString &remote) {
+                QMessageBox box(nullptr);
+                box.setWindowTitle(QStringLiteral("dsh 有新版本"));
+                box.setText(QStringLiteral("dsh 运行时发现新版本 %1（当前 %2）。\n\n"
+                                           "更新将自动完成：停管家后台 → 安装新版 → 重启，"
+                                           "期间管家界面短暂不可用。")
+                                .arg(remote, local));
+                box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+                box.setButtonText(QMessageBox::Yes, QStringLiteral("立即更新"));
+                box.setButtonText(QMessageBox::No, QStringLiteral("暂不更新"));
+                if (box.exec() == QMessageBox::Yes)
+                    m_dshUpdate->confirmUpdate(remote);
+            });
+    connect(m_dshUpdate, &DshUpdateService::updateFinished, this,
+            [](bool ok, const QString &detail) {
+                if (ok)
+                    QMessageBox::information(nullptr, QStringLiteral("dsh 更新完成"), detail);
+                else
+                    QMessageBox::warning(nullptr, QStringLiteral("dsh 更新失败"), detail);
+            });
 
     // ---- MCP 心跳 → 呼吸光效（T-074 M2.5）：dsh agent 每次调用 PopTools
     // 工具，poptools_mcp_server 触碰 mcp.heartbeat；10s 无心跳回静默。

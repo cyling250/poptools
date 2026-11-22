@@ -199,6 +199,8 @@ add_library(poptools_ui_dsh STATIC
     dsh/DshRuntime.h
     dsh/DshWindow.cpp
     dsh/DshWindow.h
+    dsh/DshUpdateService.cpp
+    dsh/DshUpdateService.h
 )
 target_link_libraries(poptools_ui_dsh PUBLIC
     poptools_core

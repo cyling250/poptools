@@ -1,11 +1,13 @@
 #include "UpdateChecker.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QUrl>
 
 namespace poptools {
@@ -86,7 +88,23 @@ void UpdateChecker::checkForUpdates(bool interactive)
                 emit upToDate();
             return;
         }
-        emit updateAvailable(tag, url);
+        // T-077 自动更新：assets 里找安装包直链（PopTools-Setup-*.exe）；
+        // 无资产（源码-only 发布）直链留空——上层仅提示跳转下载页
+        QString installerUrl;
+        const QJsonArray assets = root.value(QLatin1String("assets")).toArray();
+        const QRegularExpression setupRe(
+            QStringLiteral("PopTools-Setup-.*\\.exe$"),
+            QRegularExpression::CaseInsensitiveOption);
+        for (const QJsonValue &a : assets) {
+            const QJsonObject asset = a.toObject();
+            const QString name = asset.value(QLatin1String("name")).toString();
+            const QString dl = asset.value(QLatin1String("browser_download_url")).toString();
+            if (!dl.isEmpty() && setupRe.match(name).hasMatch()) {
+                installerUrl = dl;
+                break;
+            }
+        }
+        emit updateAvailable(tag, url, installerUrl);
     });
 }
 
