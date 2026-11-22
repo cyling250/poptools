@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-23 00:55（T-078 M0 桌面端形态迁移验证 PASS：官方桌面端下载/校验/静默装；自带 host 端口 58771+profile 同构；mcp-manager 移植后 host spawn 我们的 mcp_server——MCP 桥兼容实锤；M1 后台化改造待立项） · Agent_20261122011419
 > 最后更新：2026-11-23 00:30（T-077b 混 DPI 接屏修复：host dpr 动态重估+renderer 重建+视觉等比重映射——接屏字体大/虚线框 2/3 偏移同根根治 c6b8a4c 待复测） · Agent_20261122011419
 > 最后更新：2026-11-22 23:40（T-077 自动更新落码：PopTools Release 流式下载+Inno 静默装+开发树门控；dsh npm 查新+停 sidecar→install→重启编排；均弹窗确认+24h 定期，数据面自证通过 6493e6f） · Agent_20261122011419
 > 最后更新：2026-11-22 23:00（T-076b 看门狗：dsh sidecar 非主动退出自动重启（指数退避 2s~120s）+退出原因/stderr 尾部落 dsh-runtime.log，端到端实证杀进程 10s 内复活 f3be7ea） · Agent_20261122011419
@@ -87,32 +88,20 @@
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261117004800
 
-### T-077c dsh 孤儿 sidecar 清理（EADDRINUSE 看门狗空转根治）
+### T-078 dsh 桌面端形态迁移（M0 验证完成）
 - **执行智能体**：Agent_20261122011419
-- **结果**：✅ 端到端实证。用户报 dsh 拉不起——dsh-runtime.log 实锤孤儿
-  sidecar 占 3080（attempts=10 空转）。修复：start() 前清理占口孤儿（TCP 表
-  查监听 PID+映像验证本运行时 node 才终止+日志留证）；失败文案更新看门狗
-  语义。SDK 头链坑：winsock2.h 须先于 windows.h（LEAN_AND_MEAN 排 AF_INET）
-- 相关坑：无 ｜ 提交 4b1dee9
+- **结果**：✅ M0 全链验证 PASS。用户拍板：官方 Electron 桌面端做主界面，
+  PopTools 退后台服务，贴桌面日历现状零改动，悬浮球换形态（另议）。M0：
+  官方桌面端 286MB 下载+校验（feed sha512 是 base64 编码）+静默装成功；
+  **自带 host（OS 分配端口 58771，无 3080 冲突）+ profile 体系与 web 同构
+ （~/.dsh/profiles/desktop/cordis.patch.yml）**；mcp-manager 条目移植后
+  桌面端 host 成功 spawn 我们的 mcp_server（父 PID 22188=Harness 进程）
+- 待办 M1：PopTools 后台化改造（DshWindow/WebView2Host/DshRuntime/
+  DshUpdateService 退役，openChat→桌面端进程管理）；M2 安装器编排；AGENTS.md/
+  API Key 迁 ~/.dsh 新家；悬浮球形态另议
 
-### T-077b 混 DPI 接屏修复（字体大+虚线框偏移）
-- **执行智能体**：Agent_20261122011419
-- **结果**：✅ 落码待复测。用户接回外接屏（150%→100% 切换）后字体大+调整
-  虚线框只有日历 2/3——同根：host m_dpr 构造定死且「物理 rect 相同仅 dpr
-  变」的屏切换被 onScreenLayoutChanged 的 target==old 判定漏掉。修复：host
-  refreshDpr 动态重估（dprChanged 信号）+ CalendarPanel::onDprChanged
- （renderer 重建+视觉等比重映射+壁纸重算）；overlay 现取 dpr 换算自正
-- 相关坑：无 ｜ 提交 c6b8a4c
-
-### T-077 自动更新——PopTools Release 自装 + dsh npm 更新
-- **执行智能体**：Agent_20261122011419
-- **结果**：✅ 落码。PopTools：UpdateChecker 扩 assets 直链+UpdateDownloader
-  流式下载→Inno 静默装→安装器接管自动重启（开发树门控只跳转页）；dsh：
-  DshUpdateService 查 npm 官方源对比 package.json → 停 sidecar→npm i→重启
- （失败回拉旧版）；均弹窗确认制+24h 定期。数据面自证 npm/GitHub 通
-- 相关坑：无 ｜ 提交 6493e6f（真发布端到端验收随下次发版自然覆盖）
-
-> 更早：T-075~T-076 → [handover/archive/tasks-075-076.md](handover/archive/tasks-075-076.md)
+> 更早：T-077~T-077c → [handover/archive/tasks-077.md](handover/archive/tasks-077.md)
+> ｜ T-075~T-076 → [handover/archive/tasks-075-076.md](handover/archive/tasks-075-076.md)
 > ｜ T-066~T-073 → [handover/archive/tasks-066-073.md](handover/archive/tasks-066-073.md)
 > ｜ T-059~T-065 → [handover/archive/tasks-059-065.md](handover/archive/tasks-059-065.md)
 > ｜ T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-058 → [handover/archive/tasks-047-058.md](handover/archive/tasks-047-058.md)
