@@ -1,5 +1,11 @@
 #include "DshRuntime.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+
+#include <algorithm>
+
 namespace poptools {
 
 namespace {
@@ -7,6 +13,10 @@ namespace {
 // label 恒为 'dsh web'）
 constexpr QLatin1String kUrlLinePrefix("dsh web: ");
 constexpr int kKillGraceMs = 3000;
+// 看门狗退避：2s → 6s → 18s → 54s → 封顶 120s（防 crash-loop 疯狂重启）
+constexpr int kRestartBaseMs = 2000;
+constexpr int kRestartCapMs = 120000;
+constexpr int kStderrTailLines = 20;
 } // namespace
 
 DshRuntime::DshRuntime(QObject *parent)
@@ -19,6 +29,12 @@ DshRuntime::DshRuntime(QObject *parent)
             m_process.kill(); // 宽限期过仍存活 → 强杀（finished 收尾）
     });
 
+    m_restartTimer.setSingleShot(true);
+    connect(&m_restartTimer, &QTimer::timeout, this, [this] {
+        if (m_state != State::Stopping && m_process.state() != QProcess::Running)
+            start(); // 看门狗到点拉起（stop() 已把 timer 停掉，此路径恒非主动关停）
+    });
+
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
         const QStringList lines = QString::fromUtf8(m_process.readAllStandardOutput())
                                       .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -28,8 +44,12 @@ DshRuntime::DshRuntime(QObject *parent)
     connect(&m_process, &QProcess::readyReadStandardError, this, [this] {
         const QStringList lines = QString::fromUtf8(m_process.readAllStandardError())
                                       .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-        for (const QString &line : lines)
+        for (const QString &line : lines) {
             emit outputLine(line.trimmed()); // 诊断通道（Node 告警等）透传
+            m_stderrTail.append(line.trimmed()); // 看门狗日志用尾部环形缓冲
+            if (m_stderrTail.size() > kStderrTailLines)
+                m_stderrTail.removeFirst();
+        }
     });
     connect(&m_process, &QProcess::finished, this, &DshRuntime::handleFinished);
     connect(&m_process, &QProcess::errorOccurred, this, &DshRuntime::handleError);
@@ -43,6 +63,8 @@ void DshRuntime::configure(const QString &nodeExe, const QString &dshBinJs, cons
     m_dshHome = dshHome;
     m_agentsHome = agentsHome;
     m_apiKey = apiKey;
+    // 运行时日志放数据根（dshHome = <dataRoot>/dsh-home → 上级即 dataRoot）
+    m_logPath = QDir::cleanPath(m_dshHome + QStringLiteral("/../dsh-runtime.log"));
 }
 
 void DshRuntime::start()
@@ -71,6 +93,7 @@ void DshRuntime::start()
 
 void DshRuntime::stop()
 {
+    m_restartTimer.stop(); // 主动关停：取消任何待发的看门狗重启
     if (m_process.state() != QProcess::Running) {
         setState(State::Idle);
         return;
@@ -94,23 +117,27 @@ void DshRuntime::handleLine(const QString &line)
     if (line.startsWith(kUrlLinePrefix) && m_webUrl.isEmpty()) {
         m_webUrl = line.mid(kUrlLinePrefix.size()).trimmed();
         setState(State::Ready);
+        m_restartAttempts = 0; // 看门狗：成功就绪即重置退避
         emit webUrlReady(m_webUrl);
     }
 }
 
 void DshRuntime::handleFinished(int exitCode, QProcess::ExitStatus status)
 {
-    Q_UNUSED(exitCode);
     m_killTimer.stop();
     if (m_state == State::Stopping) {
         setState(State::Idle);
         return;
     }
-    // 非 stop 请求下的进程退出：启动期/就绪期崩溃（CrashReportExit 正常退出
-    // 也按失败对待——sidecar 不应自行退出）
+    // 看门狗（T-076b）：非 stop 请求下的进程退出（崩溃/自行退出——sidecar
+    // 不应自行退出）→ 落盘诊断 + 自动重启（指数退避）
+    const QString reason = status == QProcess::CrashExit
+                               ? QStringLiteral("dsh 进程崩溃退出")
+                               : QStringLiteral("dsh 进程自行退出（code %1）").arg(exitCode);
+    appendRuntimeLog(reason);
     setState(State::Failed);
-    emit failed(status == QProcess::CrashExit ? QStringLiteral("dsh 进程崩溃退出")
-                                              : QStringLiteral("dsh 进程自行退出（code %1）").arg(exitCode));
+    emit failed(reason);
+    scheduleRestart();
 }
 
 void DshRuntime::handleError(QProcess::ProcessError error)
@@ -118,8 +145,39 @@ void DshRuntime::handleError(QProcess::ProcessError error)
     // FailedToStart 最关键：node 路径错/文件缺失。Crashed 由 finished 收尾，
     // 此处只报 Starting 期错误避免双重 failed
     if (error == QProcess::FailedToStart) {
+        appendRuntimeLog(QStringLiteral("dsh 进程启动失败：node 或 bin.js 路径无效"));
         setState(State::Failed);
         emit failed(QStringLiteral("dsh 进程启动失败：node 或 bin.js 路径无效"));
+        scheduleRestart(); // 退避节流下持续重试（最长 120s 一次）
+    }
+}
+
+void DshRuntime::scheduleRestart()
+{
+    const int delay = std::min(kRestartCapMs,
+                               kRestartBaseMs * (1 << std::min(m_restartAttempts, 6)));
+    ++m_restartAttempts;
+    m_restartTimer.start(delay);
+}
+
+void DshRuntime::appendRuntimeLog(const QString &reason)
+{
+    QFile log(m_logPath);
+    if (!log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        return; // 日志失败不阻断看门狗（重启优先）
+    log.write(QDateTime::currentDateTime()
+                  .toString(QStringLiteral("[yyyy-MM-dd hh:mm:ss] "))
+                  .toUtf8());
+    log.write(reason.toUtf8());
+    log.write(QStringLiteral("  attempts=%1\n").arg(m_restartAttempts).toUtf8());
+    for (const QString &line : m_stderrTail) {
+        log.write(QStringLiteral("  | %1\n").arg(line).toUtf8());
+    }
+    // 简单限幅：日志超 256KB 换代（删除重建，历史丢失可接受——看门狗日志
+    // 只为最近诊断）
+    if (log.size() > 256 * 1024) {
+        log.close();
+        QFile::remove(m_logPath);
     }
 }
 
