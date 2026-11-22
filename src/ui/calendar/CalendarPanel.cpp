@@ -188,7 +188,6 @@ void CalendarPanel::refreshSummaries(bool force)
         return;
     m_digestViewMonth = key;
     m_digestView = CalendarDigestView();
-    m_digestView.armedDate = m_modalDate;
     if (m_digestQuery) {
         const QDate first(m_year, m_month, 1);
         const int days = first.daysInMonth();
@@ -203,40 +202,9 @@ void CalendarPanel::refreshSummaries(bool force)
     render();
 }
 
-// 摘要以 txt 弹出（系统 notepad，用户指定形态）：md 原文即纯文本，写
-// %TEMP% 副本后 startDetached（副本归 notepad 所有，PopTools 不清理）
-void CalendarPanel::openDigestInNotepad(const QString &path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-        return;
-    const QString base = QFileInfo(path).completeBaseName(); // 2026-11-18 / 2026-11
-    const QString txt = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
-                        + QStringLiteral("/PopTools工作摘要_") + base
-                        + QStringLiteral(".txt");
-    QFile out(txt);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return;
-    out.write(f.readAll());
-    out.close();
-    QProcess::startDetached(QStringLiteral("notepad.exe"), {txt});
-}
-
-// 编辑器面板开启期间的摘要链接分发：仅激活日期（双击打开面板的那天）的
-// 链接热区生效；未命中返回 false（事件按模态抑制丢弃）
-bool CalendarPanel::handleSummaryLinkClick(const QPoint &p)
-{
-    if (!m_layout.has_value() || !m_modalDate.isValid())
-        return false;
-    QDate date;
-    if (!m_layout->hitCellSummaryLink(p, &date) || date != m_modalDate)
-        return false;
-    const QString path = m_digestView.daily.value(date);
-    if (path.isEmpty())
-        return false;
-    openDigestInNotepad(path);
-    return true;
-}
+// 摘要 notepad 弹出逻辑（md→%TEMP% txt→startDetached）2026-11-22 提升为
+// ui/calendar 域共享自由函数 openDigestInNotepad（CalendarEventEditor.h）：
+// 月报链接（本文件）与日报链接（编辑器标题行，用户拍板改道）共用。
 
 // S-04：render()/renderDuringAdjust() 的公共体（原两函数除 m_adjusting 守卫与
 // hover/hint 实参外逐行相同）。先画进私有暂存帧再整帧发布：直接在共享位图上
@@ -265,8 +233,7 @@ void CalendarPanel::renderFrame(const QPoint &hover, const QString &hoverHint,
         m_surface->commitSurface(commitDirty);
 }
 
-QRect CalendarPanel::hoverVisualRect(int headerIdx, const QString &hint, bool monthHov,
-                                     bool armedHov) const
+QRect CalendarPanel::hoverVisualRect(int headerIdx, const QString &hint, bool monthHov) const
 {
     QRect r;
     if (!m_layout.has_value())
@@ -277,13 +244,6 @@ QRect CalendarPanel::hoverVisualRect(int headerIdx, const QString &hint, bool mo
         r = r.united(m_layout->guidePill);
     if (monthHov)
         r = r.united(m_layout->monthLink);
-    if (armedHov && m_digestView.armedDate.isValid()) {
-        // armedDate → 所在格（首格日期 + 天数差定位；越出显示月的日期 hit
-        // 阶段已过滤）
-        const int idx = int(m_layout->firstCellDate.daysTo(m_digestView.armedDate));
-        if (idx >= 0 && idx < m_layout->rows * 7)
-            r = r.united(m_layout->cellSummaryLinkRect(m_layout->cellRect(idx / 7, idx % 7)));
-    }
     return r;
 }
 
@@ -322,22 +282,19 @@ void CalendarPanel::onLeave()
         return;
     if (m_hover != QPoint(-9999, -9999) || !m_hoverHint.isEmpty()) {
         const QRect dirty = hoverVisualRect(m_lastHeaderHover, m_hoverHint,
-                                            m_lastMonthLinkHov, m_lastArmedLinkHov);
+                                            m_lastMonthLinkHov);
         m_hover = QPoint(-9999, -9999);
         m_hoverHint.clear();
         m_lastHeaderHover = -1;
         m_lastMonthLinkHov = false; // 离开面板全量复位（原漏复位两个链接标记：
-        m_lastArmedLinkHov = false; // 重进同一链接时"变化才重绘"判等失效）
         renderFrame(m_hover, m_hoverHint, true, dirty.adjusted(-2, -2, 2, 2));
     }
 }
 
 void CalendarPanel::onClick(const QPoint &p)
 {
-    // 编辑器面板开启期间：当日摘要链接热区仍可点（T-067"双击开面板后才可
-    // 点"）；其余事件维持模态抑制
-    if (m_modal && handleSummaryLinkClick(p))
-        return;
+    // 摘要格内链接已撤（2026-11-22 改道编辑器标题行）；编辑器开启期间其余
+    // 事件维持模态抑制
     if (!eventsAccepted())
         return;
     handleSingleClick(p);
@@ -359,28 +316,22 @@ void CalendarPanel::updateHover(const QPoint &p)
     }
     m_hover = p;
     // 头部按钮只做悬停底色，不弹文字气泡（气泡压住星期表头，被用户否掉）；
-    // 仅首次使用引导气泡保留。月报链接/激活摘要链接悬停同走"变化才重绘"
+    // 仅首次使用引导气泡保留。月报链接悬停走"变化才重绘"
     QString hint;
     const int hh = m_layout->hitHeader(p);
     const bool monthHov = !m_digestView.monthly.isEmpty() && m_layout->monthLink.contains(p);
-    QDate linkDate;
-    const bool armedHov = m_digestView.armedDate.isValid()
-                          && m_layout->hitCellSummaryLink(p, &linkDate)
-                          && linkDate == m_digestView.armedDate;
     if (hh < 0 && !monthHov && m_settings.showGuide && m_layout->guidePill.contains(p)) {
         hint = QStringLiteral("调整日历清单的位置和大小");
     }
-    if (hh != m_lastHeaderHover || hint != m_hoverHint || monthHov != m_lastMonthLinkHov
-        || armedHov != m_lastArmedLinkHov) {
+    if (hh != m_lastHeaderHover || hint != m_hoverHint || monthHov != m_lastMonthLinkHov) {
         // T-071：悬停级小改动带脏矩形提交（新旧语义目标可视矩形并集，外扩
         // 2px 兜描边/悬停底外扩）；翻页/跨日等大改动仍走 render() 整帧
         const QRect dirty = hoverVisualRect(m_lastHeaderHover, m_hoverHint,
-                                            m_lastMonthLinkHov, m_lastArmedLinkHov)
-                                .united(hoverVisualRect(hh, hint, monthHov, armedHov));
+                                            m_lastMonthLinkHov)
+                                .united(hoverVisualRect(hh, hint, monthHov));
         m_lastHeaderHover = hh;
         m_hoverHint = hint;
         m_lastMonthLinkHov = monthHov;
-        m_lastArmedLinkHov = armedHov;
         renderFrame(p, hint, true, dirty.adjusted(-2, -2, 2, 2));
     }
 }
@@ -487,16 +438,16 @@ void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
         y = screen.bottom() + 1 - hPhys - 60;
     x = std::max(screen.left() + 10, x);
     y = std::max(screen.top() + 10, y);
-    auto *editor = new CalendarEventEditor(date, &m_store, logicalPos(QPoint(x, y)), nullptr);
+    // 摘要入口（2026-11-22 用户拍板）：当日有日报则编辑器标题行显示「摘要»」
+    // 链接，点击直接 notepad（格内链接已撤，不再有"双击开面板后才可点"链路）
+    auto *editor = new CalendarEventEditor(date, &m_store, logicalPos(QPoint(x, y)),
+                                           m_digestView.daily.value(date), nullptr);
     trackModal(editor); // m_modal/m_modalWidget 唯一权威置位处（S-08 删去开头重复裸置位）
-    m_modalDate = date; // 该日摘要链接随面板开启而激活（T-067）
     // 外点关闭兜底：编辑器靠 WindowDeactivate 关闭，但双击源自桌面（前台进程是
     // explorer），activateWindow 作为后台进程常被 Windows 前台锁拒绝——编辑器
     // 从未激活过，外点就永远不会"失焦"，表现即"有时点外面关不掉、且无规律"
     //（实为激活是否成功无规律）。共享 WH_MOUSE_LL 按需装卸（划词卡片先例，
-    // 红线 2）：点编辑器外即保存关闭，编辑器销毁即卸钩。T-067 豁免：点在激活
-    // 日期的摘要链接热区上不关面板（链接可点的前提），notepad 弹出由面板
-    // onClick 路径处理（UP 事件），此处只放行不重复弹
+    // 红线 2）：点编辑器外即保存关闭，编辑器销毁即卸钩
     if (!m_editorHook) {
         m_editorHook = new GlobalMouseHook(this);
         connect(m_editorHook, &GlobalMouseHook::mousePressed, this,
@@ -504,13 +455,6 @@ void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
                     auto *ed = qobject_cast<CalendarEventEditor *>(m_modalWidget.data());
                     if (!ed)
                         return;
-                    if (m_modalDate.isValid() && m_layout.has_value()) {
-                        QDate linkDate;
-                        if (m_layout->hitCellSummaryLink(nativePos, &linkDate)
-                            && linkDate == m_modalDate
-                            && m_digestView.daily.contains(linkDate))
-                            return; // 链接热区：不关面板，UP 事件走面板路径
-                    }
                     if (!ed->frameGeometry().contains(logicalPos(nativePos)))
                         ed->saveAndClose();
                 });
@@ -519,13 +463,6 @@ void CalendarPanel::openEditor(const QDate &date, const QRect &cell)
     connect(editor, &QObject::destroyed, this, [this] {
         if (m_editorHook)
             m_editorHook->stop();
-        if (m_modalDate.isValid()) {
-            m_modalDate = QDate();
-            if (m_digestView.armedDate.isValid()) {
-                m_digestView.armedDate = QDate();
-                render(); // 链接去激活态
-            }
-        }
     });
     editor->show();
     editor->raise();

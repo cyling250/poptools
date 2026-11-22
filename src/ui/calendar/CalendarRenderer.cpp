@@ -171,7 +171,6 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
             if (!inMonth)
                 continue;
 
-            const bool hasDigest = digests.daily.contains(date);
             const QFontMetrics &fm = fontMetricsFor(dateFont);
             const qreal dateTextW = fm.horizontalAdvance(QString::number(date.day()));
             const QPointF datePos(cell.left() + 8, cell.top() + 3);
@@ -194,31 +193,15 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                                datePos + QPointF(dateTextW + 6, 3));
             }
 
-            if (hasDigest) {
-                // 摘要链接（T-067）：日期行下方右对齐条带；编辑器打开中的日期
-                // 高亮（激活态可点击），其余日期弱化色仅展示。几何与命中测试
-                // 共用 layout.cellSummaryLinkRect
-                const QRect lr = layout.cellSummaryLinkRect(cell);
-                const bool armed = date == digests.armedDate;
-                const bool hov = armed && lr.contains(hover);
-                if (hov)
-                    g->fillPath(roundedPath(QRectF(lr.adjusted(-2, -2, 2, 2)), 3),
-                                QColor(255, 255, 255, 30));
-                drawShadowTextInRect(g, QStringLiteral("»摘要"), lunarFont,
-                                     armed ? QColor(120, 200, 255, 255)
-                                           : QColor(150, 180, 210, 170),
-                                     QRectF(lr), Qt::AlignRight | Qt::AlignVCenter);
-            }
-
             if (settings.showEvents) {
                 const QVector<CalendarTaskItem> tasks = store.get(date);
                 if (!tasks.isEmpty()) {
                     const qreal lineH = 17 * scale; // 17 = rlqd 日程行高节奏（100% 时），随 fontScale 折算
                     g->save();
                     g->setClipRect(QRect(cell.left(), cell.top(), cell.width(), cell.height() - 2));
-                    // 27 = 日期行占位高（顶 3px + 日期字高），日程首行从其下开始；
-                    // 格内有摘要链接时让出一行（链接条带 25~40px，T-067）
-                    qreal ey = cell.top() + 27 + (hasDigest ? lineH : 0);
+                    // 27 = 日期行占位高（顶 3px + 日期字高），日程首行从其下开始
+                    //（2026-11-22：格内摘要链接撤除，不再让行——入口在日程编辑器）
+                    qreal ey = cell.top() + 27;
                     for (int i = 0; i < tasks.size(); ++i) {
                         if (ey + lineH > cell.bottom())
                             break;

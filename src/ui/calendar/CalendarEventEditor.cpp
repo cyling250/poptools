@@ -6,19 +6,43 @@
 #include "ui/ThemeColors.h" // overlay::warmAccent（T-071 橙收敛）
 #include "ui/theming/FluentTheme.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QProcess>
+#include <QStandardPaths>
 
 namespace poptools {
 
+void openDigestInNotepad(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+    const QString base = QFileInfo(path).completeBaseName(); // 2026-11-18 / 2026-11
+    const QString txt = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                        + QStringLiteral("/PopTools工作摘要_") + base
+                        + QStringLiteral(".txt");
+    QFile out(txt);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    out.write(f.readAll());
+    out.close();
+    QProcess::startDetached(QStringLiteral("notepad.exe"), {txt});
+}
+
 CalendarEventEditor::CalendarEventEditor(const QDate &date, CalendarTaskStore *store,
-                                         const QPoint &pos, QWidget *parent)
+                                         const QPoint &pos, const QString &digestPath,
+                                         QWidget *parent)
     : QWidget(parent, Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
     , m_date(date)
     , m_store(store)
+    , m_digestPath(digestPath)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
@@ -82,6 +106,26 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
                    .arg(m_date.day())
                    .arg(ChineseCalendar::weekdayName(m_date)));
 
+    // 摘要链接（2026-11-22 用户拍板）：标题右侧、✓ 左侧，当日有日报才显示。
+    // 下划线传达可点击（编辑器无 hover 高亮路径，保持最小改动）；命中区比
+    // 文字略宽便于点击。字色用日历家族暖强调（T-071 橙收敛）
+    m_digestRect = QRect();
+    if (!m_digestPath.isEmpty()) {
+        QFont linkFont;
+        linkFont.setFamilies({ QStringLiteral("SimSun"), QStringLiteral("Microsoft YaHei UI") });
+        linkFont.setPixelSize(14);
+        linkFont.setUnderline(true);
+        const QString label = QStringLiteral("摘要»");
+        const QFontMetrics lm(linkFont);
+        const int linkW = lm.horizontalAdvance(label);
+        m_digestRect = QRect(m_checkRect.left() - 8 - linkW, 10, linkW + 8, 28);
+        g.setFont(linkFont);
+        g.setPen(overlay::warmAccent());
+        g.drawText(QPoint(m_digestRect.left(),
+                          m_digestRect.top() + 14 + lm.ascent() - lm.descent() / 2),
+                   label);
+    }
+
     m_checkRect = QRect(width() - 42, 10, 28, 28);
     g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60)); // 玻璃按压底
     QPen checkPen(overlay::warmAccent(), 2); // T-071 收编：散写橙 → 具名语义色
@@ -97,6 +141,12 @@ void CalendarEventEditor::mousePressEvent(QMouseEvent *event)
 {
     if (m_checkRect.contains(event->pos())) {
         saveAndClose();
+        return;
+    }
+    // 摘要链接：直接 notepad 弹日报（不关编辑器；notepad 抢焦点后编辑器走
+    // 失焦保存关闭，摘要独立展示——用户拍板形态）
+    if (m_digestRect.isValid() && m_digestRect.contains(event->pos())) {
+        openDigestInNotepad(m_digestPath);
         return;
     }
 }

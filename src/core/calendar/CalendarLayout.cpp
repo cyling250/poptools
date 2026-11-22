@@ -76,27 +76,6 @@ bool CalendarLayout::tryGetCell(const QPoint &p, int *row, int *col, QDate *date
     return true;
 }
 
-QRect CalendarLayout::cellSummaryLinkRect(const QRect &cell) const
-{
-    const int w = std::min(cell.width() - 8, 74);
-    return QRect(cell.right() - 4 - w, cell.top() + 25, w, 15);
-}
-
-bool CalendarLayout::hitCellSummaryLink(const QPoint &p, QDate *date) const
-{
-    QRect cell;
-    QDate d;
-    int row = 0;
-    int col = 0;
-    if (!tryGetCell(p, &row, &col, &d, &cell))
-        return false;
-    if (!cellSummaryLinkRect(cell).contains(p))
-        return false;
-    if (date)
-        *date = d;
-    return true;
-}
-
 int CalendarLayout::hitHeader(const QPoint &p) const
 {
     for (int i = 0; i < headerButtons.size(); ++i)

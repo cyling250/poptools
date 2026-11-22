@@ -18,13 +18,13 @@ namespace poptools {
 
 class DesktopSharedCanvas;
 
-// Goody 工作摘要视图（T-067）：日历链接绘制的唯一数据源，由面板按显示月
+// Goody 工作摘要视图（T-067；2026-11-22 用户拍板改道：格内链接撤除，日报
+// 入口移至日程编辑器标题行）：月报链接绘制的唯一数据源，由面板按显示月
 // 缓存（GoodyModule 查询槽构建，goodySummariesChanged/翻月时刷新）
 struct CalendarDigestView
 {
-    QHash<QDate, QString> daily; // 有摘要的日期 → md 路径
+    QHash<QDate, QString> daily; // 有摘要的日期 → md 路径（面板→编辑器取数用）
     QString monthly;             // 当月月报 md 路径（空=未生成，链接不画）
-    QDate armedDate;             // 编辑器打开中的日期：该日链接激活高亮（可点击）
 };
 
 // ============================================================

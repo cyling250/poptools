@@ -78,10 +78,9 @@ private:
     // 悬停级小改动带脏矩形提交（对齐 BoxPanel 先例，T-071）
     void renderFrame(const QPoint &hover, const QString &hoverHint, bool suppressIfAdjusting,
                      const QRect &commitDirty = QRect());
-    // 悬停语义目标 → 可视矩形（脏矩形计算用）：头部按钮/引导胶囊/月报链接/
-    // 激活摘要链接，未命中的项不计入（P-063 口径：按会改变画面的语义目标计）
-    QRect hoverVisualRect(int headerIdx, const QString &hint, bool monthHov,
-                          bool armedHov) const;
+    // 悬停语义目标 → 可视矩形（脏矩形计算用）：头部按钮/引导胶囊/月报链接，
+    // 未命中的项不计入（P-063 口径：按会改变画面的语义目标计）
+    QRect hoverVisualRect(int headerIdx, const QString &hint, bool monthHov) const;
     // 秒级跨日检测：仅日期变化才重绘；正处显示月则跟随跳到新月
     void tickClock();
     // 把设置矩形钳回主屏内（宽高下限 520/420），screen 无效时跳过
@@ -102,11 +101,6 @@ private:
     void handleSingleClick(const QPoint &p);
     // 双击显示月格子 → 打开当日日程编辑器
     void handleDoubleClick(const QPoint &p);
-    // 编辑器面板开启期间的摘要链接分发（T-067"双击开面板后才可点"）：仅
-    // 激活日期的链接热区生效，命中即 notepad 弹 txt；未命中返回 false
-    bool handleSummaryLinkClick(const QPoint &p);
-    // 摘要以 txt 弹出（系统 notepad，用户指定）：md 原文写 %TEMP% 副本
-    void openDigestInNotepad(const QString &path);
     void trackModal(QWidget *w);
     void centerOnPanel(QWidget *w);
     // explorer 转发事件是否放行。m_modal 管 trackModal 弹窗；原生文件对话框
@@ -132,7 +126,6 @@ private:
     qint64 m_previewMs = 0;  // 预览渲染节流：上次渲染时刻
     bool m_previewPending = false; // 节流补帧定时器在飞
     QPointer<QWidget> m_modalWidget;
-    QDate m_modalDate;         // 编辑器打开中的日期（该日摘要链接激活，T-067）
     QTimer *m_clock = nullptr;
     QTimer *m_wallpaperTimer = nullptr;
     bool m_wallpaperBusy = false; // 壁纸线程池重算在飞（30s 定时器重入护栏，T-068）
@@ -142,7 +135,6 @@ private:
     CalendarDigestView m_digestView; // 显示月的摘要缓存（渲染唯一数据源）
     QString m_digestViewMonth;       // 缓存对应月份键（热路径去重）
     bool m_lastMonthLinkHov = false; // 月报链接悬停态（变化才重绘）
-    bool m_lastArmedLinkHov = false; // 激活摘要链接悬停态（变化才重绘）
 };
 
 } // namespace poptools
