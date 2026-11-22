@@ -7,10 +7,13 @@
 #include "ui/theming/FluentTheme.h"
 #include "ui/shared/DesktopStack.h"
 
+#include <QConicalGradient>
 #include <QEnterEvent>
+#include <QEasingCurve>
 #include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPropertyAnimation>
 #include <QScreen>
 #include <QStyleHints>
@@ -28,6 +31,9 @@ namespace {
 constexpr int kBallWindowSize = 68; // 窗体（球 + 光晕余量）
 constexpr int kBallDiameter = 52;   // 球直径
 constexpr int kBreathPeriodMs = 1200; // 呼吸周期（需求单定案）
+constexpr int kSweepPeriodMs = 450;   // 悬停扫光单次时长
+constexpr int kIdleTickMs = 90;       // 待机环步进间隔（10fps，慢速旋转足够顺滑）
+constexpr int kIdleCycleTicks = 89;   // 8s/圈 ≈ 89 步 × 90ms
 constexpr qreal kTwoPi = 6.283185307179586;
 
 // 可用屏几何列表（排除任务栏）——applySavedPosition 与拖动松开钳制
@@ -62,6 +68,34 @@ GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
             this, &GoodyFloatingBall::applyTheme);
     applyTheme();
+
+    // 屏幕布局变化即时重钳制（T-076）：拔屏/主屏切换/改分辨率后旧记忆坐标
+    // 可能落在已消失的屏幕区间（球缺角/整只失踪），applySavedPosition 幂等
+    const auto reclamp = [this] {
+        if (isVisible())
+            applySavedPosition();
+    };
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, reclamp);
+    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, reclamp);
+    for (QScreen *s : QGuiApplication::screens())
+        connect(s, &QScreen::geometryChanged, this, reclamp);
+
+    // 待机光环步进（T-076）：常驻定时器仅可见且非 working 期间运转（10fps
+    // 小窗脏矩形重绘，红线 4 口径——68px 级微负载）
+    m_idleTimer = new QTimer(this);
+    m_idleTimer->setInterval(kIdleTickMs);
+    connect(m_idleTimer, &QTimer::timeout, this, [this] {
+        m_idlePhase = std::fmod(m_idlePhase + 1.0 / kIdleCycleTicks, 1.0);
+        update(glowDirtyRect());
+    });
+}
+
+void GoodyFloatingBall::setIdleRunning(bool on)
+{
+    if (on)
+        m_idleTimer->start();
+    else
+        m_idleTimer->stop();
 }
 
 void GoodyFloatingBall::applyTheme()
@@ -92,6 +126,14 @@ void GoodyFloatingBall::setWorking(bool on)
         startBreath();
     else
         stopBreath();
+    // 待机环与呼吸互斥（working 呼吸更醒目，避免两层光效打架）
+    setIdleRunning(!on && isVisible());
+}
+
+void GoodyFloatingBall::setSweepPhase(qreal phase)
+{
+    m_sweepPhase = phase;
+    update(glowDirtyRect());
 }
 
 void GoodyFloatingBall::startBreath()
@@ -173,7 +215,18 @@ void GoodyFloatingBall::mouseReleaseEvent(QMouseEvent *event)
 void GoodyFloatingBall::enterEvent(QEnterEvent *event)
 {
     m_hover = true;
-    update(ballRect()); // 悬停描边反馈（无定时器）
+    update(ballRect()); // 悬停描边反馈
+    // 高光扫过（T-076）：单次 450ms，从左上斜向扫到右下；重复进入重放
+    if (!m_sweep) {
+        m_sweep = new QPropertyAnimation(this, "sweepPhase", this);
+        m_sweep->setStartValue(0.0);
+        m_sweep->setEndValue(1.0);
+        m_sweep->setDuration(kSweepPeriodMs);
+        m_sweep->setEasingCurve(QEasingCurve::OutCubic);
+    }
+    m_sweep->stop();
+    m_sweepPhase = 0.0;
+    m_sweep->start();
     QWidget::enterEvent(event);
 }
 
@@ -191,6 +244,8 @@ void GoodyFloatingBall::showEvent(QShowEvent *event)
     QWidget::showEvent(event);
     if (m_working)
         startBreath(); // 隐藏期间被停表的呼吸，显示即恢复
+    else
+        setIdleRunning(true); // 待机环随可见恢复（T-076）
     // 显示完成后贴底（winId 就绪后再 attach）
     QTimer::singleShot(0, this, [this] {
         if (isVisible())
@@ -202,10 +257,11 @@ void GoodyFloatingBall::hideEvent(QHideEvent *event)
 {
     QWidget::hideEvent(event);
     // 守护表配对注销（R3 #19）：否则守护定时器为不可见窗口空转；
-    // 隐藏即停呼吸（聊天窗隐没期间零动画）
+    // 隐藏即停呼吸与待机环（聊天窗隐没期间零动画）
     desktopstack::detach(this);
     if (m_breath && m_breath->state() == QAbstractAnimation::Running)
         m_breath->stop();
+    setIdleRunning(false);
 }
 
 // P-031：点击不激活窗口（抑制 Windows 默认抬升，避免盖住正常应用
@@ -249,18 +305,39 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
     const QPointF center = ball.center();
     const qreal r = ball.width() / 2.0;
 
-    // 呼吸光晕（仅工作态）：accent 圆环描边，alpha 随相位余弦呼吸
+    // ---- 光效层（球体之下） ----
     if (m_working) {
+        // 工作呼吸（T-076 强化）：内环 alpha 呼吸 + 外环半径随相位微缩放，
+        // 双层立体感（原单层 alpha 呼吸升级）
         const qreal wave = 0.5 - 0.5 * std::cos(kTwoPi * m_glowPhase); // 0→1→0
         QColor glow{QColor(c.accent)};
         glow.setAlpha(int(45 + 75 * wave));
         QPen pen(glow, 3);
         p.setPen(pen);
         p.setBrush(Qt::NoBrush);
+        p.drawEllipse(center, r + 2 + 1.5 * wave, r + 2 + 1.5 * wave); // 内环：半径随呼吸
+        QColor outer{QColor(c.accent)};
+        outer.setAlpha(int(18 + 40 * wave));
+        p.setPen(QPen(outer, 2));
+        // 半径上限 33 < 34 半窗——超窗即呼吸态光晕缺圈（窗体 68 的余量纪律）
+        p.drawEllipse(center, r + 4 + 2 * wave, r + 4 + 2 * wave); // 外环：扩散层
+    } else {
+        // 待机动效（T-076）：一圈 accent 锥形渐变光环绕球缓转——拖尾从
+        // 亮点渐隐，克制不抢视线（alpha 峰值 55）
+        QConicalGradient halo(center, -m_idlePhase * 360.0);
+        QColor head{QColor(c.accent)};
+        head.setAlpha(55);
+        QColor tail{QColor(c.accent)};
+        tail.setAlpha(0);
+        halo.setColorAt(0.0, head);
+        halo.setColorAt(0.55, tail); // 55% 处渐隐完，其余留空 = 145° 拖尾弧
+        halo.setColorAt(1.0, head);
+        p.setPen(QPen(QBrush(halo), 2.5));
+        p.setBrush(Qt::NoBrush);
         p.drawEllipse(center, r + 4, r + 4);
     }
 
-    // 玻璃感球体：bgCard 半透明垂直渐变（底色随 Fluent token）+ 顶部高光
+    // ---- 球体：bgCard 半透明垂直渐变（底色随 Fluent token） ----
     QColor top{QColor(c.bgCard)};
     top.setAlpha(225);
     QColor bottom{QColor(c.bgCard)};
@@ -277,6 +354,33 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
     p.setBrush(sheen);
     p.setPen(Qt::NoPen);
     p.drawEllipse(QPointF(center.x(), ball.top() + r * 0.42), r * 0.72, r * 0.55);
+
+    // ---- 悬停高光扫过（T-076）：白色斜向光带随 sweepPhase 位移，clip 球圆 ----
+    if (m_sweepPhase > 0.0 && m_sweepPhase < 1.0) {
+        p.save();
+        QPainterPath clip;
+        clip.addEllipse(ball);
+        p.setClipPath(clip);
+        // 光带中心沿对角线从左上(-r,-r)推进到右下(+r,+r)；带宽 ~0.6r，
+        // 白色中心渐变边缘透明（高光过曝感）
+        const qreal d = (m_sweepPhase * 2.0 - 1.0) * r;
+        const QPointF bandCenter(center.x() + d * 0.707, center.y() + d * 0.707);
+        QLinearGradient band(bandCenter + QPointF(-r * 0.42, r * 0.42),
+                             bandCenter + QPointF(r * 0.42, -r * 0.42));
+        QColor b0{Qt::white};
+        b0.setAlpha(0);
+        QColor b1{Qt::white};
+        b1.setAlpha(80);
+        QColor b2{Qt::white};
+        b2.setAlpha(0);
+        band.setColorAt(0.0, b0);
+        band.setColorAt(0.5, b1);
+        band.setColorAt(1.0, b2);
+        p.setBrush(band);
+        p.setPen(Qt::NoPen);
+        p.drawRect(ball); // clip 已限球内
+        p.restore();
+    }
 
     // 边框：悬停强调色，常态取 cardStroke（token 已按主题配好可见度）
     QColor border = m_hover ? QColor(c.accent) : QColor(c.cardStroke);

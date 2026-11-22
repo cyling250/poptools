@@ -35,6 +35,59 @@ CalendarPanel::CalendarPanel(QObject *parent)
     m_year = m_today.year();
     m_month = m_today.month();
     // 重活（设置/日程 JSON、渲染器与壁纸资源）留在 onDutyStarted 懒建（红线 6）
+
+    // 屏幕布局变化 → 比例映射自愈（T-076 用户实测 2026-11-22：外接屏拔掉后
+    // 日历仍按旧几何显示，超出新屏被裁）。screenRemoved/primaryScreenChanged/
+    // geometryChanged 三源连发，200ms 防抖合并成一次映射
+    m_screenDebounce = new QTimer(this);
+    m_screenDebounce->setSingleShot(true);
+    m_screenDebounce->setInterval(200);
+    connect(m_screenDebounce, &QTimer::timeout, this,
+            &CalendarPanel::onScreenLayoutChanged);
+    const auto kick = [this] { m_screenDebounce->start(); };
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, kick);
+    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, kick);
+    for (QScreen *s : QGuiApplication::screens())
+        connect(s, &QScreen::geometryChanged, this, kick);
+    connect(qGuiApp, &QGuiApplication::screenAdded, this,
+            [this, kick](QScreen *s) {
+                connect(s, &QScreen::geometryChanged, this, kick);
+                kick();
+            });
+}
+
+// 拔屏/改分辨率/主屏切换：旧归属屏（m_screenNative）不再匹配当前布局时，
+// 把日历矩形按新旧屏比例映射到新归属屏（中心仍在原归属屏则不动——无关屏
+// 插拔与 DPI 微调不折腾面板）。画布=虚拟桌面并集且拔屏只会变小，槽矩形
+// 缩回新并集即可，无需重建 SHM（T-063 架构红利）
+void CalendarPanel::onScreenLayoutChanged()
+{
+    const QRect oldScreen = m_screenNative;
+    if (oldScreen.isEmpty())
+        return;
+    // 归属屏判定：中心点落在哪块屏；旧中心已不在任何屏（屏被拔）= 必须映射
+    QRect target;
+    for (const QRect &native : deskscreens::nativeScreenRects())
+        if (native.contains(oldScreen.center()))
+            target = native;
+    if (!target.isEmpty() && target == oldScreen)
+        return; // 归属屏健在且几何未变：不动（防抖余波/无关屏事件）
+    if (target.isEmpty())
+        target = deskscreens::nativeScreenRects().first(); // 主屏兜底（拔屏自愈）
+
+    const QRect oldRect = m_settings.rect();
+    const qint64 ow = std::max<qint64>(1, oldScreen.width());
+    const qint64 oh = std::max<qint64>(1, oldScreen.height());
+    m_settings.x = int(target.left()
+                       + (oldRect.left() - oldScreen.left()) * target.width() / ow);
+    m_settings.y = int(target.top()
+                       + (oldRect.top() - oldScreen.top()) * target.height() / oh);
+    m_settings.width = int(std::max<qint64>(520, oldRect.width() * target.width() / ow));
+    m_settings.height = int(std::max<qint64>(420, oldRect.height() * target.height() / oh));
+    clampSettings(); // 归属屏重解析 + 屏内钳制（m_screenNative 刷新）
+    m_settings.save();
+    kickWallpaperRefresh(); // 归属屏可能换了：毛玻璃壁纸按新屏重算（异步）
+    render();
 }
 
 CalendarPanel::~CalendarPanel() = default;

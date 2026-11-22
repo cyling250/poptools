@@ -85,6 +85,9 @@ private:
     void tickClock();
     // 把设置矩形钳回主屏内（宽高下限 520/420），screen 无效时跳过
     void clampSettings();
+    // 屏幕布局变化自愈（T-076）：拔屏/改分辨率/主屏切换时把日历矩形按新旧
+    // 屏比例映射到新归属屏（200ms 防抖合并三源信号连发）
+    void onScreenLayoutChanged();
     QPoint logicalPos(const QPoint &physical) const; // 物理 → Qt 逻辑
     // 线程池壁纸成品回主线程（30s 定时器异步路径尾段）：装缓存 + 重绘（T-068）
     void onWallpaperComputed(const QImage &img);
@@ -121,6 +124,7 @@ private:
     bool m_modal = false;
     bool m_adjusting = false;
     QRect m_screenNative;  // 日历归属屏物理矩形（虚拟桌面坐标；中心落在哪屏归哪屏）
+    QTimer *m_screenDebounce = nullptr; // 屏幕布局变化防抖（200ms 合并连发）
     bool m_hiddenDuringAdjust = false; // 调整期间桌面层日历隐藏（槽置空，预览在覆盖层）
     QImage m_adjustPreview;  // 调整预览帧（面板 + 四周 32px 阴影/发光余量）
     qint64 m_previewMs = 0;  // 预览渲染节流：上次渲染时刻
