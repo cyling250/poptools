@@ -108,7 +108,10 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
 
     // 摘要链接（2026-11-22 用户拍板）：标题右侧、✓ 左侧，当日有日报才显示。
     // 下划线传达可点击（编辑器无 hover 高亮路径，保持最小改动）；命中区比
-    // 文字略宽便于点击。字色用日历家族暖强调（T-071 橙收敛）
+    // 文字略宽便于点击。字色用日历家族暖强调（T-071 橙收敛）。
+    // 注意：m_checkRect 必须先于摘要定位赋值（首帧几何就绪，否则链接 x 依赖
+    // 未初始化 rect 算出负坐标，画进窗外=看不见但热区能命中，2026-11-22 实测坑）
+    m_checkRect = QRect(width() - 42, 10, 28, 28);
     m_digestRect = QRect();
     if (!m_digestPath.isEmpty()) {
         QFont linkFont;
@@ -126,7 +129,7 @@ void CalendarEventEditor::paintEvent(QPaintEvent *)
                    label);
     }
 
-    m_checkRect = QRect(width() - 42, 10, 28, 28);
+    g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60)); // 玻璃按压底
     g.fillPath(roundedPath(QRectF(m_checkRect), 5), QColor(255, 255, 255, 60)); // 玻璃按压底
     QPen checkPen(overlay::warmAccent(), 2); // T-071 收编：散写橙 → 具名语义色
     checkPen.setCapStyle(Qt::RoundCap);
