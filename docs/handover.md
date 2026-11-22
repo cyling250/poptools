@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-22 04:05（T-076 动效全量批落码：GoodyBallFx 动效系统 18 项全实现（极光/星尘/涟漪/彗尾/果冻/磁吸/呼吸波等），窗体 68→88；存量压实 T-066~T-073 剪切 archive/tasks-066-073.md；待目测） · Agent_20261122011419
 > 最后更新：2026-11-22 03:30（T-076 拔屏自适应+悬浮球动效三件套落码 dc85a3d——日历比例映射自愈/球重钳制/待机环+悬停扫光+呼吸双层，待目测） · Agent_20261122011419
 > 最后更新：2026-11-22 02:55（T-075 目测通过收口：摘要链接首帧负坐标修 bdadf4d + 「有记录」日期标识 2b6b582——有日报的日期「21 十三」行尾跟暖橙小字，无记录不写；均未推送则推） · Agent_20261122011419
 > 最后更新：2026-11-22 01:15（T-074 收口冲刺：提交态复验全绿 + MCP 25 件冒烟 13/13 + 截图历史层自证 6/6 + 安装器对齐走查无缺口；双缺陷修复 a6e2a59（ocr_image 漏注册补齐 + box_catalog_get 悬垂 UAF 根修，P-074/P-075 入账）；验收手册 docs/20261122-t074-m3-acceptance.md——7 项真机验收待用户） · Agent_20261122011419
@@ -83,13 +84,16 @@
 > 注：本节由 git 提交历史（2026-08-06 ~ 2026-08-24，共 19 个提交）在交接文档首次创建时整理而成。
 > 维护智能体：Agent_20261117004800
 
-### T-076 拔屏自适应 + 悬浮球动效三件套
+### T-076 拔屏自适应 + 悬浮球动效全量批
 - **执行智能体**：Agent_20261122011419
-- **结果**：✅ 落码待目测。日历：屏幕变化三源信号 200ms 防抖 → 比例映射新
-  归属屏（拔屏根因=clampSettings 运行中无人调用）；悬浮球：屏幕变化重钳制
-  （缺角根因=旧记忆坐标落已拔屏区间）+ 三动效（待机光环 8s/圈 / 悬停扫光
-  450ms / 呼吸双层强化，光效半径≤33<34 半窗纪律）
-- 相关坑：无 ｜ 提交 dc85a3d（4 文件 +185/-6）
+- **结果**：✅ 落码待目测。拔屏自愈：日历三源信号 200ms 防抖→比例映射新
+  归属屏（根因=clampSettings 运行中无人调用）、悬浮球同源重钳制（缺角根因
+  =旧坐标落已拔屏区间）。动效全量批（用户拍板"全要"）：新建 GoodyBallFx
+  动效系统（state+tick+paint 分层，30fps 主时钟）——极光球/能量核心/流体
+  渐变/果冻拖拽/镜面高光/彗尾光弧/双层反转环/辉光脉冲/星尘环绕/汇聚发散/
+  点击涟漪/悬停波光/悬停放大/磁吸微移/拖动彗尾/呼吸波发射/思考流光/完成
+  弹跳 18 项；窗体 68→88（光效外沿 ≤43 纪律）
+- 相关坑：无 ｜ 提交 dc85a3d+<fx>（细档：无——动效分层说明在 GoodyBallFx.h 头注释）
 
 ### T-075 日历摘要入口改道日程编辑器
 - **执行智能体**：Agent_20261122011419
@@ -99,31 +103,9 @@
   日期行尾暖橙小字，无记录不写，2b6b582）；月报 pill 与 notepad 逻辑提升共享
 - 相关坑：无 ｜ 提交 3315cfe+bdadf4d+2b6b582
 
-### T-073 界面美化精修——设置 + Goody 对话（UI 方向被否，转 T-074）
-- **执行智能体**：Agent_20261121184000
-- **结果**：⚠️ Fluent/dsh 底座上精修两界面（导航指示条/标题层次/间距 + IME 组词
-  Enter 守卫/空态欢迎卡/行高 150%/细滚动条/过程行光环），构建 0 编译警告+ctest 99 绿；
-  用户目测否决 UI 增量方向，拍板全量 dsh 化（T-074）→ IME 守卫等行为修复保留随
-  T-074 提交，UI 精修过渡期服役
-- 相关坑：无 ｜ 未提交（改动在工作区 9 文件，随 T-074 M1 处置）
-
-### T-068 鼠标拖动「卡顿→瞬移」取证+根治+发版 v0.5.1
-- **执行智能体**：Agent_20261119101500
-- **结果**：✅ 探针实锤三类主线程停摆（30s 壁纸重算 ~160-170ms 主犯/IME 截屏/开机月报
-  拼接 380ms），三处全挪离主线程+签名免重算，验证 30s 停摆归零；发版 v0.5.1
-  （Release id 451052105，资产 56MB）；提交 9ffa3b4(fix)+2cb237b(bump)
-- **相关坑**：P-068 ｜ 细档：[handover/t068_mouse_stall.md](handover/t068_mouse_stall.md)
-
-### T-066 UIA 文本镜像输入监听（字母键序流完全替换）
-- **执行智能体**：Agent_20261118130500
-- **结果**：✅ TextMirrorMonitor 上线——UIA 焦点控件影子差分（输入/退格/替换以最终文本
-  原文落盘 textlog.jsonl，拼音草稿→汉字 replace 全程可见）+ 同窗口续接防 RuntimeId 重建
-  吞增量 + 密码字段影子重置防泄漏；KeyboardTextComposer/打码开关移除（完全替换）；
-  真机验收达标（退格删"走"/"5→7"修正实证）；ctest 95 绿。路线史：TSF 被动 TIP 三诉求
-  结构性冲突实锤转 UIA（weasel 本机实证）
-- **相关坑**：P-067 ｜ 细档：[handover/t066_tsf_research.md](handover/t066_tsf_research.md)
-
-> 更早：T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-058 → [handover/archive/tasks-047-058.md](handover/archive/tasks-047-058.md) ｜ T-059~T-065 → [handover/archive/tasks-059-065.md](handover/archive/tasks-059-065.md)
+> 更早：T-066~T-073 → [handover/archive/tasks-066-073.md](handover/archive/tasks-066-073.md)
+> ｜ T-059~T-065 → [handover/archive/tasks-059-065.md](handover/archive/tasks-059-065.md)
+> ｜ T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-058 → [handover/archive/tasks-047-058.md](handover/archive/tasks-047-058.md)
 
 ## 当前任务
 
@@ -452,6 +434,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-22 04:05 | Agent_20261122011419 | 头部 / 历史任务 / 归档 tasks-066-073 / 台账 / ui goody（GoodyBallFx 新建+Ball 重写）/ CMake(ui) | T-076 动效全量批：GoodyBallFx 系统新建 18 项动效+窗体 88+主时钟 30fps；存量压实（T-066~T-073 剪切归档） | 构建 0 编译警告 ctest 全绿；待目测 |
 | 2026-11-22 02:55 | Agent_20261122011419 | 头部 / 历史任务 / 台账 / renderer | T-075 目测收口：首帧负坐标修 bdadf4d + 「有记录」日期标识 2b6b582 | 构建 0 编译警告 ctest 全绿；用户目测通过 |
 | 2026-11-22 02:20 | Agent_20261122011419 | 头部 / 历史任务 / 台账 / ui calendar 五文件 / core CalendarLayout 两文件 | T-075：摘要入口改道日程编辑器（格内链接撤除+编辑器标题行直弹 notepad） | 构建 0 编译警告 ctest 全绿；3315cfe；未目测 |
 | 2026-11-22 01:15 | Agent_20261122011419 | 头部 / 当前任务 / 踩坑记录 / 台账 / docs(验收手册) / mcpserver 两文件 | T-074 收口冲刺：提交态复验+MCP 25 件冒烟 13/13+截图历史 6/6+安装器走查；双缺陷修复（ocr_image 注册+box UAF）a6e2a59；P-074/P-075 入账；验收手册落 docs | 构建 0 编译警告 ctest 全绿；7 项真机验收待用户 |
