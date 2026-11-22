@@ -104,26 +104,8 @@
  （失败回拉旧版）；均弹窗确认制+24h 定期。数据面自证 npm/GitHub 通
 - 相关坑：无 ｜ 提交 6493e6f（真发布端到端验收随下次发版自然覆盖）
 
-### T-076 拔屏自适应 + 悬浮球动效全量批
-- **执行智能体**：Agent_20261122011419
-- **结果**：✅ 落码待目测。拔屏自愈：日历三源信号 200ms 防抖→比例映射新
-  归属屏（根因=clampSettings 运行中无人调用）、悬浮球同源重钳制（缺角根因
-  =旧坐标落已拔屏区间）。动效全量批（用户拍板"全要"）：新建 GoodyBallFx
-  动效系统（state+tick+paint 分层，30fps 主时钟）——极光球/能量核心/流体
-  渐变/果冻拖拽/镜面高光/彗尾光弧/双层反转环/辉光脉冲/星尘环绕/汇聚发散/
-  点击涟漪/悬停波光/悬停放大/磁吸微移/拖动彗尾/呼吸波发射/思考流光/完成
-  弹跳 18 项；窗体 68→88（光效外沿 ≤43 纪律）
-- 相关坑：无 ｜ 提交 dc85a3d+<fx>（细档：无——动效分层说明在 GoodyBallFx.h 头注释）
-
-### T-075 日历摘要入口改道日程编辑器
-- **执行智能体**：Agent_20261122011419
-- **结果**：✅ 用户目测通过。格内「»摘要」链接整链撤除，日报入口移至日程
-  编辑器标题行（有日报才显「摘要»」，点击直弹 notepad）；目测轮修首帧负
-  坐标坑（m_checkRect 时序，bdadf4d）；追加「有记录」日期标识（有日报的
-  日期行尾暖橙小字，无记录不写，2b6b582）；月报 pill 与 notepad 逻辑提升共享
-- 相关坑：无 ｜ 提交 3315cfe+bdadf4d+2b6b582
-
-> 更早：T-066~T-073 → [handover/archive/tasks-066-073.md](handover/archive/tasks-066-073.md)
+> 更早：T-075~T-076 → [handover/archive/tasks-075-076.md](handover/archive/tasks-075-076.md)
+> ｜ T-066~T-073 → [handover/archive/tasks-066-073.md](handover/archive/tasks-066-073.md)
 > ｜ T-059~T-065 → [handover/archive/tasks-059-065.md](handover/archive/tasks-059-065.md)
 > ｜ T-001~T-020 → [handover/archive/tasks-001-020.md](handover/archive/tasks-001-020.md) ｜ T-021~T-036 → [handover/archive/tasks-021-036.md](handover/archive/tasks-021-036.md) ｜ T-037~T-040 → [handover/archive/tasks-037-040.md](handover/archive/tasks-037-040.md) ｜ T-041~T-046 → [handover/archive/tasks-041-046.md](handover/archive/tasks-041-046.md) ｜ T-047~T-058 → [handover/archive/tasks-047-058.md](handover/archive/tasks-047-058.md)
 
