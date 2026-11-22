@@ -112,9 +112,11 @@ void DshWindow::rebuildStatus()
     if (m_lastFailure.isEmpty())
         m_status->setText(QStringLiteral("dsh 后台服务启动中…（首次启动需数秒）"));
     else
-        m_status->setText(QStringLiteral("dsh 后台服务失败：%1\n（修复 tools/node、tools/dsh 后重启 PopTools；"
-                                         "详情见 PoC 日志或 sidecar 输出）")
-                              .arg(m_lastFailure));
+        m_status->setText(QStringLiteral("dsh 后台服务失败：%1\n"
+                                         "（看门狗将自动重启；若反复失败请查看 "
+                                         "%2\\PopTools\\PopTools\\dsh-runtime.log）")
+                              .arg(m_lastFailure,
+                                   qEnvironmentVariable("LOCALAPPDATA")));
 }
 
 void DshWindow::closeEvent(QCloseEvent *event)

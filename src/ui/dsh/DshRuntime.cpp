@@ -5,6 +5,14 @@
 #include <QFile>
 
 #include <algorithm>
+#include <vector>
+
+#ifdef Q_OS_WIN
+#include <winsock2.h> // AF_INET/u_short（dsh 库全局 WIN32_LEAN_AND_MEAN 排除 winsock）
+#include <windows.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#endif
 
 namespace poptools {
 
@@ -76,6 +84,8 @@ void DshRuntime::start()
         setState(State::Failed);
         return;
     }
+    killOrphanOnWebPort(); // 孤儿 sidecar 清理（T-077c：强杀宿主留下的 node
+                           // 继续占 3080，新实例 EADDRINUSE 反复失败）
     m_webUrl.clear();
     setState(State::Starting);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -89,6 +99,50 @@ void DshRuntime::start()
         env.insert(QStringLiteral("DEEPSEEK_API_KEY"), m_apiKey);
     m_process.setProcessEnvironment(env);
     m_process.start(m_nodeExe, { m_dshBinJs, QStringLiteral("web"), QStringLiteral("--no-open") });
+}
+
+// 孤儿 sidecar 清理（T-077c）：宿主被强杀（taskkill /F 无清理机会）时 dsh
+// sidecar 成孤儿继续监听 3080，新 PopTools 实例的 sidecar 每次 EADDRINUSE
+// 失败、看门狗反复空转（dsh-runtime.log 实证 attempts=10）。启动前查 3080
+// 监听 PID，映像路径是本运行时的 node（tools/node/current）才终止——不误伤
+// 其他进程恰好占 3080 的情况（让 dsh 自己的 EADDRINUSE 报错兜底暴露）。
+void DshRuntime::killOrphanOnWebPort()
+{
+#ifdef Q_OS_WIN
+    constexpr u_short kWebPort = 3080;
+    DWORD size = 0;
+    if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != ERROR_INSUFFICIENT_BUFFER)
+        return;
+    std::vector<char> buf(size);
+    auto *table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID *>(buf.data());
+    if (GetExtendedTcpTable(buf.data(), &size, FALSE, AF_INET,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR)
+        return;
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        const MIB_TCPROW_OWNER_PID &row = table->table[i];
+        if (ntohs(static_cast<u_short>(row.dwLocalPort)) != kWebPort)
+            continue;
+        const DWORD pid = row.dwOwningPid;
+        HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                                  FALSE, pid);
+        if (!proc)
+            continue;
+        WCHAR imagePath[MAX_PATH] = {};
+        DWORD len = MAX_PATH;
+        if (QueryFullProcessImageNameW(proc, 0, imagePath, &len)) {
+            const QString image = QString::fromWCharArray(imagePath);
+            if (image.contains(QStringLiteral("tools\\node\\current\\node.exe"),
+                               Qt::CaseInsensitive)) {
+                appendRuntimeLog(QStringLiteral("清理孤儿 sidecar（占 3080，pid %1）")
+                                     .arg(pid));
+                TerminateProcess(proc, 1);
+                WaitForSingleObject(proc, 3000); // 端口释放需进程真正退出
+            }
+        }
+        CloseHandle(proc);
+    }
+#endif
 }
 
 void DshRuntime::stop()

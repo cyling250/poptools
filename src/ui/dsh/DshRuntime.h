@@ -62,6 +62,7 @@ private:
     void handleError(QProcess::ProcessError error);
     void scheduleRestart();      // 看门狗：指数退避调度 start()
     void appendRuntimeLog(const QString &reason); // 退出原因+stderr 尾部落盘
+    void killOrphanOnWebPort();  // 启动前清理占 3080 的孤儿 sidecar（映像验证）
 
     QProcess m_process;
     QTimer m_killTimer;     // stop() 宽限期计时（terminate 无效则 kill）

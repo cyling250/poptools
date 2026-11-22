@@ -208,6 +208,7 @@ target_link_libraries(poptools_ui_dsh PUBLIC
     Qt6::Gui
     Qt6::Widgets
     user32
+    iphlpapi
 )
 target_include_directories(poptools_ui_dsh PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # WebView2Host.h 直接含 <WebView2.h>（COM 类型在头成员里），include 路径
