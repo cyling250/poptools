@@ -176,6 +176,7 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
             const QPointF datePos(cell.left() + 8, cell.top() + 3);
             drawShadowText(g, QString::number(date.day()), dateFont,
                            QColor(246, 246, 246, 255), datePos);
+            qreal rowTextW = dateTextW; // 日期行已占宽（农历/记录标识顺次排布）
             if (!label.text.isEmpty()) {
                 QColor lc(188, 188, 188, 255);
                 switch (label.kind) {
@@ -191,6 +192,17 @@ CalendarLayout CalendarRenderer::render(QPainter *g, DesktopSharedCanvas &canvas
                 //（与 drawShadowText 顶锚语义配套）
                 drawShadowText(g, label.text, lunarFont, lc,
                                datePos + QPointF(dateTextW + 6, 3));
+                rowTextW += 6 + fontMetricsFor(lunarFont).horizontalAdvance(label.text);
+            }
+            // 「有记录」标识（T-075b 用户拍板 2026-11-22）：有 Goody 日报的日期
+            // 在日期行尾跟小字标示，无记录的日子不写——扫一眼即可见哪天有记录。
+            // 纯展示（点击入口在日程编辑器标题行，2026-11-22 改道）；暖橙同
+            // 摘要/节日家族强调色，锚点下移 3px 与农历基线对齐
+            if (digests.daily.contains(date)) {
+                drawShadowText(g, QStringLiteral("有记录"), lunarFont,
+                               overlay::warmAccent(),
+                               datePos + QPointF(rowTextW + 6, 3),
+                               cell.right() - (datePos.x() + rowTextW + 6) - 4);
             }
 
             if (settings.showEvents) {
