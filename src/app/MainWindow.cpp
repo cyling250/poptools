@@ -24,7 +24,7 @@
 #include "modules/BoxModule.h"
 #include "modules/CalendarModule.h"
 #include "modules/CaptureModule.h"
-#include "modules/GoodyModule.h"
+#include "modules/DshModule.h"
 #include "modules/PinModule.h"
 #include "modules/SelectionTranslateModule.h"
 #include "ui/settings/SettingsDialog.h"
@@ -73,7 +73,7 @@ MainWindow::MainWindow(QObject *parent)
     m_registry.add(std::make_unique<PinModule>());
     m_registry.add(std::make_unique<SelectionTranslateModule>());
     m_registry.add(std::make_unique<ActivityMonitorModule>());
-    m_registry.add(std::make_unique<GoodyModule>());
+    m_registry.add(std::make_unique<DshModule>());
     m_registry.add(std::make_unique<CalendarModule>());
     m_registry.add(std::make_unique<BoxModule>());
     m_registry.initAll(*m_services);

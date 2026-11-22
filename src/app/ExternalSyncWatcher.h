@@ -18,7 +18,7 @@ namespace poptools {
 //   calendar.dirty → calendarApplySettings 能力槽（宿主重载重绘）
 //   box.dirty      → notifySettingsChanged（收纳盒重应用；目录结构变更
 //                    v1 经重启兜底，M3 加实时重载）
-//   mcp.heartbeat  → heartbeat() 信号（GoodyModule 绑悬浮球呼吸光效；
+//   mcp.heartbeat  → heartbeat() 信号（DshModule 绑悬浮球呼吸光效；
 //                    每次 MCP tools/call 触碰一次，10s 无心跳回静默）
 // ============================================================
 class ExternalSyncWatcher : public QObject

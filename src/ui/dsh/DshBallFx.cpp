@@ -1,6 +1,6 @@
 // T-076 全量动效批（2026-11-22 用户拍板"全要"）：悬浮球 18 项动效系统。
-// 分层渲染与状态推进全在本文件（无 QObject）；接线见 GoodyFloatingBall。
-#include "GoodyBallFx.h"
+// 分层渲染与状态推进全在本文件（无 QObject）；接线见 DshFloatingBall。
+#include "DshBallFx.h"
 
 #include <QConicalGradient>
 #include <QEasingCurve>
@@ -53,12 +53,12 @@ QColor auroraColor(int i, int alpha)
 
 // ---- 事件触发 ----
 
-void fxSeedDust(GoodyBallFxState &fx)
+void fxSeedDust(DshBallFxState &fx)
 {
     fx.dust.clear();
     QRandomGenerator *rng = QRandomGenerator::global();
     for (int i = 0; i < 10; ++i) {
-        GoodyBallFxState::Dust d;
+        DshBallFxState::Dust d;
         d.orbit = 1.04 + rng->generateDouble() * 0.30;  // 1.04r~1.34r
         d.speed = (0.25 + rng->generateDouble() * 0.55)  // rad/s 慢速飘行
                   * (rng->generateDouble() < 0.4 ? -1.0 : 1.0);
@@ -69,11 +69,11 @@ void fxSeedDust(GoodyBallFxState &fx)
     }
 }
 
-void fxSpawnRipple(GoodyBallFxState &fx, const QPointF &p)
+void fxSpawnRipple(DshBallFxState &fx, const QPointF &p)
 {
     // #11 点击涟漪：点击点为源 3 圈错相扩散（球面水波）
     for (int i = 0; i < 3; ++i) {
-        GoodyBallFxState::Wave w;
+        DshBallFxState::Wave w;
         w.center = p;
         w.spawnT = fx.t + i * 0.15;               // 错相
         w.maxR = kR * 1.35;
@@ -85,17 +85,17 @@ void fxSpawnRipple(GoodyBallFxState &fx, const QPointF &p)
     }
 }
 
-void fxKickJelly(GoodyBallFxState &fx, double strength)
+void fxKickJelly(DshBallFxState &fx, double strength)
 {
     // #4 果冻：松手冲击 → scaleY 阻尼振荡（strength≈速度比例）
     fx.jellyVel += strength;
 }
 
-void fxKickBounce(GoodyBallFxState &fx)
+void fxKickBounce(DshBallFxState &fx)
 {
     // #18 完成弹跳：scaleY 下压回弹 + 一圈快速爆闪扩散
     fx.bounceVel -= 7.0;
-    GoodyBallFxState::Wave w;
+    DshBallFxState::Wave w;
     w.center = fx.ball.center();
     w.spawnT = fx.t;
     w.maxR = kR + 13;
@@ -108,7 +108,7 @@ void fxKickBounce(GoodyBallFxState &fx)
 
 // ---- 主时钟推进 ----
 
-void tickBallFx(GoodyBallFxState &fx, double dt)
+void tickBallFx(DshBallFxState &fx, double dt)
 {
     fx.t += dt;
 
@@ -123,7 +123,7 @@ void tickBallFx(GoodyBallFxState &fx, double dt)
     if (fx.working)
         fx.breathPhase = std::fmod(fx.breathPhase + dt / kBreathDur, 1.0);
     if (fx.working && fx.breathPhase < fx.lastBreathPhase) {       // 相位回绕=新一拍
-        GoodyBallFxState::Wave w;
+        DshBallFxState::Wave w;
         w.center = fx.ball.center();
         w.spawnT = fx.t;
         w.maxR = kR + 12;
@@ -153,7 +153,7 @@ void tickBallFx(GoodyBallFxState &fx, double dt)
 
     // 波生命周期清理（错相未出生的 spawnT>t 保留）
     fx.waves.erase(std::remove_if(fx.waves.begin(), fx.waves.end(),
-                                  [&](const GoodyBallFxState::Wave &w) {
+                                  [&](const DshBallFxState::Wave &w) {
                                       return fx.t - w.spawnT > w.dur;
                                   }),
                    fx.waves.end());
@@ -174,7 +174,7 @@ void tickBallFx(GoodyBallFxState &fx, double dt)
 
 // ---- 分层渲染 ----
 
-void paintBallFx(QPainter *p, const GoodyBallFxState &fx)
+void paintBallFx(QPainter *p, const DshBallFxState &fx)
 {
     p->setRenderHint(QPainter::Antialiasing);
     const QRectF ball = fx.ball;
@@ -240,7 +240,7 @@ void paintBallFx(QPainter *p, const GoodyBallFxState &fx)
     }
 
     // ---- L3 球外扩散波（#16 呼吸波 / #18 爆闪；涟漪的球外部分不画） ----
-    for (const GoodyBallFxState::Wave &w : fx.waves) {
+    for (const DshBallFxState::Wave &w : fx.waves) {
         if (w.clipBall)
             continue;
         const double age = std::clamp(fx.t - w.spawnT, 0.0, w.dur);
@@ -340,7 +340,7 @@ void paintBallFx(QPainter *p, const GoodyBallFxState &fx)
         QPainterPath clip;
         clip.addEllipse(realBall);
         p->setClipPath(clip);
-        for (const GoodyBallFxState::Wave &w : fx.waves) {
+        for (const DshBallFxState::Wave &w : fx.waves) {
             if (!w.clipBall)
                 continue;
             const double age = fx.t - w.spawnT;
@@ -359,7 +359,7 @@ void paintBallFx(QPainter *p, const GoodyBallFxState &fx)
     }
 
     // ---- L6 星尘环绕（#9）+ 汇聚/发散（#10） ----
-    for (const GoodyBallFxState::Dust &d : fx.dust) {
+    for (const DshBallFxState::Dust &d : fx.dust) {
         const double ang = d.phase + fx.t * d.speed;
         const double orbit = r * d.orbit * fx.dustRadius;
         const QPointF pos = c + QPointF(std::cos(ang) * orbit, std::sin(ang) * orbit);

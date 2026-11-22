@@ -10,10 +10,10 @@ class QPainter;
 namespace poptools {
 
 // ============================================================
-// GoodyBallFx：悬浮球动效系统（T-076 全量动效批，用户拍板"全要"）。
+// DshBallFx：悬浮球动效系统（T-076 全量动效批，用户拍板"全要"）。
 //
-// 结构：GoodyBallFxState（全部相位/波列表/弹簧状态）+ 纯函数 tick()/paint()
-// ——无 QObject 依赖、状态可快照比对，便于将来单测。GoodyFloatingBall 只
+// 结构：DshBallFxState（全部相位/波列表/弹簧状态）+ 纯函数 tick()/paint()
+// ——无 QObject 依赖、状态可快照比对，便于将来单测。DshFloatingBall 只
 // 负责主时钟（30fps tick→脏矩形重绘）与事件接线（按下/悬停/拖动/working）。
 //
 // 动效分层（paint 由底到顶）：
@@ -29,7 +29,7 @@ namespace poptools {
 // 超窗即光效缺圈（2026-11-22 缺角反馈的渲染侧纪律）。
 // ============================================================
 
-struct GoodyBallFxState
+struct DshBallFxState
 {
     // ---- 输入（窗体接线侧每帧/事件更新） ----
     QRectF ball;            // 球矩形（窗中心 52px）
@@ -96,15 +96,15 @@ struct GoodyBallFxState
 };
 
 // 主时钟推进（dt 秒；接线侧 30fps 固定步进）：相位/弹簧/波生命周期/彗尾采样
-void tickBallFx(GoodyBallFxState &fx, double dt);
+void tickBallFx(DshBallFxState &fx, double dt);
 
-// 事件触发（GoodyFloatingBall 接线侧调用）
-void fxSeedDust(GoodyBallFxState &fx);                      // 星尘轨道初始化（构造调一次）
-void fxSpawnRipple(GoodyBallFxState &fx, const QPointF &p); // #11 点击涟漪（按下点）
-void fxKickJelly(GoodyBallFxState &fx, double strength);    // #4 松手果冻回弹冲击
-void fxKickBounce(GoodyBallFxState &fx);                    // #18 完成弹跳+爆闪
+// 事件触发（DshFloatingBall 接线侧调用）
+void fxSeedDust(DshBallFxState &fx);                      // 星尘轨道初始化（构造调一次）
+void fxSpawnRipple(DshBallFxState &fx, const QPointF &p); // #11 点击涟漪（按下点）
+void fxKickJelly(DshBallFxState &fx, double strength);    // #4 松手果冻回弹冲击
+void fxKickBounce(DshBallFxState &fx);                    // #18 完成弹跳+爆闪
 
 // 分层渲染（paintEvent 委托；传入窗矩形以定位球）
-void paintBallFx(QPainter *p, const GoodyBallFxState &fx);
+void paintBallFx(QPainter *p, const DshBallFxState &fx);
 
 } // namespace poptools

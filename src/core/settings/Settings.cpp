@@ -305,7 +305,7 @@ void Settings::setMonitorOcrSnapshot(bool on)
     syncChecked();
 }
 
-// ---- Goody 管家 ----
+// ---- DeepSeek Harness ----
 
 
 void Settings::setAssistantApiKey(const QString &key)
@@ -328,26 +328,28 @@ void Settings::setAssistantApiModel(const QString &model)
     syncChecked();
 }
 
-quint32 Settings::assistantHotKeyVk() const
+quint32 Settings::dshHotKeyVk() const
 {
-    const quint32 vk = m_s.value("assistant/hotkeyVk", 0x47 /* G */).toUInt();
+    const quint32 vk = m_s.value("dsh/hotkeyVk", m_s.value("assistant/hotkeyVk",
+        0x47 /* G */)).toUInt(); // 键名迁移 fallback（T-078 goody→dsh）
     return (vk >= 0x01 && vk <= 0xFE) ? vk : 0x47;
 }
 
-quint32 Settings::assistantHotKeyModifiers() const
+quint32 Settings::dshHotKeyModifiers() const
 {
-    const quint32 mod = m_s.value("assistant/hotkeyMod", 0x0003 /* MOD_CONTROL|MOD_ALT */).toUInt();
+    const quint32 mod = m_s.value("dsh/hotkeyMod", m_s.value("assistant/hotkeyMod",
+        0x0003 /* MOD_CONTROL|MOD_ALT */)).toUInt(); // 键名迁移 fallback
     if (!validHotkeyModifiers(mod)) {
-        qWarning("Settings: 非法热键修饰键 assistant/hotkeyMod=0x%x，回退默认", mod);
+        qWarning("Settings: 非法热键修饰键 dsh/hotkeyMod=0x%x，回退默认", mod);
         return 0x0003;
     }
     return mod;
 }
 
-void Settings::setAssistantHotKey(quint32 vk, quint32 modifiers)
+void Settings::setDshHotKey(quint32 vk, quint32 modifiers)
 {
-    m_s.setValue("assistant/hotkeyVk", vk);
-    m_s.setValue("assistant/hotkeyMod", modifiers);
+    m_s.setValue("dsh/hotkeyVk", vk);
+    m_s.setValue("dsh/hotkeyMod", modifiers);
     syncChecked();
 }
 
@@ -397,24 +399,26 @@ void Settings::setAssistantWindowGeometry(const QByteArray &state)
 }
 
 // T-050：桌面悬浮球开关（默认开）与记忆位置（"x,y"；空 = 未记忆，
-// 取屏幕右上角默认位；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）
-bool Settings::assistantBallEnabled() const
+// 取屏幕右上角默认位；解析/钳制逻辑在 ui/dsh/DshBallLogic.h）
+bool Settings::dshBallEnabled() const
 {
-    return m_s.value("assistant/ballEnabled", true).toBool();
+    return m_s.value("dsh/ballEnabled", m_s.value("assistant/ballEnabled", true))
+        .toBool(); // 键名迁移 fallback
 }
 
-void Settings::setAssistantBallEnabled(bool on)
+void Settings::setDshBallEnabled(bool on)
 {
-    m_s.setValue("assistant/ballEnabled", on);
+    m_s.setValue("dsh/ballEnabled", on);
     syncChecked();
 }
 
-QString Settings::assistantBallPos() const
+QString Settings::dshBallPos() const
 {
     // 兼容两种磁盘形态：应用写入的 QString("x,y")（IniFormat 落盘带引号）
     // 与手改 ini 未加引号的 "x,y"——后者会被 IniFormat 按逗号裂成
     // QStringList，直接 toString() 得空串（实测踩坑），此处合回 "x,y"
-    const QVariant v = m_s.value("assistant/ballPos", QString());
+    const QVariant v = m_s.value("dsh/ballPos",
+        m_s.value("assistant/ballPos", QString())); // 键名迁移 fallback
     if (v.metaType().id() == QMetaType::QStringList) {
         const QStringList parts = v.toStringList();
         return parts.size() == 2 ? parts.join(QLatin1Char(',')) : QString();
@@ -422,9 +426,9 @@ QString Settings::assistantBallPos() const
     return v.toString();
 }
 
-void Settings::setAssistantBallPos(const QString &xy)
+void Settings::setDshBallPos(const QString &xy)
 {
-    m_s.setValue("assistant/ballPos", xy);
+    m_s.setValue("dsh/ballPos", xy);
     syncChecked();
 }
 
@@ -436,22 +440,6 @@ void Settings::syncExternal()
 }
 
 // ---- dsh 常驻服务（T-074） ----
-
-QString Settings::dshApiKey() const
-{
-    return m_s.value("dsh/apiKey", "").toString();
-}
-
-QByteArray Settings::dshWindowGeometry() const
-{
-    return m_s.value("dsh/windowGeometry").toByteArray();
-}
-
-void Settings::setDshWindowGeometry(const QByteArray &state)
-{
-    m_s.setValue("dsh/windowGeometry", state);
-    syncChecked();
-}
 
 QString Settings::updateIgnoredVersion() const
 {

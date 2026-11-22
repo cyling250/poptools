@@ -89,15 +89,15 @@ target_link_libraries(poptools_module_activitymonitor PUBLIC
     poptools_app_infra
 )
 
-# ---- 功能模块：Goody 管家（大模型助手；聊天窗 + 工具回合循环） ----
-add_library(poptools_module_goody STATIC
-    modules/GoodyModule.cpp
-    modules/GoodyModule.h
+# ---- 功能模块：DeepSeek Harness 后台服务（悬浮球+热键+桌面端唤起） ----
+add_library(poptools_module_dsh STATIC
+    modules/DshModule.cpp
+    modules/DshModule.h
 )
-target_link_libraries(poptools_module_goody PUBLIC
+target_link_libraries(poptools_module_dsh PUBLIC
     poptools_app_infra
-    poptools_ui_goody
-    poptools_ui_dsh # T-074：dsh 常驻窗（旧 GoodyWindow 的对话界面替代）
+    poptools_ui_dsh
+    
 )
 
 # ---- 聚合目标：可执行只链接 poptools_modules ----
@@ -109,5 +109,5 @@ target_link_libraries(poptools_modules INTERFACE
     poptools_module_activitymonitor
     poptools_module_calendar
     poptools_module_box
-    poptools_module_goody
+    poptools_module_dsh
 )

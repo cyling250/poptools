@@ -1,9 +1,9 @@
 // T-050 阶段一：Goody 桌面悬浮球实现（贴底驻留/手势判别/主题联动）
-// T-076（2026-11-22）：渲染与动效全量委托 GoodyBallFx（18 项动效系统），
+// T-076（2026-11-22）：渲染与动效全量委托 DshBallFx（18 项动效系统），
 // 本件瘦身为接线层——主时钟/事件/位置/驻桌。
-#include "GoodyFloatingBall.h"
+#include "DshFloatingBall.h"
 
-#include "GoodyBallLogic.h"
+#include "DshBallLogic.h"
 #include "core/settings/Settings.h"
 #include "ui/ThemeColors.h" // systemSchemeDark
 #include "ui/theming/FluentTheme.h"
@@ -46,12 +46,12 @@ QList<QRect> visibleScreenRects()
 }
 } // namespace
 
-GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
+DshFloatingBall::DshFloatingBall(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName("goodyBall");
     // 复用现有资源：resources 无 goody 专属图标，窗口图标取应用方砖；
-    // 球面中央字标自绘 "G"（GoodyBallFx 内绘制）
+    // 球面中央字标自绘 "G"（DshBallFx 内绘制）
     setWindowIcon(QIcon(QStringLiteral(":/app_icon.svg")));
     // 窗口纪律：无边框工具窗、透明背景、显示不激活
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
@@ -59,11 +59,11 @@ GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
     setAttribute(Qt::WA_ShowWithoutActivating);
     setFixedSize(kBallWindowSize, kBallWindowSize);
     setCursor(Qt::PointingHandCursor);
-    setToolTip(QStringLiteral("Goody 管家：单击打开对话，拖动调整位置"));
+    setToolTip(QStringLiteral("DeepSeek Harness：单击打开对话，拖动调整位置"));
 
     // 跟随系统明暗主题（TranslateCard.cpp 先例）
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
-            this, &GoodyFloatingBall::applyTheme);
+            this, &DshFloatingBall::applyTheme);
     applyTheme();
 
     fxSeedDust(m_fx); // 星尘轨道初始化（#9，一次）
@@ -72,7 +72,7 @@ GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
     // 低频轮询（窗未悬停也能感知鼠标接近；33ms 一次零成本）
     m_fxClock = new QTimer(this);
     m_fxClock->setInterval(1000 / kFxFps);
-    connect(m_fxClock, &QTimer::timeout, this, &GoodyFloatingBall::onFxTick);
+    connect(m_fxClock, &QTimer::timeout, this, &DshFloatingBall::onFxTick);
 
     // 屏幕布局变化即时重钳制（T-076）：拔屏/主屏切换/改分辨率后旧记忆坐标
     // 可能落在已消失的屏幕区间（球缺角/失踪），applySavedPosition 幂等
@@ -86,10 +86,10 @@ GoodyFloatingBall::GoodyFloatingBall(QWidget *parent)
         connect(s, &QScreen::geometryChanged, this, reclamp);
 }
 
-void GoodyFloatingBall::applyTheme()
+void DshFloatingBall::applyTheme()
 {
     const FluentTokens t = fluentTheme(systemSchemeDark());
-    // 动效系统调色（GoodyBallFx 渲染唯一取色处）
+    // 动效系统调色（DshBallFx 渲染唯一取色处）
     m_fx.accent = QColor(t.accent);
     m_fx.cardBg = QColor(t.bgCard);
     m_fx.stroke = QColor(t.cardStroke);
@@ -109,7 +109,7 @@ void GoodyFloatingBall::applyTheme()
 
 // ---- 主时钟 ----
 
-void GoodyFloatingBall::onFxTick()
+void DshFloatingBall::onFxTick()
 {
     // #14 磁吸目标：QCursor 逻辑全局坐标 vs 窗心，接近半径内朝向偏移 ≤3px
     const QPoint cursor = QCursor::pos();
@@ -128,19 +128,19 @@ void GoodyFloatingBall::onFxTick()
     update(glowDirtyRect());
 }
 
-void GoodyFloatingBall::startFxClock()
+void DshFloatingBall::startFxClock()
 {
     m_fxClock->start();
 }
 
-void GoodyFloatingBall::stopFxClock()
+void DshFloatingBall::stopFxClock()
 {
     m_fxClock->stop();
 }
 
 // ---- 工作状态 ----
 
-void GoodyFloatingBall::setWorking(bool on)
+void DshFloatingBall::setWorking(bool on)
 {
     if (m_fx.working == on)
         return;
@@ -149,9 +149,9 @@ void GoodyFloatingBall::setWorking(bool on)
         fxKickBounce(m_fx); // #18 完成弹跳+爆闪（工作结束反馈）
 }
 
-// ---- 手势（分类器状态机，goodyball::GestureClassifier 可单测） ----
+// ---- 手势（分类器状态机，dshball::GestureClassifier 可单测） ----
 
-void GoodyFloatingBall::mousePressEvent(QMouseEvent *event)
+void DshFloatingBall::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         m_fx.pressed = true;
@@ -165,7 +165,7 @@ void GoodyFloatingBall::mousePressEvent(QMouseEvent *event)
     QWidget::mousePressEvent(event);
 }
 
-void GoodyFloatingBall::mouseMoveEvent(QMouseEvent *event)
+void DshFloatingBall::mouseMoveEvent(QMouseEvent *event)
 {
     m_fx.mousePos = event->pos();
     m_gesture.addMove(event->globalPosition().toPoint());
@@ -176,24 +176,24 @@ void GoodyFloatingBall::mouseMoveEvent(QMouseEvent *event)
     event->accept();
 }
 
-void GoodyFloatingBall::mouseReleaseEvent(QMouseEvent *event)
+void DshFloatingBall::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton) {
         QWidget::mouseReleaseEvent(event);
         return;
     }
     m_fx.pressed = false;
-    const goodyball::Gesture g = m_gesture.endRelease();
+    const dshball::Gesture g = m_gesture.endRelease();
     m_fx.dragging = false;
-    if (g == goodyball::Gesture::Click) {
+    if (g == dshball::Gesture::Click) {
         emit clicked();
-    } else if (g == goodyball::Gesture::Drag) {
+    } else if (g == dshball::Gesture::Drag) {
         fxKickJelly(m_fx, 2.6); // #4 果冻回弹（松手冲击）
         // T-050-FIX（P3-2）：松开先钳进可用屏再落盘（与 applySavedPosition
         // 同一 clampBallPos）——拖出屏幕/压任务栏的落点否则会话内滞留，
         // 重启才被钳回；窗口同步移到钳制位，视觉位置与持久化值一致
         const QPoint clamped =
-            goodyball::clampBallPos(pos(), size(), visibleScreenRects());
+            dshball::clampBallPos(pos(), size(), visibleScreenRects());
         if (clamped != pos())
             move(clamped);
         emit positionChanged(clamped); // 松开写回位置（模块持久化）
@@ -201,14 +201,14 @@ void GoodyFloatingBall::mouseReleaseEvent(QMouseEvent *event)
     event->accept();
 }
 
-void GoodyFloatingBall::enterEvent(QEnterEvent *event)
+void DshFloatingBall::enterEvent(QEnterEvent *event)
 {
     m_fx.hover = true;
     m_fx.mousePos = mapFromGlobal(QCursor::pos());
     QWidget::enterEvent(event);
 }
 
-void GoodyFloatingBall::leaveEvent(QEvent *event)
+void DshFloatingBall::leaveEvent(QEvent *event)
 {
     m_fx.hover = false;
     QWidget::leaveEvent(event);
@@ -216,7 +216,7 @@ void GoodyFloatingBall::leaveEvent(QEvent *event)
 
 // ---- 驻桌（desktopstack：Progman 上方 + 1s 守护归位） ----
 
-void GoodyFloatingBall::showEvent(QShowEvent *event)
+void DshFloatingBall::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
     startFxClock(); // 显示即启动效时钟（隐藏停钟零开销）
@@ -227,7 +227,7 @@ void GoodyFloatingBall::showEvent(QShowEvent *event)
     });
 }
 
-void GoodyFloatingBall::hideEvent(QHideEvent *event)
+void DshFloatingBall::hideEvent(QHideEvent *event)
 {
     QWidget::hideEvent(event);
     // 守护表配对注销（R3 #19）：否则守护定时器为不可见窗口空转；
@@ -239,7 +239,7 @@ void GoodyFloatingBall::hideEvent(QHideEvent *event)
 // P-031：点击不激活窗口（抑制 Windows 默认抬升，避免盖住正常应用
 // 窗口后又被守护归位形成横跳）——只拦 WM_MOUSEACTIVATE，鼠标按键
 // 消息照常到达 Qt 事件层，单击/拖动手势不受影响
-bool GoodyFloatingBall::nativeEvent(const QByteArray &eventType, void *message,
+bool DshFloatingBall::nativeEvent(const QByteArray &eventType, void *message,
                                     qintptr *result)
 {
 #ifdef Q_OS_WIN
@@ -256,19 +256,19 @@ bool GoodyFloatingBall::nativeEvent(const QByteArray &eventType, void *message,
 
 // ---- 绘制 ----
 
-QRect GoodyFloatingBall::ballRect() const
+QRect DshFloatingBall::ballRect() const
 {
     const int off = (kBallWindowSize - kBallDiameter) / 2;
     return QRect(off, off, kBallDiameter, kBallDiameter);
 }
 
-QRect GoodyFloatingBall::glowDirtyRect() const
+QRect DshFloatingBall::glowDirtyRect() const
 {
     // 光效外沿最大 r+13（爆闪/呼吸波/彗尾弧）+ 磁吸 3px + 抗锯齿余量
     return ballRect().adjusted(-17, -17, 17, 17);
 }
 
-void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
+void DshFloatingBall::paintEvent(QPaintEvent * /*event*/)
 {
     m_fx.ball = QRectF(ballRect()); // 窗体几何 → 动效系统（每帧同步）
     QPainter p(this);
@@ -277,15 +277,15 @@ void GoodyFloatingBall::paintEvent(QPaintEvent * /*event*/)
 
 // ---- 位置 ----
 
-void GoodyFloatingBall::applySavedPosition()
+void DshFloatingBall::applySavedPosition()
 {
     const QList<QRect> screens = visibleScreenRects(); // 排除任务栏（共用取法）
     const QSize sz = size();
     bool ok = false;
-    QPoint pos = goodyball::ballPosFromString(Settings::instance().assistantBallPos(), &ok);
+    QPoint pos = dshball::ballPosFromString(Settings::instance().dshBallPos(), &ok);
     if (!ok) // 未记忆/坏值：可用区右上角默认位
-        pos = goodyball::defaultBallPos(QGuiApplication::primaryScreen()->availableGeometry(), sz);
-    move(goodyball::clampBallPos(pos, sz, screens)); // 启动钳制进可见屏幕
+        pos = dshball::defaultBallPos(QGuiApplication::primaryScreen()->availableGeometry(), sz);
+    move(dshball::clampBallPos(pos, sz, screens)); // 启动钳制进可见屏幕
 }
 
 } // namespace poptools

@@ -17,7 +17,7 @@ namespace poptools {
 // 目录约定（与主程序 QStandardPaths::AppLocalDataLocation 同口径：
 // %LOCALAPPDATA%/PopTools/PopTools）：
 //   monitor/<日期>/{timeline,keys,textlog,ocrtext,clipboard}.jsonl
-//   goody/daily/<日期>.md、goody/monthly/<yyyy-MM>.md（日历摘要链路约定路径）
+//   dsh/daily/<日期>.md、dsh/monthly/<yyyy-MM>.md（日历摘要链路约定路径）
 // ============================================================
 
 // MCP 工具执行结果：payload 为工具的结构化输出；isError 时协议层给
@@ -41,11 +41,11 @@ QJsonArray mcpToolDescriptors();
 // ---- 工具实现 ----
 // 活动数据读取（原 monitor.query 逻辑移植，流白名单防路径穿越）
 McpToolResult runActivityDaily(const QString &monitorBaseDir, const QJsonObject &args);
-// 日报写入（dsh 定时任务成文落 goody 约定路径 → 日历摘要链路续命）
-McpToolResult runWriteDailyDigest(const QString &goodyBaseDir, const QJsonObject &args);
-McpToolResult runReadDailyDigest(const QString &goodyBaseDir, const QJsonObject &args);
-McpToolResult runWriteMonthlyDigest(const QString &goodyBaseDir, const QJsonObject &args);
-McpToolResult runReadMonthlyDigest(const QString &goodyBaseDir, const QJsonObject &args);
+// 日报写入（dsh 定时任务成文落 dsh 约定路径 → 日历摘要链路续命）
+McpToolResult runWriteDailyDigest(const QString &dshBaseDir, const QJsonObject &args);
+McpToolResult runReadDailyDigest(const QString &dshBaseDir, const QJsonObject &args);
+McpToolResult runWriteMonthlyDigest(const QString &dshBaseDir, const QJsonObject &args);
+McpToolResult runReadMonthlyDigest(const QString &dshBaseDir, const QJsonObject &args);
 // 截图（整虚拟桌面拼图，PNG 落临时目录，返回路径供 dsh 读图/OCR）
 McpToolResult runCaptureScreenshot(const QJsonObject &args);
 

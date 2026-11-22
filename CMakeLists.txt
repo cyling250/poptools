@@ -182,33 +182,7 @@ if(EXISTS "${QT_BIN_DIR}/windeployqt.exe")
     )
 endif()
 
-# ---- M1 dsh 嵌入 PoC（T-074）：独立验证窗（poptools_ui_dsh 已正式入
-# src/ui 聚合并被 GoodyModule 链接；本 target 仅作开发调试工具保留） ----
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/include/WebView2.h")
-    add_executable(dsh_poc WIN32 src/dsh_poc/main.cpp)
-    target_link_libraries(dsh_poc PRIVATE poptools_ui_dsh Qt6::Widgets)
-    add_custom_command(TARGET dsh_poc POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/tools/webview2/x64/WebView2Loader.dll"
-            "$<TARGET_FILE_DIR:dsh_poc>"
-        COMMAND "${QT_BIN_DIR}/windeployqt.exe" --release -no-translations
-            "$<TARGET_FILE:dsh_poc>"
-        COMMENT "Deploying WebView2Loader.dll + Qt runtime for dsh_poc"
-    )
-else()
-    message(STATUS "tools/webview2 缺失：跳过 dsh_poc（运行 scripts/install_webview2.py）")
-endif()
-
-# WebView2Loader.dll（PopTools 主程序）：poptools_ui_dsh 经 QLibrary 动态解析，
-# exe 目录优先，兜底源码树 tools/webview2/x64——部署到主程序旁保证安装包形态可用
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/webview2/x64/WebView2Loader.dll")
-    add_custom_command(TARGET PopTools POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/tools/webview2/x64/WebView2Loader.dll"
-            "$<TARGET_FILE_DIR:PopTools>"
-        COMMENT "Deploying WebView2Loader.dll for PopTools"
-    )
-endif()
-
+# （T-078 M1）dsh_poc 与 WebView2Loader 部署随 DshWindow/WebView2Host 嵌入壳
+# 退役——主界面切换 dsh 官方 Electron 桌面端，PopTools 退居后台服务。
 # 安装规则（可选）
 install(TARGETS PopTools RUNTIME DESTINATION .)

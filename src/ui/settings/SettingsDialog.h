@@ -93,7 +93,7 @@ private:
     QSpinBox *m_monIdleSpin = nullptr;
     QSpinBox *m_monRetentionSpin = nullptr;
 
-    // Goody 管家（T-074：模型/API/权限/总结时刻等已随 dsh 常驻服务交由
+    // DeepSeek Harness（T-074：模型/API/权限/总结时刻等已随 dsh 常驻服务交由
     // dsh 自身设置页管理，此处只留悬浮球与打开入口）
     ToggleSwitch *m_gdyBallSwitch = nullptr; // T-050：桌面悬浮球开关
 

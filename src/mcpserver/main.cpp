@@ -5,9 +5,9 @@
 // mcp-manager 作为子进程拉起（profiles/web/cordis.patch.yml 配置 command），
 // 桌面能力以工具面暴露给 dsh agent：
 //   poptools_activity_daily      活动监控日志读取（日报/「今天干了什么」取数）
-//   poptools_write/read_daily_digest     日报落盘/读取（goody/daily 约定路径，
+//   poptools_write/read_daily_digest     日报落盘/读取（dsh/daily 约定路径，
 //                                桌面日历摘要链路续命）
-//   poptools_write/read_monthly_digest   月报落盘/读取（goody/monthly）
+//   poptools_write/read_monthly_digest   月报落盘/读取（dsh/monthly）
 //   poptools_capture_screenshot  整虚拟桌面截图（PNG 落临时目录）
 //   poptools_ocr_image           RapidOCR 离线识别（图片路径 → 文本）
 //
@@ -101,16 +101,16 @@ int main(int argc, char *argv[])
                 runActivityDaily(dataRoot + QStringLiteral("/monitor"), args), isError);
         if (name == QLatin1String("poptools_write_daily_digest"))
             return wrapPayload(
-                runWriteDailyDigest(dataRoot + QStringLiteral("/goody"), args), isError);
+                runWriteDailyDigest(dataRoot + QStringLiteral("/dsh"), args), isError);
         if (name == QLatin1String("poptools_read_daily_digest"))
             return wrapPayload(
-                runReadDailyDigest(dataRoot + QStringLiteral("/goody"), args), isError);
+                runReadDailyDigest(dataRoot + QStringLiteral("/dsh"), args), isError);
         if (name == QLatin1String("poptools_write_monthly_digest"))
             return wrapPayload(
-                runWriteMonthlyDigest(dataRoot + QStringLiteral("/goody"), args), isError);
+                runWriteMonthlyDigest(dataRoot + QStringLiteral("/dsh"), args), isError);
         if (name == QLatin1String("poptools_read_monthly_digest"))
             return wrapPayload(
-                runReadMonthlyDigest(dataRoot + QStringLiteral("/goody"), args), isError);
+                runReadMonthlyDigest(dataRoot + QStringLiteral("/dsh"), args), isError);
         if (name == QLatin1String("poptools_capture_screenshot"))
             return wrapPayload(runCaptureScreenshot(args), isError);
 

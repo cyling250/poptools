@@ -82,7 +82,7 @@ SettingsDialog::SettingsDialog(AppServices *services, QWidget *parent)
     m_nav->addItem(QStringLiteral("截图与贴图"));
     m_nav->addItem(QStringLiteral("翻译"));
     m_nav->addItem(QStringLiteral("活动监控"));
-    m_nav->addItem(QStringLiteral("Goody 管家"));
+    m_nav->addItem(QStringLiteral("DeepSeek Harness"));
     m_nav->addItem(QStringLiteral("桌面日历"));
 
     m_pages = new QStackedWidget(this);
@@ -191,7 +191,7 @@ void SettingsDialog::commitSettings()
     s.setMonitorRetentionDays(m_monRetentionSpin->value());
     // Goody 模型/权限/总结配置已随 dsh 常驻服务交由其自身设置管理（T-074），
     // 此页只写悬浮球开关
-    s.setAssistantBallEnabled(m_gdyBallSwitch->isChecked());
+    s.setDshBallEnabled(m_gdyBallSwitch->isChecked());
     s.endBatch(); // 批量写收口：一次整 INI sync（其后日历 JSON 与广播不变）
 
     // 桌面日历：load→改→save 只覆写本页暴露的 7 个字段；几何(x/y/width/height)
@@ -498,7 +498,7 @@ QWidget *SettingsDialog::buildMonitorPage()
 
     auto *enabledCard = new SettingCard(
         QStringLiteral("开启活动监控"),
-        QStringLiteral("在本地记录你输入的文字与使用的窗口，供 Goody 管家生成"
+        QStringLiteral("在本地记录你输入的文字与使用的窗口，供 DeepSeek Harness生成"
                        "「本日工作记录」。数据只存本机，生成总结时当日摘要会"
                        "发送给所配的大模型 API。"), page);
     m_monEnabledSwitch = new ToggleSwitch(enabledCard);
@@ -546,25 +546,25 @@ QWidget *SettingsDialog::buildMonitorPage()
     return page;
 }
 
-// Goody 管家页（T-074 改造）：对话/模型/权限/总结已整体交由 dsh 常驻服务
+// DeepSeek Harness页（T-074 改造）：对话/模型/权限/总结已整体交由 dsh 常驻服务
 //（其设置在 dsh 界面自身的管理页），此处只留悬浮球开关与打开入口
 QWidget *SettingsDialog::buildGoodyPage()
 {
-    auto *page = newPage(QStringLiteral("Goody 管家"));
+    auto *page = newPage(QStringLiteral("DeepSeek Harness"));
     auto *lay = qobject_cast<QVBoxLayout *>(page->layout());
     Q_ASSERT(lay);
 
-    // ---- 对话窗（T-069b 菜单精简：托盘「Goody 管家」的等价入口） ----
+    // ---- 对话窗（T-069b 菜单精简：托盘「DeepSeek Harness」的等价入口） ----
     auto *openGroup = new SettingCardGroup(QStringLiteral("对话窗"), page);
     lay->addWidget(openGroup);
     auto *openCard = new SettingCard(
-        QStringLiteral("打开 Goody 管家"),
+        QStringLiteral("打开 DeepSeek Harness"),
         QStringLiteral("呼出方式：Ctrl+Alt+G、桌面悬浮球单击，或点右侧按钮。"
                        "模型与权限等在管家的设置页内配置"), page);
     auto *openBtn = new QPushButton(QStringLiteral("打开"), openCard);
     connect(openBtn, &QPushButton::clicked, this, [this] {
-        if (m_services && m_services->goodyOpenChat)
-            m_services->goodyOpenChat();
+        if (m_services && m_services->dshOpenChat)
+            m_services->dshOpenChat();
     });
     openCard->setTrailingWidget(openBtn);
     openGroup->addCard(openCard);
@@ -573,10 +573,10 @@ QWidget *SettingsDialog::buildGoodyPage()
     auto *ballGroup = new SettingCardGroup(QStringLiteral("桌面悬浮球"), page);
     lay->addWidget(ballGroup);
     auto *ballCard = new SettingCard(
-        QStringLiteral("在桌面显示 Goody 悬浮球"),
-        QStringLiteral("单击打开对话，可拖动并记忆位置；Goody 工作时呼吸光效提示"), page);
+        QStringLiteral("在桌面显示 DeepSeek Harness 悬浮球"),
+        QStringLiteral("单击打开对话，可拖动并记忆位置；DeepSeek Harness 工作时呼吸光效提示"), page);
     m_gdyBallSwitch = new ToggleSwitch(ballCard);
-    m_gdyBallSwitch->setChecked(Settings::instance().assistantBallEnabled());
+    m_gdyBallSwitch->setChecked(Settings::instance().dshBallEnabled());
     ballCard->setTrailingWidget(m_gdyBallSwitch);
     ballGroup->addCard(ballCard);
 

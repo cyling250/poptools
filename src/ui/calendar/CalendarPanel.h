@@ -61,12 +61,12 @@ public:
     void exportTasks();
     void importTasks();
 
-    // ---- Goody 工作摘要（T-067；CalendarModule 注入 GoodyModule 查询槽） ----
-    // 注入摘要查询槽（GoodyModule 发布；注入即强制刷新一次缓存）
+    // ---- Goody 工作摘要（T-067；CalendarModule 注入 DshModule 查询槽） ----
+    // 注入摘要查询槽（DshModule 发布；注入即强制刷新一次缓存）
     void setDigestQuery(std::function<QString(int year, int month, int day)> daily,
                         std::function<QString(int year, int month)> monthly);
     // 重建显示月的摘要缓存并重绘。force=false 时同月直接跳过（render 热路径
-    // 去重）；翻月/goodySummariesChanged 信号走 force=true
+    // 去重）；翻月/dshSummariesChanged 信号走 force=true
     void refreshSummaries(bool force);
 
 private:

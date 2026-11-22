@@ -62,14 +62,14 @@ public:
     // 打开应用设置对话框并定位「桌面日历」页（MainWindow 组合根发布）
     std::function<void()> openCalendarSettings;
 
-    // ---- 贡献点：Goody 工作摘要（GoodyModule 发布；桌面日历消费，T-067） ----
-    // 指定日期的日摘要文件路径（goody/daily/<yyyy-MM-dd>.md）；该日无摘要
+    // ---- 贡献点：工作摘要（DshModule 发布；桌面日历消费，T-067） ----
+    // 指定日期的日摘要文件路径（dsh/daily/<yyyy-MM-dd>.md）；该日无摘要
     // 返回空串。路径即存在性，内容由消费方读（notepad 展示）
-    std::function<QString(int year, int month, int day)> goodyDailyDigestPath;
-    // 指定月份的月报文件路径（goody/monthly/<yyyy-MM>.md）；无则空串
-    std::function<QString(int year, int month)> goodyMonthlyDigestPath;
-    // T-069b 菜单精简：打开 Goody 对话窗（设置页「打开 Goody 管家」入口）
-    std::function<void()> goodyOpenChat;
+    std::function<QString(int year, int month, int day)> dshDailyDigestPath;
+    // 指定月份的月报文件路径（dsh/monthly/<yyyy-MM>.md）；无则空串
+    std::function<QString(int year, int month)> dshMonthlyDigestPath;
+    // T-069b 菜单精简：唤起 DeepSeek Harness（设置页「打开」入口）
+    std::function<void()> dshOpenChat;
 
     // ---- 贡献点：收纳盒（BoxModule 发布；设置页消费，T-069b 菜单精简） ----
     std::function<void()> boxOpenManager;        // 打开收纳盒管理对话框
@@ -100,9 +100,9 @@ public:
 
 signals:
     void settingsChanged();
-    // T-067：Goody 工作摘要发生变更（日摘要起居注重写 / 月报生成）——
+    // T-067：工作摘要发生变更（日摘要起居注重写 / 月报生成）——
     // 桌面日历连接此信号刷新摘要缓存并重绘
-    void goodySummariesChanged();
+    void dshSummariesChanged();
 
 private slots:
     void onHotKeyActivated(int id);

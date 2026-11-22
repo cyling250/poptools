@@ -8,7 +8,7 @@
 #include <QtGlobal>
 
 namespace poptools {
-namespace goodyball {
+namespace dshball {
 
 // ============================================================
 // 悬浮球纯逻辑（T-050 阶段一）：与窗口/Qt 事件解耦，便于单测。
@@ -19,7 +19,7 @@ namespace goodyball {
 //   * clampBallPos：把球左上角钳进可见屏幕（多屏取包含点的那块，
 //     不在任何屏内取中心最近的一块），防止记忆位置因换分辨率/
 //     拔显示器而落进不可达区域。
-//   * ballPosToString / ballPosFromString：assistant/ballPos 的
+//   * ballPosToString / ballPosFromString：dsh/ballPos 的
 //     "x,y" 字符序列化往返。
 //   * defaultBallPos：默认位——可用区（排除任务栏）右上角内缩。
 // ============================================================
@@ -145,5 +145,5 @@ inline QPoint ballPosFromString(const QString &xy, bool *ok = nullptr)
     return QPoint(x, y);
 }
 
-} // namespace goodyball
+} // namespace dshball
 } // namespace poptools

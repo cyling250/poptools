@@ -234,7 +234,7 @@ void ActivityStore::sendAll()
 {
     if (!m_running)
         return;
-    // 全量流遍历：流名由写入方决定（monitor 三流 + goody 审计流 audit）。
+    // 全量流遍历：流名由写入方决定（monitor 三流 + 审计流 audit）。
     // 白名单遍历会让未列出的流静默滞留缓冲并被 clear 吞掉（audit 曾因此
     // 从未落盘）
     for (auto it = m_bufs.constBegin(); it != m_bufs.constEnd(); ++it) {

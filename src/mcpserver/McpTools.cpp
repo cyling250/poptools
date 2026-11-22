@@ -171,7 +171,7 @@ McpToolResult runActivityDaily(const QString &monitorBaseDir, const QJsonObject 
     return {result, false};
 }
 
-McpToolResult runWriteDailyDigest(const QString &goodyBaseDir, const QJsonObject &args)
+McpToolResult runWriteDailyDigest(const QString &dshBaseDir, const QJsonObject &args)
 {
     const QString date = args.value(QStringLiteral("date")).toString();
     if (!validDate(date))
@@ -179,7 +179,7 @@ McpToolResult runWriteDailyDigest(const QString &goodyBaseDir, const QJsonObject
     const QString markdown = args.value(QStringLiteral("markdown")).toString();
     if (markdown.trimmed().isEmpty())
         return {err(QStringLiteral("markdown 不能为空")), true};
-    QDir dir(goodyBaseDir + QStringLiteral("/daily"));
+    QDir dir(dshBaseDir + QStringLiteral("/daily"));
     if (!dir.mkpath(QStringLiteral(".")))
         return {err(QStringLiteral("目录创建失败：%1").arg(dir.absolutePath())), true};
     QFile f(dir.filePath(date + QStringLiteral(".md")));
@@ -192,12 +192,12 @@ McpToolResult runWriteDailyDigest(const QString &goodyBaseDir, const QJsonObject
             false};
 }
 
-McpToolResult runReadDailyDigest(const QString &goodyBaseDir, const QJsonObject &args)
+McpToolResult runReadDailyDigest(const QString &dshBaseDir, const QJsonObject &args)
 {
     const QString date = args.value(QStringLiteral("date")).toString();
     if (!validDate(date))
         return {err(QStringLiteral("日期格式应为 YYYY-MM-DD")), true};
-    QFile f(goodyBaseDir + QStringLiteral("/daily/") + date + QStringLiteral(".md"));
+    QFile f(dshBaseDir + QStringLiteral("/daily/") + date + QStringLiteral(".md"));
     if (!f.exists())
         return {QJsonObject{{"ok", true}, {"exists", false},
                             {"note", QStringLiteral("该日期尚无日报")}},
@@ -209,7 +209,7 @@ McpToolResult runReadDailyDigest(const QString &goodyBaseDir, const QJsonObject 
             false};
 }
 
-McpToolResult runWriteMonthlyDigest(const QString &goodyBaseDir, const QJsonObject &args)
+McpToolResult runWriteMonthlyDigest(const QString &dshBaseDir, const QJsonObject &args)
 {
     const QDate today = QDate::currentDate();
     const int year = args.value(QStringLiteral("year")).toInt(today.year());
@@ -219,7 +219,7 @@ McpToolResult runWriteMonthlyDigest(const QString &goodyBaseDir, const QJsonObje
     const QString markdown = args.value(QStringLiteral("markdown")).toString();
     if (markdown.trimmed().isEmpty())
         return {err(QStringLiteral("markdown 不能为空")), true};
-    QDir dir(goodyBaseDir + QStringLiteral("/monthly"));
+    QDir dir(dshBaseDir + QStringLiteral("/monthly"));
     if (!dir.mkpath(QStringLiteral(".")))
         return {err(QStringLiteral("目录创建失败：%1").arg(dir.absolutePath())), true};
     QFile f(dir.filePath(QString::number(year) + QStringLiteral("-")
@@ -233,14 +233,14 @@ McpToolResult runWriteMonthlyDigest(const QString &goodyBaseDir, const QJsonObje
             false};
 }
 
-McpToolResult runReadMonthlyDigest(const QString &goodyBaseDir, const QJsonObject &args)
+McpToolResult runReadMonthlyDigest(const QString &dshBaseDir, const QJsonObject &args)
 {
     const QDate today = QDate::currentDate();
     const int year = args.value(QStringLiteral("year")).toInt(today.year());
     const int month = args.value(QStringLiteral("month")).toInt(today.month());
     if (month < 1 || month > 12 || year < 2000 || year > 2999)
         return {err(QStringLiteral("year/month 取值非法")), true};
-    QFile f(goodyBaseDir + QStringLiteral("/monthly/") + QString::number(year)
+    QFile f(dshBaseDir + QStringLiteral("/monthly/") + QString::number(year)
             + QStringLiteral("-") + QString::number(month) + QStringLiteral(".md"));
     if (!f.exists())
         return {QJsonObject{{"ok", true}, {"exists", false},

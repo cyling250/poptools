@@ -88,15 +88,15 @@ public:
     bool monitorOcrSnapshot() const;
     void setMonitorOcrSnapshot(bool on);
 
-    // ---- Goody 管家（内置大模型助手） ----
+    // ---- DeepSeek Harness（内置大模型助手） ----
     // API 配置（OpenAI 兼容，默认 DeepSeek；Key 只存本机 ini）
     void setAssistantApiKey(const QString &key);
     void setAssistantApiBaseUrl(const QString &url);
     void setAssistantApiModel(const QString &model);
     // 呼出热键（默认 Ctrl+Alt+G：VK_G=0x47, MOD_CONTROL|MOD_ALT=0x0003）
-    quint32 assistantHotKeyVk() const;
-    quint32 assistantHotKeyModifiers() const;
-    void setAssistantHotKey(quint32 vk, quint32 modifiers);
+    quint32 dshHotKeyVk() const;
+    quint32 dshHotKeyModifiers() const;
+    void setDshHotKey(quint32 vk, quint32 modifiers);
     // 每日工作记录生成时刻（"HH:mm"，默认 22:00）与自动开关
     void setAssistantSummaryTime(const QString &hhmm);
     void setAssistantAutoSummarize(bool on);
@@ -106,26 +106,23 @@ public:
     void setAssistantAlwaysAllowTools(const QStringList &tools);
     // Smart 模式的 shell 安全命令前缀白名单
     void setAssistantShellAllowPrefixes(const QStringList &prefixes);
-    // 人格附言（用户追加到 Goody 系统提示词末尾）
+    // 人格附言（用户追加到系统提示词末尾）
     void setAssistantPersonaAppendix(const QString &text);
     // 聊天窗口几何（base64 序列化；空 = 未记忆，首开居中弹出）。
     // T-050-P2 新键：窗口升级为居中卡片聊天窗，几何与旧键（assistant/
     // geometry，440×600 竖版）解耦，避免旧尺寸撑爆新布局
     void setAssistantWindowGeometry(const QByteArray &state);
     // 桌面悬浮球（T-050 阶段一）：显示开关与记忆位置。位置为 "x,y" 字符串
-    //（空 = 未记忆，取默认屏幕右上角；解析/钳制逻辑在 ui/goody/GoodyBallLogic.h）
-    bool assistantBallEnabled() const;
-    void setAssistantBallEnabled(bool on);
-    QString assistantBallPos() const;
-    void setAssistantBallPos(const QString &xy);
+    //（空 = 未记忆，取默认屏幕右上角；解析/钳制逻辑在 ui/dsh/DshBallLogic.h）
+    bool dshBallEnabled() const;
+    void setDshBallEnabled(bool on);
+    QString dshBallPos() const;
+    void setDshBallPos(const QString &xy);
 
     // ---- dsh 常驻服务（T-074：dsh 原样移植，旧 Goody 对话界面的替代） ----
     // DeepSeek API Key：本机 ini [dsh] apiKey（DshRuntime 经启动环境注入
     // DEEPSEEK_API_KEY——dsh 官方 sidecar 供 Key 路径）；不入仓库
-    QString dshApiKey() const;
     // dsh 常驻窗几何（base64 序列化；空 = 未记忆，取默认尺寸）
-    QByteArray dshWindowGeometry() const;
-    void setDshWindowGeometry(const QByteArray &state);
 
     // ---- 更新自查 ----
     // 用户选择"跳过此版本"的 Release 版本号（如 "v0.5.0"）；启动自动检查时

@@ -65,7 +65,7 @@ QJsonObject tasksJsonForRange(const CalendarTaskStore &store, const QDate &from,
 }
 
 // 日报/月报清单（上下文管理：AI 先查目录，再按需读单篇）
-QJsonArray digestInventory(const QString &goodyBaseDir)
+QJsonArray digestInventory(const QString &dshBaseDir)
 {
     QJsonArray out;
     const auto addDir = [&out](const QDir &d, const QString &kind) {
@@ -83,8 +83,8 @@ QJsonArray digestInventory(const QString &goodyBaseDir)
                                    {"title", title}});
         }
     };
-    addDir(QDir(goodyBaseDir + QStringLiteral("/daily")), QStringLiteral("daily"));
-    addDir(QDir(goodyBaseDir + QStringLiteral("/monthly")), QStringLiteral("monthly"));
+    addDir(QDir(dshBaseDir + QStringLiteral("/daily")), QStringLiteral("daily"));
+    addDir(QDir(dshBaseDir + QStringLiteral("/monthly")), QStringLiteral("monthly"));
     return out;
 }
 
@@ -239,7 +239,7 @@ QJsonArray domainToolDescriptors()
 bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
                    const QString &name, const QJsonObject &args, McpToolResult *out)
 {
-    const QString goodyBaseDir = dataRoot + QStringLiteral("/goody");
+    const QString dshBaseDir = dataRoot + QStringLiteral("/dsh");
 
     // ---- 日历域 ----
     if (name == QLatin1String("poptools_calendar_tasks_get")) {
@@ -433,7 +433,7 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
                                          {"selection_translate", QStringLiteral("划词翻译")},
                                          {"activity_monitor", s.monitorEnabled() ? QStringLiteral("活动监控：开")
                                                                                  : QStringLiteral("活动监控：关")},
-                                         {"goody", QStringLiteral("管家（本 dsh 界面）")},
+                                         {"dsh", QStringLiteral("DeepSeek Harness（桌面端）")},
                                          {"calendar", QStringLiteral("桌面日历")},
                                          {"box", QStringLiteral("收纳盒")}}},
                             {"data_dir", dataRoot},
@@ -454,7 +454,7 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
             out2.insert(QStringLiteral("hotkeys"),
                         QJsonObject{{"capture_vk", double(s.captureHotKeyVk())},
                                     {"pin_vk", double(s.selectionTranslateHotKeyVk())},
-                                    {"goody_vk", double(s.assistantHotKeyVk())}});
+                                    {"goody_vk", double(s.dshHotKeyVk())}});
         *out = McpToolResult{QJsonObject{{"ok", true}, {"settings", out2}}, false};
         return true;
     }
@@ -593,7 +593,7 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
 
     // ---- 上下文管理域 ----
     if (name == QLatin1String("poptools_digest_list")) {
-        const QJsonArray items = digestInventory(goodyBaseDir);
+        const QJsonArray items = digestInventory(dshBaseDir);
         *out = {QJsonObject{{"ok", true},
                             {"count", double(items.size())},
                             {"items", items}},
@@ -635,9 +635,9 @@ bool runDomainTool(const QString &monitorBaseDir, const QString &dataRoot,
             }
         };
         if (scope == QLatin1String("all") || scope == QLatin1String("daily"))
-            scanDir(QDir(goodyBaseDir + QStringLiteral("/daily")), QStringLiteral("daily"));
+            scanDir(QDir(dshBaseDir + QStringLiteral("/daily")), QStringLiteral("daily"));
         if (scope == QLatin1String("all") || scope == QLatin1String("monthly"))
-            scanDir(QDir(goodyBaseDir + QStringLiteral("/monthly")), QStringLiteral("monthly"));
+            scanDir(QDir(dshBaseDir + QStringLiteral("/monthly")), QStringLiteral("monthly"));
         *out = {QJsonObject{{"ok", true},
                             {"query", query},
                             {"scanned_files", double(scanned)},

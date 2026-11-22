@@ -26,7 +26,7 @@ namespace poptools {
 //     （贴桌面玻璃家族的半透明描边除外——alpha 语义色，注释声明）；
 //   * 常暗语境（截图覆盖层/贴桌面面板上的浮层）取 fluentTheme(true) 固定
 //     深色套，不随系统明暗切换（先例：capture ToolBar 常暗玻璃面板）；
-//   * **已定案豁免**：① ui/goody/GoodyTheme.h 是 Goody 窗的第二 token 表
+//   * **已定案豁免**：① ui/dsh/GoodyTheme.h 是 Goody 窗的第二 token 表
 //     （T-070 按 dsh WebUI 视觉拍板，两表互不引用）——Goody 窗内配色取
 //     goody_theme，不入本表口径；② 内容惯例色（ToolBar 16 色绘图调色盘、
 //     CodeHighlighter 语法配色、取色卡白底信息区）是用户内容/功能语义，
