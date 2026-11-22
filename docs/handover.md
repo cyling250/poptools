@@ -1,6 +1,7 @@
 # 项目交接文档
 
 > 本文档由 AI 维护，用于任务交接。主档 ≤ 500 行，旧条目见 docs/handover/archive/（按编号按需检索，不通读）。
+> 最后更新：2026-11-23 01:15（T-078 M1 后台化改造+goody→dsh 全局改名落码 0185bcf：官方桌面端做主界面，PopTools 退后台服务；DshWindow 全家退役；桌面端唤起+patch/AGENTS.md/数据迁移三链实测 PASS；M2 安装器编排待做） · Agent_20261122011419
 > 最后更新：2026-11-23 00:55（T-078 M0 桌面端形态迁移验证 PASS：官方桌面端下载/校验/静默装；自带 host 端口 58771+profile 同构；mcp-manager 移植后 host spawn 我们的 mcp_server——MCP 桥兼容实锤；M1 后台化改造待立项） · Agent_20261122011419
 > 最后更新：2026-11-23 00:30（T-077b 混 DPI 接屏修复：host dpr 动态重估+renderer 重建+视觉等比重映射——接屏字体大/虚线框 2/3 偏移同根根治 c6b8a4c 待复测） · Agent_20261122011419
 > 最后更新：2026-11-22 23:40（T-077 自动更新落码：PopTools Release 流式下载+Inno 静默装+开发树门控；dsh npm 查新+停 sidecar→install→重启编排；均弹窗确认+24h 定期，数据面自证通过 6493e6f） · Agent_20261122011419
@@ -96,9 +97,16 @@
   **自带 host（OS 分配端口 58771，无 3080 冲突）+ profile 体系与 web 同构
  （~/.dsh/profiles/desktop/cordis.patch.yml）**；mcp-manager 条目移植后
   桌面端 host 成功 spawn 我们的 mcp_server（父 PID 22188=Harness 进程）
-- 待办 M1：PopTools 后台化改造（DshWindow/WebView2Host/DshRuntime/
-  DshUpdateService 退役，openChat→桌面端进程管理）；M2 安装器编排；AGENTS.md/
-  API Key 迁 ~/.dsh 新家；悬浮球形态另议
+- **M1 已落码+提交（0185bcf，40 文件 +575/-1799）**：DshWindow/WebView2Host/
+  DshRuntime/DshUpdateService/dsh_poc/WebView2Loader 全退役；GoodyModule→
+  DshModule 后台化重写（唤起=启动/前置桌面端 exe，single-instance 实测
+  成立）；goody→dsh 全局改名（类/CMake 目标/AppServices 槽/Settings 键
+  dshBallEnabled 等+旧键 fallback/模块 id/数据路径 goody/daily→dsh/daily/
+  文案 Goody 管家→DeepSeek Harness）；ensureDesktopIntegration 三链幂等
+  （目录迁移/AGENTS.md 迁 ~/.dsh/MCP patch command 动态更新）实测 PASS；
+  构建 0 编译警告+ctest 全绿+拉起实测通过
+- 待办 M2：安装器编排（联网下载官方桌面端 exe 286MB 静默装）；悬浮球
+  新形态（用户另议：桌面娘立绘/托盘图标）
 
 > 更早：T-077~T-077c → [handover/archive/tasks-077.md](handover/archive/tasks-077.md)
 > ｜ T-075~T-076 → [handover/archive/tasks-075-076.md](handover/archive/tasks-075-076.md)
@@ -433,6 +441,7 @@
 
 | 时间 | 智能体 | 板块 | 操作 | 摘要 |
 |---|---|---|---|---|
+| 2026-11-23 01:15 | Agent_20261122011419 | 头部 / 历史任务 / 台账 / src 全域（模块改名+退役+重写）/ tests / CMake×3 | T-078 M1：后台化改造+goody→dsh 全局改名（40 文件）；三链迁移实测 PASS | 构建 0 编译警告 ctest 全绿；0185bcf；M2 安装器编排待做 |
 | 2026-11-22 23:40 | Agent_20261122011419 | 头部 / 历史任务 / 台账 / core update(+Downloader) / ui dsh(+UpdateService) / app(Main+Goody) / DshWindow.h | T-077 自动更新：Release 自装+dsh npm 编排+24h 定期+弹窗确认 | 数据面自证 npm/GitHub 通；6493e6f |
 | 2026-11-22 23:00 | Agent_20261122011419 | 头部 / 台账 / ui dsh 两文件 | T-076b：dsh sidecar 看门狗（自动重启指数退避+dsh-runtime.log） | 端到端实证杀进程 10s 内复活；f3be7ea |
 | 2026-11-22 04:05 | Agent_20261122011419 | 头部 / 历史任务 / 归档 tasks-066-073 / 台账 / ui goody（GoodyBallFx 新建+Ball 重写）/ CMake(ui) | T-076 动效全量批：GoodyBallFx 系统新建 18 项动效+窗体 88+主时钟 30fps；存量压实（T-066~T-073 剪切归档） | 构建 0 编译警告 ctest 全绿；待目测 |
