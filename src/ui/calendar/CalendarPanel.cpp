@@ -219,7 +219,27 @@ void CalendarPanel::clampSettings()
     m_screenNative = deskscreens::resolveScreenForRect(m_settings.rect());
     if (m_screenNative.isEmpty())
         return;
+    // 视觉等比自愈（T-077b 补强——启动时序缺口）：100%↔150% 切换常发生在
+    // 两次运行之间，运行时 dpr 信号收不到。rect 是另一缩放配置下记的逻辑
+    // 坐标：右/下缘超出归属屏物理边界即失配实锤（物理坐标系稳定，不随
+    // Qt 逻辑缩放漂）→ 归一化到「右/下缘恰在屏缘」等比回缩
     const QRect &s = m_screenNative;
+    const int rectRight = m_settings.x + m_settings.width;
+    const int rectBottom = m_settings.y + m_settings.height;
+    const bool oversize = rectRight > s.right() + 1 || rectBottom > s.bottom() + 1;
+    if (oversize) {
+        const qreal fx = qreal(s.width()) / qMax(1, rectRight - s.left());
+        const qreal fy = qreal(s.height()) / qMax(1, rectBottom - s.top());
+        // 归一化到「右/下缘恰在屏缘」的占比再回乘，XY/宽高同乘保纵横感觉
+        const qreal f = qMin(fx, fy);
+        m_settings.x = s.left() + qRound((m_settings.x - s.left()) * f);
+        m_settings.y = s.top() + qRound((m_settings.y - s.top()) * f);
+        m_settings.width = qRound(m_settings.width * f);
+        m_settings.height = qRound(m_settings.height * f);
+        m_settings.save();
+        qInfo("CalendarPanel: rect 超出归属屏（缩放配置切换），按 %.2f 等比重映射",
+              f);
+    }
     const int w = std::clamp(m_settings.width, 520, std::max(520, s.width()));
     const int h = std::clamp(m_settings.height, 420, std::max(420, s.height()));
     const int x = std::clamp(m_settings.x, s.left(), std::max(s.left(), s.right() + 1 - w));

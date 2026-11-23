@@ -38,6 +38,13 @@ DesktopSurfaceHost::DesktopSurfaceHost(QWidget *parent)
         connect(s, &QScreen::logicalDotsPerInchChanged, this,
                 [this] { refreshDpr(); });
     }
+    // 信号兜底轮询（T-077b 实测补充）：primary 屏缩放切换（接拔屏触发）时
+    // Qt6 的 logicalDotsPerInchChanged/devicePixelRatioChanged 都可能不发——
+    // 10s 低频轮询校验 dpr（读 devicePixelRatio 零开销，变化才发 dprChanged）
+    auto *dprPoll = new QTimer(this);
+    dprPoll->setInterval(10 * 1000);
+    connect(dprPoll, &QTimer::timeout, this, [this] { refreshDpr(); });
+    dprPoll->start();
     refreshDpr();
 }
 
