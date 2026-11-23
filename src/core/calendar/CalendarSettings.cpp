@@ -41,10 +41,11 @@ QJsonObject CalendarSettings::toJson() const
 {
     return QJsonObject{
         { "X", x },           { "Y", y },                 { "Width", width },
-        { "Height", height }, { "Hidden", hidden },       { "ShowLunar", showLunar },
-        { "ShowWeekNumbers", showWeekNumbers },           { "ShowEvents", showEvents },
-        { "GlassEffect", glassEffect },                   { "FontScale", fontScale },
-        { "ShowGuide", showGuide },                       { "ShowNextMonthPill", showNextMonthPill }
+        { "Height", height }, { "SavedDpr", savedDpr },   { "Hidden", hidden },
+        { "ShowLunar", showLunar },                       { "ShowWeekNumbers", showWeekNumbers },
+        { "ShowEvents", showEvents },                     { "GlassEffect", glassEffect },
+        { "FontScale", fontScale },                       { "ShowGuide", showGuide },
+        { "ShowNextMonthPill", showNextMonthPill }
     };
 }
 
@@ -54,6 +55,7 @@ void CalendarSettings::fromJson(const QJsonObject &o)
     y = o.value("Y").toInt(20);
     width = o.value("Width").toInt(1260);
     height = o.value("Height").toInt(795);
+    savedDpr = o.value("SavedDpr").toDouble(0.0); // 旧档 0=未知（load 侧启发式）
     hidden = o.value("Hidden").toBool(false);
     showLunar = o.value("ShowLunar").toBool(true);
     showWeekNumbers = o.value("ShowWeekNumbers").toBool(true);

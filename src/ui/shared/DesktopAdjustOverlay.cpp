@@ -94,13 +94,19 @@ void DesktopAdjustOverlay::paintEvent(QPaintEvent *)
     g.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     // 日历面板预览：与虚线框同帧同层，拖动零跨进程延迟（跟手根治）。
-    // 预览帧四周含 margin 余量（阴影/发光），对齐 inner 左上收进 margin 绘制
+    // 预览帧四周含 margin 余量（阴影/发光），对齐 inner 左上收进 margin 绘制。
+    // 预览图是物理像素（渲染器按 dpr 出图），窗口在 Qt 逻辑坐标系——必须
+    // ÷dpr 缩放绘制，否则 150% 屏上预览比虚线框大 1.5 倍（2026-11-23 实测）
     const QRect inner(m_inner.left() - x(), m_inner.top() - y(), m_inner.width(),
                       m_inner.height());
     if (m_preview) {
         const QImage pv = m_preview();
-        if (!pv.isNull())
-            g.drawImage(QPoint(inner.left() - m_previewMargin, inner.top() - m_previewMargin), pv);
+        if (!pv.isNull()) {
+            const QRectF target(inner.left() - qreal(m_previewMargin) / m_dpr,
+                                inner.top() - qreal(m_previewMargin) / m_dpr,
+                                qreal(pv.width()) / m_dpr, qreal(pv.height()) / m_dpr);
+            g.drawImage(target, pv);
+        }
     }
 
     QPen dashPen(QColor(255, 255, 255, 255), 1.3, Qt::DashLine);

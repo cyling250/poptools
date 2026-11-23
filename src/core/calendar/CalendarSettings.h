@@ -20,6 +20,8 @@ public:
     int y = 20;
     int width = 1260;
     int height = 795;
+    qreal savedDpr = 0.0; // 保存本 rect 时的主屏 dpr（0=旧档未知）；加载时
+                          // 与当前 dpr 比率换算保持视觉布局（T-077b）
     bool hidden = false;
     bool showLunar = true;
     bool showWeekNumbers = true;
